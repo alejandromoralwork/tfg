@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::common::{AssetPair, Amount, Order, OrderKind, Price, Side, Trade, PRICE_SCALE};
+use crate::optimizer::{SettlementOptimizer, SettlementSummary};
 
 #[derive(Clone, Debug)]
 pub struct ClearingResult {
@@ -10,6 +11,99 @@ pub struct ClearingResult {
     pub demand_at_price: Amount,
     pub supply_at_price: Amount,
     pub trades: Vec<Trade>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MultiAssetClearingResult {
+    pub pair_results: Vec<ClearingResult>,
+    pub settlement: SettlementSummary,
+    pub leftover_batches: BTreeMap<AssetPair, Vec<Order>>,
+}
+
+#[derive(Default, Debug)]
+pub struct MultiAssetEngine {
+    batches: BTreeMap<AssetPair, Vec<Order>>,
+    inner: BatchAuctionEngine,
+    optimizer: SettlementOptimizer,
+}
+
+impl MultiAssetEngine {
+    pub fn new() -> Self {
+        Self {
+            batches: BTreeMap::new(),
+            inner: BatchAuctionEngine::new(),
+            optimizer: SettlementOptimizer::new(),
+        }
+    }
+
+    pub fn submit(&mut self, order: Order) {
+        self.batches.entry(order.pair.clone()).or_default().push(order);
+    }
+
+    /// Clears with a pair-first heuristic: run pair clearing per pair to extract
+    /// direct Coincidence-of-Wants trades, then pass collected trades to the
+    /// settlement optimizer. Remaining unmatched order fragments are returned
+    /// in `leftover_batches` for external routing.
+    pub fn clear_all(&mut self) -> MultiAssetClearingResult {
+        let pairs: Vec<AssetPair> = self.batches.keys().cloned().collect();
+        let mut pair_results: Vec<ClearingResult> = Vec::new();
+        let mut all_trades: Vec<Trade> = Vec::new();
+
+        for pair in &pairs {
+            if let Some(orders) = self.batches.get(pair).cloned() {
+                // Use inner engine to compute a pair clearing (does not consume our map)
+                if let Some(result) = self.inner.clear_orders(pair, &orders) {
+                    // collect trades and result
+                    all_trades.extend(result.trades.clone());
+                    pair_results.push(result);
+                }
+            }
+        }
+
+        // Build leftover batches by subtracting filled amounts from original orders
+        let mut leftover: BTreeMap<AssetPair, Vec<Order>> = BTreeMap::new();
+
+        for pair in &pairs {
+            if let Some(original_orders) = self.batches.get(pair).cloned() {
+                // compute fills per order id
+                let mut fills: BTreeMap<u64, Amount> = BTreeMap::new();
+                for trade in &all_trades {
+                    // buyer filled
+                    *fills.entry(trade.buy_order_id).or_insert(0) += trade.quantity;
+                    *fills.entry(trade.sell_order_id).or_insert(0) += trade.quantity;
+                }
+
+                let mut remaining_orders: Vec<Order> = Vec::new();
+                for mut order in original_orders {
+                    let filled = fills.get(&order.id).cloned().unwrap_or(0);
+                    if filled >= order.remaining {
+                        order.remaining = 0;
+                    } else {
+                        order.remaining = order.remaining.saturating_sub(filled);
+                    }
+
+                    if order.remaining > 0 {
+                        remaining_orders.push(order);
+                    }
+                }
+
+                if !remaining_orders.is_empty() {
+                    leftover.insert(pair.clone(), remaining_orders);
+                }
+            }
+        }
+
+        let settlement = self.optimizer.optimize_trades(&all_trades);
+
+        // replace engine batches with leftover (to be externally routed later)
+        self.batches = leftover.clone();
+
+        MultiAssetClearingResult {
+            pair_results,
+            settlement,
+            leftover_batches: leftover,
+        }
+    }
 }
 
 #[derive(Default, Debug)]
