@@ -1,4 +1,4 @@
-use crate::common::PRICE_SCALE;
+use crate::common::{PRICE_SCALE, Price};
 
 /// Simple AMM constant-product pool (x * y = k) representing a pair of assets.
 #[derive(Clone, Debug)]
@@ -14,10 +14,11 @@ impl AMMPool {
         Self { reserve_x, reserve_y }
     }
 
-    /// current marginal price of X in terms of Y (y/x)
-    pub fn price(&self) -> f64 {
-        if self.reserve_x == 0 { return f64::INFINITY; }
-        (self.reserve_y as f64) / (self.reserve_x as f64)
+    /// current marginal price of X in terms of Y (y/x), scaled by `PRICE_SCALE`.
+    pub fn price(&self) -> Price {
+        if self.reserve_x == 0 { return Price::MAX; }
+        // price = reserve_y / reserve_x scaled to PRICE_SCALE
+        (self.reserve_y.saturating_mul(PRICE_SCALE)) / self.reserve_x
     }
 
     /// Execute a sell of `dx` base units and return `dy` quote units received.
@@ -71,13 +72,13 @@ mod tests {
     fn amm_price_and_execution() {
         let mut pool = AMMPool::new(1_000_000u128, 2_000_000u128);
         let p = pool.price();
-        assert!(p > 0.0);
+        assert!(p > 0);
 
         let dy = pool.execute_sell(100_000u128);
         assert!(dy > 0);
-        // price should have increased (y/x increases as x increases)
+        // price (scaled) should be > 0 after execution
         let p2 = pool.price();
-        assert!(p2 > 0.0);
+        assert!(p2 > 0);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::common::{AssetPair, Amount, Order, OrderKind, Price, Side, Trade, PRICE_SCALE};
-use crate::optimizer::{SettlementOptimizer, SettlementSummary};
+use super::optimizer::{SettlementOptimizer, SettlementSummary};
 
 #[derive(Clone, Debug)]
 pub struct ClearingResult {
@@ -242,7 +242,9 @@ impl BatchAuctionEngine {
 
             let better = match best {
                 None => true,
-                Some((best_price, best_volume, best_imbalance)) => {
+                Some((best_price, best_demand, best_supply)) => {
+                    let best_volume = best_demand.min(best_supply);
+                    let best_imbalance = best_demand.abs_diff(best_supply);
                     volume > best_volume
                         || (volume == best_volume && imbalance < best_imbalance)
                         || (volume == best_volume && imbalance == best_imbalance && price > best_price)
@@ -327,7 +329,7 @@ mod tests {
 
         let result = engine.clear_pair(&pair).expect("pair must clear");
         assert_eq!(result.clearing_price, 10 * PRICE_SCALE);
-        assert_eq!(result.traded_quantity, 15);
+        assert_eq!(result.traded_quantity, 16);
         assert_eq!(result.demand_at_price, 18);
         assert_eq!(result.supply_at_price, 16);
     }
