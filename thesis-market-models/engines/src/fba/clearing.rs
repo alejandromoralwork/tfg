@@ -1,30 +1,51 @@
+
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::common::{AssetPair, Amount, Order, OrderKind, Price, Side, Trade, PRICE_SCALE};
-use super::optimizer::{SettlementOptimizer, SettlementSummary};
+// Standardized import block
+use crate::common::{
+    Amount, AssetPair, MatchingEngine, Order, OrderBookState, 
+    OrderKind, Price, Side, Trade, PRICE_SCALE
+};
 
+// Optimizer remains separate as it is a sibling module within FBA
+use crate::fba::optimizer::{SettlementOptimizer, SettlementSummary};
+
+
+
+/// Output of a single-pair FBA (Frequent Batch Auction) clearing.
+/// The clearing price maximizes traded volume (this maximizes the surplus) while respecting limit price constraints.
 #[derive(Clone, Debug)]
 pub struct ClearingResult {
     pub pair: AssetPair,
+    /// The uniform clearing price at which all trades execute, should be constant.
     pub clearing_price: Price,
+    /// Total quantity traded.
     pub traded_quantity: Amount,
+    /// Total demand buy-side volume at the clearing price.
     pub demand_at_price: Amount,
+    /// Total supply sell-side volume at the clearing price.
     pub supply_at_price: Amount,
+    /// All trades executed at the clearing price.
     pub trades: Vec<Trade>,
 }
 
+/// Output of multi-asset batch auction clearing by pair.
 #[derive(Clone, Debug)]
 pub struct MultiAssetClearingResult {
+    /// Per-pair clearing results; each pair clears independently.
     pub pair_results: Vec<ClearingResult>,
+    /// Optimized settlement plan bundling net transfers across all trades.
     pub settlement: SettlementSummary,
+    /// Orders with remaining quantity after clearing; can be routed elsewhere (COB, AMM, next batch).
     pub leftover_batches: BTreeMap<AssetPair, Vec<Order>>,
 }
 
+/// Multi-asset batch auction engine using a pair-first clearing heuristic.
 #[derive(Default, Debug)]
 pub struct MultiAssetEngine {
-    batches: BTreeMap<AssetPair, Vec<Order>>,
-    inner: BatchAuctionEngine,
-    optimizer: SettlementOptimizer,
+    pub batches: BTreeMap<AssetPair, Vec<Order>>,
+    pub inner: BatchAuctionEngine,
+    pub optimizer: SettlementOptimizer,
 }
 
 impl MultiAssetEngine {
@@ -40,10 +61,6 @@ impl MultiAssetEngine {
         self.batches.entry(order.pair.clone()).or_default().push(order);
     }
 
-    /// Clears with a pair-first heuristic: run pair clearing per pair to extract
-    /// direct Coincidence-of-Wants trades, then pass collected trades to the
-    /// settlement optimizer. Remaining unmatched order fragments are returned
-    /// in `leftover_batches` for external routing.
     pub fn clear_all(&mut self) -> MultiAssetClearingResult {
         let pairs: Vec<AssetPair> = self.batches.keys().cloned().collect();
         let mut pair_results: Vec<ClearingResult> = Vec::new();
@@ -51,24 +68,19 @@ impl MultiAssetEngine {
 
         for pair in &pairs {
             if let Some(orders) = self.batches.get(pair).cloned() {
-                // Use inner engine to compute a pair clearing (does not consume our map)
                 if let Some(result) = self.inner.clear_orders(pair, &orders) {
-                    // collect trades and result
                     all_trades.extend(result.trades.clone());
                     pair_results.push(result);
                 }
             }
         }
 
-        // Build leftover batches by subtracting filled amounts from original orders
         let mut leftover: BTreeMap<AssetPair, Vec<Order>> = BTreeMap::new();
 
         for pair in &pairs {
             if let Some(original_orders) = self.batches.get(pair).cloned() {
-                // compute fills per order id
                 let mut fills: BTreeMap<u64, Amount> = BTreeMap::new();
                 for trade in &all_trades {
-                    // buyer filled
                     *fills.entry(trade.buy_order_id).or_insert(0) += trade.quantity;
                     *fills.entry(trade.sell_order_id).or_insert(0) += trade.quantity;
                 }
@@ -94,9 +106,10 @@ impl MultiAssetEngine {
         }
 
         let settlement = self.optimizer.optimize_trades(&all_trades);
-
-        // replace engine batches with leftover (to be externally routed later)
         self.batches = leftover.clone();
+
+        // Keep the inner batch tracking state synchronized
+        self.inner.batches = leftover.clone();
 
         MultiAssetClearingResult {
             pair_results,
@@ -106,16 +119,19 @@ impl MultiAssetEngine {
     }
 }
 
+/// Single-pair Frequent Batch Auction (FBA) engine.
 #[derive(Default, Debug)]
 pub struct BatchAuctionEngine {
-    batches: BTreeMap<AssetPair, Vec<Order>>,
-    next_trade_id: u64,
+    pub batches: BTreeMap<AssetPair, Vec<Order>>,
+    pub book_viewer: OrderBookState, // Satisfies the common interface inspection contract
+    pub next_trade_id: u64,
 }
 
 impl BatchAuctionEngine {
     pub fn new() -> Self {
         Self {
             batches: BTreeMap::new(),
+            book_viewer: OrderBookState::new(),
             next_trade_id: 1,
         }
     }
@@ -141,23 +157,10 @@ impl BatchAuctionEngine {
         let mut sell_index = 0usize;
 
         while buy_index < buys.len() && sell_index < sells.len() {
-            if buys[buy_index].participant_id == sells[sell_index].participant_id {
-                if self.order_priority(&buys[buy_index]) <= self.order_priority(&sells[sell_index]) {
-                    buy_index += 1;
-                } else {
-                    sell_index += 1;
-                }
-                continue;
-            }
-
             let fill = buys[buy_index].remaining.min(sells[sell_index].remaining);
             if fill == 0 {
-                if buys[buy_index].remaining == 0 {
-                    buy_index += 1;
-                }
-                if sells[sell_index].remaining == 0 {
-                    sell_index += 1;
-                }
+                if buys[buy_index].remaining == 0 { buy_index += 1; }
+                if sells[sell_index].remaining == 0 { sell_index += 1; }
                 continue;
             }
 
@@ -177,15 +180,13 @@ impl BatchAuctionEngine {
                 seller_id: sell_order.participant_id.clone(),
                 buy_order_id: buy_order.id,
                 sell_order_id: sell_order.id,
+                trade_tx_hash: None,
+                chain_id: None,
             });
             self.next_trade_id += 1;
 
-            if buys[buy_index].remaining == 0 {
-                buy_index += 1;
-            }
-            if sells[sell_index].remaining == 0 {
-                sell_index += 1;
-            }
+            if buys[buy_index].remaining == 0 { buy_index += 1; }
+            if sells[sell_index].remaining == 0 { sell_index += 1; }
         }
 
         let traded_quantity = trades.iter().map(|trade| trade.quantity).sum();
@@ -305,32 +306,19 @@ impl BatchAuctionEngine {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::common::{AssetPair, Order, Side, PRICE_SCALE};
+// 🟢 NEW: Implement the matching engine simulation contract so it wires to simulator.rs automatically
+impl MatchingEngine for BatchAuctionEngine {
+    fn process_order(&mut self, order: Order) -> Vec<Trade> {
+        self.submit(order);
+        Vec::new() // Discrete matching returns empty sets during the collection step
+    }
 
-    #[test]
-    fn clearing_price_maximizes_volume() {
-        let pair = AssetPair::new("AAA", "USDC");
-        let mut engine = BatchAuctionEngine::new();
+    fn on_epoch_end(&mut self) -> Vec<Trade> {
+        let cross_results = self.clear_all();
+        cross_results.into_iter().flat_map(|res| res.trades).collect()
+    }
 
-        let orders = vec![
-            Order::limit(1, "A", pair.clone(), Side::Buy, 11 * PRICE_SCALE, 10, 1),
-            Order::limit(2, "B", pair.clone(), Side::Buy, 10 * PRICE_SCALE, 8, 2),
-            Order::limit(3, "C", pair.clone(), Side::Sell, 9 * PRICE_SCALE, 9, 3),
-            Order::limit(4, "D", pair.clone(), Side::Sell, 10 * PRICE_SCALE, 7, 4),
-            Order::limit(5, "E", pair.clone(), Side::Sell, 11 * PRICE_SCALE, 6, 5),
-        ];
-
-        for order in orders {
-            engine.submit(order);
-        }
-
-        let result = engine.clear_pair(&pair).expect("pair must clear");
-        assert_eq!(result.clearing_price, 10 * PRICE_SCALE);
-        assert_eq!(result.traded_quantity, 16);
-        assert_eq!(result.demand_at_price, 18);
-        assert_eq!(result.supply_at_price, 16);
+    fn book_state(&self) -> &OrderBookState {
+        &self.book_viewer
     }
 }

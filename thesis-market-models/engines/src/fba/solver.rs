@@ -2,12 +2,12 @@ use std::fmt::Write;
 
 /// Minimal LP builder that emits a textual LP model in simple LP format.
 /// This is a lightweight encoder used to write model files for external solvers.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct LPBuilder {
-    objective: String,
-    constraints: Vec<String>,
-    bounds: Vec<String>,
-    binaries: Vec<String>,
+    pub objective: String,
+    pub constraints: Vec<String>,
+    pub bounds: Vec<String>,
+    pub binaries: Vec<String>,
 }
 
 impl LPBuilder {
@@ -31,27 +31,34 @@ impl LPBuilder {
         self.binaries.push(name.to_string());
     }
 
-    /// Emit LP model as string in a simple format.
+    /// Emit LP model as a string structured for standard CPLEX LP format.
     pub fn to_lp(&self) -> String {
         let mut out = String::new();
+        
+        // Frequent Batch Auctions can choose to Minimize imbalance or Maximize volume.
+        // We write 'Minimize' here; if maximizing volume, terms should be negated (e.g., -1 * volume).
         writeln!(&mut out, "Minimize").ok();
         writeln!(&mut out, "  obj: {}", self.objective).ok();
+        
         writeln!(&mut out, "Subject To").ok();
         for c in &self.constraints {
             writeln!(&mut out, "  {}", c).ok();
         }
+        
         if !self.bounds.is_empty() {
             writeln!(&mut out, "Bounds").ok();
             for b in &self.bounds {
                 writeln!(&mut out, "  {}", b).ok();
             }
         }
+        
         if !self.binaries.is_empty() {
             writeln!(&mut out, "Binaries").ok();
             for b in &self.binaries {
                 writeln!(&mut out, "  {}", b).ok();
             }
         }
+        
         writeln!(&mut out, "End").ok();
         out
     }
@@ -75,5 +82,6 @@ mod tests {
         assert!(s.contains("Subject To"));
         assert!(s.contains("Bounds"));
         assert!(s.contains("Binaries"));
+        assert!(s.contains("End"));
     }
 }

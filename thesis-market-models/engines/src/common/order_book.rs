@@ -1,16 +1,17 @@
 use std::cmp::Reverse;
-
-use super::{AssetPair, Amount, Order, OrderKind, Price, Side, Trade, PRICE_SCALE};
+use crate::common::{
+    AssetPair, Amount, Order, OrderKind, Price, Side, Trade, PRICE_SCALE
+};
 
 #[derive(Clone, Debug)]
-pub struct OrderBook {
+pub struct OrderBookState {
     pub pair: AssetPair,
-    bids: Vec<Order>,
-    asks: Vec<Order>,
-    next_trade_id: u64,
+    pub bids: Vec<Order>, 
+    pub asks: Vec<Order>, 
+    pub next_trade_id: u64,
 }
 
-impl OrderBook {
+impl OrderBookState {
     pub fn new(pair: AssetPair) -> Self {
         Self {
             pair,
@@ -21,6 +22,7 @@ impl OrderBook {
     }
 
     pub fn submit(&mut self, mut order: Order) -> Vec<Trade> {
+        // Sanity check
         assert_eq!(order.pair, self.pair, "order submitted to the wrong book");
 
         let mut trades = Vec::new();
@@ -30,6 +32,7 @@ impl OrderBook {
             Side::Sell => self.match_sell(&mut order, &mut trades),
         }
 
+        // Only store remaining limit orders
         if order.remaining > 0 && matches!(order.kind, OrderKind::Limit { .. }) {
             self.store(order);
         }
@@ -55,6 +58,7 @@ impl OrderBook {
 
             let mut resting = self.asks.remove(index);
             let fill = incoming.remaining.min(resting.remaining);
+            
             incoming.reduce(fill);
             resting.reduce(fill);
 
@@ -73,6 +77,7 @@ impl OrderBook {
 
             let mut resting = self.bids.remove(index);
             let fill = incoming.remaining.min(resting.remaining);
+            
             incoming.reduce(fill);
             resting.reduce(fill);
 
@@ -126,6 +131,8 @@ impl OrderBook {
             seller_id: sell.participant_id.clone(),
             buy_order_id: buy.id,
             sell_order_id: sell.id,
+            trade_tx_hash: None,
+            chain_id: None,
         };
         self.next_trade_id += 1;
         trade

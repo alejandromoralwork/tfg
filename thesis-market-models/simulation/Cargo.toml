@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 engines = { path = "../engines" }
+
+[features]
+simulation_logging = []
+default = []
