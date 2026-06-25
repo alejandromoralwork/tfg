@@ -1,21 +1,17 @@
 use std::io::{self, Write};
 
-// 🟢 Declare simulation specific modules cleanly
+// 🟢 Declare modules
 mod commands; 
-mod cli; 
 mod simulator;
-mod display;
+mod display; // This declaration makes `display::` available to the whole crate
 
-use commands::{CliCommand, EngineMode}; // 🟢 Pull from local modules
-use simulator::FbaSimulator;
+// 🟢 Correct Imports
+use crate::commands::{CliCommand, EngineMode};
+use crate::simulator::FbaSimulator;
 
-use engines::fba::BatchAuctionEngine; 
-
-// In simulation/src/main.rs
-
-use engines::cda::ContinuousEngine; // 🟢 Matches your crate structure perfectly now!
-
-use engines::common::Order;
+// 🟢 External Crate Imports
+use engines::cda::ContinuousEngine;
+use engines::common::{Order, MatchingEngine}; 
 
 fn main() {
     let mut sim = FbaSimulator::new("USDT");
@@ -41,10 +37,11 @@ fn main() {
         if io::stdin().read_line(&mut input).is_err() { break; }
         
         match CliCommand::parse(&input) {
-            Some(CliCommand::Engine { mode }) => {
+            Some(CliCommand::Engine(mode)) => {
                 current_mode = mode;
                 println!("🔄 Switched simulation matching engine mode to: {:?}", current_mode);
             }
+            
             Some(CliCommand::Add { side, asset, price, qty, user }) => {
                 match current_mode {
                     EngineMode::Batch => {
@@ -54,7 +51,15 @@ fn main() {
                     EngineMode::Continuous => {
                         sim.order_id_counter += 1;
                         let pair = engines::common::AssetPair::new(&asset, "USDT");
-                        let order = Order::limit(sim.order_id_counter, &user, pair, side, price * engines::common::PRICE_SCALE, qty, 0);
+                        let order = Order::limit(
+                            sim.order_id_counter, 
+                            &user, 
+                            pair, 
+                            side, 
+                            price * engines::common::PRICE_SCALE, 
+                            qty, 
+                            0
+                        );
                         
                         let trades = cda.process_order(order);
                         println!("⚡ Continuous order processed. Instant trades cleared: {}", trades.len());
@@ -64,6 +69,7 @@ fn main() {
                     }
                 }
             }
+            
             Some(CliCommand::Batch) => {
                 if current_mode == EngineMode::Continuous {
                     println!("📖 Displaying Continuous Order Book state:\n{:#?}", cda);
@@ -71,19 +77,25 @@ fn main() {
                     display::render_batch_buffer(&sim);
                 }
             }
+            
             Some(CliCommand::Amm)   => display::render_amm_matrices(&sim),
+            
             Some(CliCommand::Clear) => {
                 if current_mode == EngineMode::Continuous {
                     println!("⚠️ Info: Continuous engine processes trades instantly. 'clear' applies to the FBA pipeline.");
                 }
                 sim.clear_window();
             }
+            
             Some(CliCommand::Log)   => display::render_historical_ledger(&sim),
+            
             Some(CliCommand::Help)  => print_help(),
+            
             Some(CliCommand::Exit)  => {
                 println!("Terminating simulator core workspace...");
                 break;
             }
+            
             None => println!("❌ Command sequence unrecognized. Run 'help' to review syntax specifications."),
         }
     }

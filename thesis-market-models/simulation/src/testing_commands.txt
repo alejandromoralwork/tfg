@@ -1,0 +1,12 @@
+amm
+batch
+add buy BTC 65000 2 Alice
+add sell BTC 65000 2 Bob
+batch
+add buy ETH 3600 5 Charlie
+add sell ETH 3400 3 Dave
+batch
+clear
+log
+amm
+exit

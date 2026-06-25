@@ -1,5 +1,4 @@
-
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 // Standardized import block
 use crate::common::{
@@ -10,38 +9,27 @@ use crate::common::{
 // Optimizer remains separate as it is a sibling module within FBA
 use crate::fba::optimizer::{SettlementOptimizer, SettlementSummary};
 
-
-
 /// Output of a single-pair FBA (Frequent Batch Auction) clearing.
-/// The clearing price maximizes traded volume (this maximizes the surplus) while respecting limit price constraints.
 #[derive(Clone, Debug)]
 pub struct ClearingResult {
     pub pair: AssetPair,
-    /// The uniform clearing price at which all trades execute, should be constant.
     pub clearing_price: Price,
-    /// Total quantity traded.
     pub traded_quantity: Amount,
-    /// Total demand buy-side volume at the clearing price.
     pub demand_at_price: Amount,
-    /// Total supply sell-side volume at the clearing price.
     pub supply_at_price: Amount,
-    /// All trades executed at the clearing price.
     pub trades: Vec<Trade>,
 }
 
 /// Output of multi-asset batch auction clearing by pair.
 #[derive(Clone, Debug)]
 pub struct MultiAssetClearingResult {
-    /// Per-pair clearing results; each pair clears independently.
     pub pair_results: Vec<ClearingResult>,
-    /// Optimized settlement plan bundling net transfers across all trades.
     pub settlement: SettlementSummary,
-    /// Orders with remaining quantity after clearing; can be routed elsewhere (COB, AMM, next batch).
     pub leftover_batches: BTreeMap<AssetPair, Vec<Order>>,
 }
 
 /// Multi-asset batch auction engine using a pair-first clearing heuristic.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct MultiAssetEngine {
     pub batches: BTreeMap<AssetPair, Vec<Order>>,
     pub inner: BatchAuctionEngine,
@@ -120,10 +108,11 @@ impl MultiAssetEngine {
 }
 
 /// Single-pair Frequent Batch Auction (FBA) engine.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct BatchAuctionEngine {
     pub batches: BTreeMap<AssetPair, Vec<Order>>,
-    pub book_viewer: OrderBookState, // Satisfies the common interface inspection contract
+    // Updated: HashMap to support the multi-asset requirement
+    pub book_viewer: HashMap<AssetPair, OrderBookState>, 
     pub next_trade_id: u64,
 }
 
@@ -131,7 +120,7 @@ impl BatchAuctionEngine {
     pub fn new() -> Self {
         Self {
             batches: BTreeMap::new(),
-            book_viewer: OrderBookState::new(),
+            book_viewer: HashMap::new(),
             next_trade_id: 1,
         }
     }
@@ -306,11 +295,11 @@ impl BatchAuctionEngine {
     }
 }
 
-// 🟢 NEW: Implement the matching engine simulation contract so it wires to simulator.rs automatically
+// 🟢 IMPLEMENTATION: Match the CDA Engine trait signature
 impl MatchingEngine for BatchAuctionEngine {
     fn process_order(&mut self, order: Order) -> Vec<Trade> {
         self.submit(order);
-        Vec::new() // Discrete matching returns empty sets during the collection step
+        Vec::new() 
     }
 
     fn on_epoch_end(&mut self) -> Vec<Trade> {
@@ -318,7 +307,8 @@ impl MatchingEngine for BatchAuctionEngine {
         cross_results.into_iter().flat_map(|res| res.trades).collect()
     }
 
-    fn book_state(&self) -> &OrderBookState {
+    // Updated return type to match your new architecture
+    fn book_state(&self) -> &HashMap<AssetPair, OrderBookState> {
         &self.book_viewer
     }
 }
