@@ -36,7 +36,7 @@ impl FbaSimulator {
 
     fn seed_default_pools(&mut self) {
         let default_assets = vec![
-            ("BTC", 65_000, 10, 650_000),
+            ("BTC", 65_000, 10, 650_000), //this are initial prices that we load into the ORACLE, so that if there is no trade history it fills order at this price.
             ("ETH", 3_500, 100, 350_000),
             ("SOL", 150, 1_000, 150_000),
         ];
@@ -172,26 +172,45 @@ impl FbaSimulator {
                 }
 
                 if !residual_orders.is_empty() {
-                    if let Some(pool) = self.amm_pools.get_mut(&pair) {
-                        println!("\n🌊 Routing Leftover Residual Orders through AMM Pool Curve...");
-                        
-                        let amm_executed_trades = self.arb_engine.fill_residual_orders(
-                            pool, 
-                            &mut residual_orders, 
-                            &mut self.trade_id_counter
-                        );
-                        
-                        if amm_executed_trades.is_empty() {
-                            println!("   No leftover orders satisfied constant-product curve limit constraints.");
-                        } else {
-                            for trade in &amm_executed_trades {
-                                let direction_str = if trade.buyer_id == "AMM_POOL" { "SELL" } else { "BUY" };
-                                println!("   [AMM FILL] Match ID #{:<3} | {} routed order to AMM pool (Quantity: {} units @ Effective Rate: {} USDT)", 
-                                    trade.trade_id, direction_str, trade.quantity, crate::display::format_price(trade.price));
+                if let Some(pool) = self.amm_pools.get_mut(&pair) {
+                        let pool_price = pool.price();
+                        let oracle_price = self.arb_engine.oracle.get_price(&pair).unwrap_or(pool_price);
+
+                        // Calculate % deviation using checked math to prevent potential panics
+                        let deviation = if oracle_price > 0 {
+                            if pool_price > oracle_price {
+                                ((pool_price - oracle_price) * 100) / oracle_price
+                            } else {
+                                ((oracle_price - pool_price) * 100) / oracle_price
                             }
-                            self.global_trade_history.extend(amm_executed_trades);
+                        } else {
+                            0
+                        };
+
+                        if deviation > 5 {
+                            println!("⚠️ SECURITY ALERT: AMM Pool price deviation too high ({}%). Blocking residual fill.", deviation);
+                            // Orders stay in residual_orders to be pushed back to pending_orders later
+                        } else {
+                            println!("🌊 Routing Leftover Residual Orders through AMM Pool Curve...");
+                            
+                            let amm_executed_trades = self.arb_engine.fill_residual_orders(
+                                pool, 
+                                &mut residual_orders, 
+                                &mut self.trade_id_counter
+                            );
+                            
+                            if amm_executed_trades.is_empty() {
+                                println!("   No leftover orders satisfied constant-product curve limit constraints.");
+                            } else {
+                                for trade in &amm_executed_trades {
+                                    let direction_str = if trade.buyer_id == "AMM_POOL" { "SELL" } else { "BUY" };
+                                    println!("   [AMM FILL] Match ID #{:<3} | {} routed order to AMM pool (Quantity: {} units @ Effective Rate: {} USDT)", 
+                                        trade.trade_id, direction_str, trade.quantity, crate::display::format_price(trade.price));
+                                }
+                                self.global_trade_history.extend(amm_executed_trades);
+                            }
                         }
-                    }
+                    }              
                 }
 
                 for order in residual_orders {

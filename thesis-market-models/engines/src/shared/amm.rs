@@ -8,8 +8,8 @@ pub struct AMMPool {
     pub reserve_y: u128,
 }
 
-/// A 100% safe, non-overflowing bitwise integer square root algorithm.
-/// Avoids the risks of division by zero or infinite loops found in naive Newton implementations.
+/// A  non-overflowing bitwise integer square root algorithm.
+/// Avoids the risks of division by zero or infinite loops .
 fn u128_sqrt(value: u128) -> u128 {
     if value == 0 { return 0; }
     let mut res = 0;

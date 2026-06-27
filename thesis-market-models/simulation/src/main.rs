@@ -1,15 +1,13 @@
 use std::io::{self, Write};
 
-// 🟢 Declare modules
+
 mod commands; 
 mod simulator;
-mod display; // This declaration makes `display::` available to the whole crate
+mod display; 
 
-// 🟢 Correct Imports
+
 use crate::commands::{CliCommand, EngineMode};
 use crate::simulator::FbaSimulator;
-
-// 🟢 External Crate Imports
 use engines::cda::ContinuousEngine;
 use engines::common::{Order, MatchingEngine}; 
 

@@ -39,14 +39,14 @@ impl CliCommand {
             }
             "engine" => {
                 if parts.len() < 2 { 
-                    println!("❌ Usage: engine <continuous|batch>");
+                    println!(" Usage: engine <continuous|batch>");
                     return None; 
                 }
                 match parts[1].to_lowercase().as_str() {
                     "continuous" | "cda" => Some(CliCommand::Engine(EngineMode::Continuous)),
                     "batch" | "fba" => Some(CliCommand::Engine(EngineMode::Batch)),
                     _ => {
-                        println!("❌ Unknown engine type. Choose 'continuous' or 'batch'.");
+                        println!(" Unknown engine type. Choose 'continuous' or 'batch'.");
                         None
                     }
                 }

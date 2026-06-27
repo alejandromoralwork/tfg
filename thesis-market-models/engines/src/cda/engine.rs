@@ -6,7 +6,7 @@ use crate::common::{
 
 #[derive(Debug)]
 pub struct ContinuousEngine {
-    // 1. Updated: Use a HashMap to store books per AssetPair
+    // Used a HashMap to store the books per AssetPair
     pub books: HashMap<AssetPair, OrderBookState>,
     pub next_trade_id: u64,
 }
@@ -20,7 +20,7 @@ impl ContinuousEngine {
     }
 }
 
-// Helper: Extract price safely
+// Extract price safely and convert into u128
 fn get_price(kind: &OrderKind) -> u128 {
     match kind {
         OrderKind::Limit { price } => *price,
@@ -28,7 +28,7 @@ fn get_price(kind: &OrderKind) -> u128 {
     }
 }
 
-// Helper: Check if prices allow a match
+// Check if prices allow a match
 fn check_price_match(order_kind: &OrderKind, maker_kind: &OrderKind) -> bool {
     match (order_kind, maker_kind) {
         (OrderKind::Market, _) | (_, OrderKind::Market) => true,
@@ -36,6 +36,7 @@ fn check_price_match(order_kind: &OrderKind, maker_kind: &OrderKind) -> bool {
     }
 }
 
+// pass CE to the main trait
 impl MatchingEngine for ContinuousEngine {
     fn process_order(&mut self, mut order: Order) -> Vec<Trade> {
         let mut executed_trades = Vec::new();
@@ -43,8 +44,8 @@ impl MatchingEngine for ContinuousEngine {
             return executed_trades;
         }
 
-        // 2. Updated: Fetch the specific book from the HashMap
-        // We use entry/or_insert_with to ensure the book is created if it's the first time we see this pair
+        // Fetch the specific book from the HashMap
+        // I use entry/or_insert_with to ensure the book is created if it's the first time we see this pair
         let pair_book = self.books
             .entry(order.pair.clone())
             .or_insert_with(|| OrderBookState::new(order.pair.clone()));
@@ -52,12 +53,16 @@ impl MatchingEngine for ContinuousEngine {
         match order.side {
             Side::Buy => {
                 while !pair_book.asks.is_empty() && order.remaining > 0 {
+
+
+                    //for buy we look at the best aks, and if our order prices is higher or equalt than the ask it goes in
+
                     let best_ask = &mut pair_book.asks[0];
 
                     if !check_price_match(&order.kind, &best_ask.kind) { break; }
 
                     let execution_price = get_price(&best_ask.kind);
-                    let fill_qty = order.remaining.min(best_ask.remaining);
+                    let fill_qty = order.remaining.min(best_ask.remaining); //to get the fill quantity we take the minimum of the remaining quantity of the order and the best ask
                     
                     if fill_qty == 0 { break; }
 
@@ -147,7 +152,7 @@ impl MatchingEngine for ContinuousEngine {
         Vec::new() 
     }
 
-    // 3. Updated: This trait method return type may need adjustment in the trait definition
+    // This trait method return type may need adjustment in the trait definition
     // to match the fact that we now hold a HashMap.
     fn book_state(&self) -> &HashMap<AssetPair, OrderBookState> {
         &self.books

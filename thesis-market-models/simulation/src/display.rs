@@ -1,6 +1,5 @@
-// 🟢 FIX 1: Import local FbaSimulator from simulation crate
+
 use crate::simulator::FbaSimulator; 
-// 🟢 FIX 2: Import common types from the engines library
 use engines::common::{OrderKind, Side, PRICE_SCALE, Trade};
 
 pub fn format_price(price: u128) -> String {
@@ -10,7 +9,7 @@ pub fn format_price(price: u128) -> String {
 }
 
 pub fn render_batch_buffer(sim: &FbaSimulator) {
-    println!("--- 📋 Current Pending FBA Window Accumulation Buffer ---");
+    println!("---  Current Pending FBA Window Accumulation Buffer ---");
     if sim.pending_orders.is_empty() {
         println!("(No orders currently inside this discrete window buffer)");
     } else {
@@ -24,9 +23,9 @@ pub fn render_batch_buffer(sim: &FbaSimulator) {
 }
 
 pub fn render_amm_matrices(sim: &FbaSimulator) {
-    println!("--- ⚖️ Multi-Currency Liquidity Matrices ---");
+    println!("---  Multi-Currency Liquidity Matrices ---");
     for (pair, pool) in &sim.amm_pools {
-        println!("📍 Market Pair Cluster: {}", pair.label());
+        println!("  Market Pair Cluster: {}", pair.label());
         println!("   Reserves      : {} {} / {} {}", 
             pool.reserve_x, pair.base, 
             format_price(pool.reserve_y), pair.quote);
@@ -63,7 +62,7 @@ pub fn render_historical_ledger(sim: &FbaSimulator) {
 
     println!("\n⚖️ UNIFORM BATCH AUCTION TRADES (P2P CO-CLEARING):");
     println!("--------------------------------------------------------------------------");
-    // 🟢 FIX 3: Use the imported Trade type directly
+    
     let batch_trades: Vec<&Trade> = sim.global_trade_history
         .iter()
         .filter(|t| t.buyer_id != "AMM_POOL" && t.seller_id != "AMM_POOL")
@@ -82,7 +81,7 @@ pub fn render_historical_ledger(sim: &FbaSimulator) {
 
     println!("\n🌊 AMM POOL RESIDUAL LIQUIDITY SWAPS (BONDING CURVE FILLS):");
     println!("--------------------------------------------------------------------------");
-    // 🟢 FIX 4: Use the imported Trade type directly
+   
     let amm_trades: Vec<&Trade> = sim.global_trade_history
         .iter()
         .filter(|t| t.buyer_id == "AMM_POOL" || t.seller_id == "AMM_POOL")
