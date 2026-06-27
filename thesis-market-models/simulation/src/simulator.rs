@@ -114,6 +114,8 @@ impl FbaSimulator {
                 self.batch_engine.submit(order);
             }
 
+            
+
             if let Some(mut clearing) = self.batch_engine.clear_pair(&pair) {
                 println!("✅ Uniform Clearing Calculated Successfully!");
                 println!("   Execution Rate (Uniform Price) : {} USDT", crate::display::format_price(clearing.clearing_price));

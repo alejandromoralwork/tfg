@@ -26,14 +26,45 @@ impl MatchingEngine for BatchAuctionEngine {
         Vec::new() // Return empty vector: no trades occur until the batch clears
     }
 
-    fn on_epoch_end(&mut self) -> Vec<Trade> {
-        // 1. Run the SettlementOptimizer on the collected buffer
-        let summary: SettlementSummary = self.optimizer.optimize(&self.order_buffer);
+fn on_epoch_end(&mut self) -> Vec<Trade> {
+        if self.order_buffer.is_empty() {
+            return Vec::new();
+        }
+
+        // 1. Calculate Net Positions per Participant
+        // Map Key: (ParticipantID, Side) -> Net Quantity
+        let mut net_map: HashMap<(String, Side), u128> = HashMap::new();
+
+        for order in &self.order_buffer {
+            let key = (order.participant_id.clone(), order.side);
+            *net_map.entry(key).or_insert(0) += order.remaining;
+        }
+
+        // 2. Reconstruct "Net Orders" for the Optimizer
+        // This converts the aggregated map back into a list of Orders
+        let mut net_orders: Vec<Order> = net_map
+            .into_iter()
+            .map(|((participant, side), qty)| {
+                // We create a "virtual" order representing the participant's net position
+                Order {
+                    id: 0, // IDs aren't strictly required for the optimizer logic
+                    participant_id: participant,
+                    pair: self.order_buffer[0].pair.clone(), // Assuming single-pair batches
+                    side,
+                    kind: crate::common::OrderKind::Limit, // Default to limit for FBA
+                    remaining: qty,
+                    timestamp: 0,
+                    limit_price: None, // Or aggregate price logic if needed
+                }
+            })
+            .collect();
+
+        // 3. Run the SettlementOptimizer on the Net Orders
+        let summary: SettlementSummary = self.optimizer.optimize(&net_orders);
         
-        // 2. Clear the buffer for the next epoch
+        // 4. Clear the buffer for the next epoch
         self.order_buffer.clear();
         
-        // 3. Return the calculated trades from the batch
         summary.trades
     }
 
