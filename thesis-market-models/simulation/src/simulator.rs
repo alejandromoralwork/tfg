@@ -49,28 +49,39 @@ impl FbaSimulator {
         }
     }
 
-    pub fn add_order(&mut self, side: Side, asset: &str, raw_price: u128, qty: u128, user: String) -> u64 {
-        let pair = AssetPair::new(asset, &self.reference_ccy);
+   pub fn add_order(&mut self, side: Side, asset: &str, raw_price: u128, qty: u128, user: String) -> u64 {
+    let pair = AssetPair::new(asset, &self.reference_ccy);
+    
+    // 1. Calculate the internal scaled price first
+    let internal_price = raw_price * PRICE_SCALE;
 
-        if !self.amm_pools.contains_key(&pair) {
-            let fallback_pool = AMMPool::new(pair.clone(), 100, 1_000 * PRICE_SCALE);
-            self.amm_pools.insert(pair.clone(), fallback_pool);
-            self.arb_engine.oracle.seed_price(pair.clone(), 10 * PRICE_SCALE);
-        }
+    if !self.amm_pools.contains_key(&pair) {
+        println!("🌱 [MARKET CREATION] Initializing new pool for {} at {} USDT...", pair.label(), raw_price);
+        
+        // 2. Define a starting liquidity depth (e.g., 100 units of the base asset)
+        let initial_reserve_x = 100;
+        
+        // 3. The quote asset reserve MUST match the price formula: Y = X * Price
+        // We multiply by PRICE_SCALE here to match your existing pool initialization math
+        let initial_reserve_y = initial_reserve_x * raw_price * PRICE_SCALE; 
+        
+        // 4. Create the pool and seed the oracle with the dynamically calculated price
+        let fallback_pool = AMMPool::new(pair.clone(), initial_reserve_x, initial_reserve_y);
+        self.amm_pools.insert(pair.clone(), fallback_pool);
+        self.arb_engine.oracle.seed_price(pair.clone(), internal_price);
+    }
 
-        let price = raw_price * PRICE_SCALE;
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
 
-        let order = Order::limit(
-            self.order_id_counter, 
-            user, 
-            pair, 
-            side, 
-            price, 
-            qty, 
-            timestamp
-        );
-
+    let order = Order::limit(
+        self.order_id_counter, 
+        user, 
+        pair, 
+        side, 
+        internal_price, 
+        qty, 
+        timestamp
+    );
         self.pending_orders.push(order.clone());
         self.global_order_history.push(order);
 
@@ -171,48 +182,48 @@ impl FbaSimulator {
                     }
                 }
 
-                if !residual_orders.is_empty() {
-                if let Some(pool) = self.amm_pools.get_mut(&pair) {
-                        let pool_price = pool.price();
-                        let oracle_price = self.arb_engine.oracle.get_price(&pair).unwrap_or(pool_price);
+if !residual_orders.is_empty() {
+    if let Some(pool) = self.amm_pools.get_mut(&pair) {
+        let pool_price = pool.price();
+        let oracle_price = self.arb_engine.oracle.get_price(&pair).unwrap_or(pool_price);
 
-                        // Calculate % deviation using checked math to prevent potential panics
-                        let deviation = if oracle_price > 0 {
-                            if pool_price > oracle_price {
-                                ((pool_price - oracle_price) * 100) / oracle_price
-                            } else {
-                                ((oracle_price - pool_price) * 100) / oracle_price
-                            }
-                        } else {
-                            0
-                        };
+        // 1. Calculate absolute difference safely
+        let diff = if pool_price > oracle_price {
+            pool_price.saturating_sub(oracle_price)
+        } else {
+            oracle_price.saturating_sub(pool_price)
+        };
 
-                        if deviation > 5 {
-                            println!("⚠️ SECURITY ALERT: AMM Pool price deviation too high ({}%). Blocking residual fill.", deviation);
-                            // Orders stay in residual_orders to be pushed back to pending_orders later
-                        } else {
-                            println!("🌊 Routing Leftover Residual Orders through AMM Pool Curve...");
-                            
-                            let amm_executed_trades = self.arb_engine.fill_residual_orders(
-                                pool, 
-                                &mut residual_orders, 
-                                &mut self.trade_id_counter
-                            );
-                            
-                            if amm_executed_trades.is_empty() {
-                                println!("   No leftover orders satisfied constant-product curve limit constraints.");
-                            } else {
-                                for trade in &amm_executed_trades {
-                                    let direction_str = if trade.buyer_id == "AMM_POOL" { "SELL" } else { "BUY" };
-                                    println!("   [AMM FILL] Match ID #{:<3} | {} routed order to AMM pool (Quantity: {} units @ Effective Rate: {} USDT)", 
-                                        trade.trade_id, direction_str, trade.quantity, crate::display::format_price(trade.price));
-                                }
-                                self.global_trade_history.extend(amm_executed_trades);
-                            }
-                        }
-                    }              
+        // 2. Cross-multiplication check: (diff * 100) > (oracle * 5)
+        // This is mathematically equivalent to (diff/oracle) > 0.05 without integer truncation
+        let is_deviation_too_high = oracle_price > 0 && 
+            diff.saturating_mul(100) > oracle_price.saturating_mul(5);
+
+        if is_deviation_too_high {
+            println!("⚠️ SECURITY ALERT: AMM Pool price deviation > 5%. Blocking residual fill.");
+            // Orders stay in 'residual_orders', so they will be pushed back to 'pending_orders' below
+        } else {
+            println!("🌊 Routing Leftover Residual Orders through AMM Pool Curve...");
+            
+            let amm_executed_trades = self.arb_engine.fill_residual_orders(
+                pool, 
+                &mut residual_orders, 
+                &mut self.trade_id_counter
+            );
+            
+            if amm_executed_trades.is_empty() {
+                println!("   No leftover orders satisfied constant-product curve limit constraints.");
+            } else {
+                for trade in &amm_executed_trades {
+                    let direction_str = if trade.buyer_id == "AMM_POOL" { "SELL" } else { "BUY" };
+                    println!("   [AMM FILL] Match ID #{:<3} | {} routed order to AMM pool (Quantity: {} units @ Effective Rate: {} USDT)", 
+                        trade.trade_id, direction_str, trade.quantity, crate::display::format_price(trade.price));
                 }
-
+                self.global_trade_history.extend(amm_executed_trades);
+            }
+        }
+    }
+}
                 for order in residual_orders {
                     self.pending_orders.push(order);
                 }

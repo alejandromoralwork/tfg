@@ -142,7 +142,7 @@ impl ArbitrageEngine {
         }
     }
 
-    pub fn fill_residual_orders(
+pub fn fill_residual_orders(
         &self, 
         pool: &mut AMMPool, 
         residual_orders: &mut Vec<Order>, 
@@ -178,6 +178,9 @@ impl ArbitrageEngine {
         let mut amm_trades = Vec::new();
         let mut unfillable = Vec::new();
 
+        // 🟢 ORACLE BASELINE: Fetch the verified market price for circuit breaker
+        let oracle_price = self.oracle.get_price(&pool.pair).unwrap_or(pool.price());
+
         for order in residual_orders.drain(..) {
             if order.remaining == 0 { continue; }
 
@@ -193,7 +196,6 @@ impl ArbitrageEngine {
                     let denominator = pool.reserve_x.saturating_sub(dx);
                     if denominator == 0 { unfillable.push(order); continue; }
                     
-                    // 💡 PROTECTION RULE: Round UP for incoming funds (user pays the pool)
                     let dy = (numerator + denominator - 1) / denominator;
                     
                     let effective_price = match dy.checked_mul(PRICE_SCALE) {
@@ -201,7 +203,12 @@ impl ArbitrageEngine {
                         None => u128::MAX,
                     };
 
-                    if effective_price <= order.limit_price().unwrap_or(u128::MAX) {
+                    // 🟢 POOL PROTECTION (Circuit Breaker): Check if this specific trade causes > 5% deviation
+                    let diff = if effective_price > oracle_price { effective_price - oracle_price } else { oracle_price - effective_price };
+                    let is_deviation_too_high = oracle_price > 0 && diff.saturating_mul(100) > oracle_price.saturating_mul(5);
+
+                    // Proceed only if it respects the user's limit AND doesn't wreck the pool
+                    if effective_price <= order.limit_price().unwrap_or(u128::MAX) && !is_deviation_too_high {
                         pool.reserve_x = pool.reserve_x.saturating_sub(dx);
                         pool.reserve_y = pool.reserve_y.saturating_add(dy);
                         
@@ -227,7 +234,6 @@ impl ArbitrageEngine {
                     let numerator = pool.reserve_y.saturating_mul(dx);
                     let denominator = pool.reserve_x.saturating_add(dx);
                     
-                    // 💡 PROTECTION RULE: Round DOWN for outgoing funds (pool pays the user)
                     let dy = numerator / denominator;
                     if dy == 0 { unfillable.push(order); continue; }
                     
@@ -236,7 +242,12 @@ impl ArbitrageEngine {
                         None => 0,
                     };
 
-                    if effective_price >= order.limit_price().unwrap_or(0) {
+                    // 🟢 POOL PROTECTION (Circuit Breaker): Check if this specific trade causes > 5% deviation
+                    let diff = if effective_price > oracle_price { effective_price - oracle_price } else { oracle_price - effective_price };
+                    let is_deviation_too_high = oracle_price > 0 && diff.saturating_mul(100) > oracle_price.saturating_mul(5);
+
+                    // Proceed only if it respects the user's limit AND doesn't wreck the pool
+                    if effective_price >= order.limit_price().unwrap_or(0) && !is_deviation_too_high {
                         pool.reserve_x = pool.reserve_x.saturating_add(dx);
                         pool.reserve_y = pool.reserve_y.saturating_sub(dy);
 
