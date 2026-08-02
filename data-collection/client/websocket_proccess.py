@@ -823,7 +823,12 @@ if __name__ == "__main__":
 
     def print_orderbook(data):
         append_jsonl(orderbook_log_path, {"event": "orderbook", "data": data})
-        print(f"[ORDERBOOK] token={data.get('token_id')} bids={len(data.get('bids', []))} asks={len(data.get('asks', []))}")
+        # Pretty-print the full orderbook for easier inspection
+        try:
+            pretty = json.dumps(data, default=str, indent=2)
+        except Exception:
+            pretty = str(data)
+        print(f"[ORDERBOOK] token={data.get('token_id')}\n{pretty}")
 
     def print_price_change(data):
         append_jsonl(orderbook_log_path, {"event": "price_change", "data": data})

@@ -48,45 +48,39 @@ except ModuleNotFoundError:
 ENV_PATH = Path(__file__).resolve().parents[2] / "config" / ".env"
 load_dotenv(ENV_PATH)
 
+# Prefer direct Gamma API helpers for single-event and single-market lookups.
+# This avoids performing a full catalog fetch when the docs recommend
+# using `/events/slug/{slug}`.
+GAMMA_HELPERS = False
+try:
+    from data_collection.utils.gamma_api.get_events_by_slug import get_event_by_slug
+    from data_collection.utils.gamma_api.get_markets_by_slug import get_markets_by_slug
+    GAMMA_HELPERS = True
+except Exception:
+    # Try file-based import fallback for hyphenated folder name `gamma-api`
+    try:
+        import importlib.util
+        from pathlib import Path
 
-class TokenInfo(NamedTuple):
-    """Holds token info needed for trading"""
-    clob_token_id: str  # This is what you need for placing orders
-    outcome: str        # "Yes" or "No" usually
-    winner: bool        # Is this the winning token?
+        base = Path(__file__).resolve().parents[1] / "gamma-api"
+        if base.exists():
+            spec = importlib.util.spec_from_file_location(
+                "gamma_api.get_events_by_slug", str(base / "get_events_by_slug.py")
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            get_event_by_slug = getattr(mod, "get_event_by_slug")
 
+            spec2 = importlib.util.spec_from_file_location(
+                "gamma_api.get_markets_by_slug", str(base / "get_markets_by_slug.py")
+            )
+            mod2 = importlib.util.module_from_spec(spec2)
+            spec2.loader.exec_module(mod2)
+            get_markets_by_slug = getattr(mod2, "get_markets_by_slug")
+            GAMMA_HELPERS = True
+    except Exception:
+        GAMMA_HELPERS = False
 
-class MarketTokens(NamedTuple):
-    """Combines market info with its trading tokens"""
-    market: Dict[str, Any]    # All market data from API
-    tokens: List[TokenInfo]   # Trading tokens for this market
-
-
-# Global client - reused to avoid creating new connections
-_client = None
-
-# API endpoints
-GAMMA_API_BASE = "https://gamma-api.polymarket.com"
-CLOB_API_BASE = "https://clob.polymarket.com"
-
-
-def _get_client() -> ClobClient:
-    """Get or create the Polymarket client (internal function)"""
-    global _client
-    if ClobClient is None:
-        raise ModuleNotFoundError("py_clob_client is not installed")
-
-    if _client is None:
-        host = os.getenv("CLOB_API_URL", CLOB_API_BASE)
-        _client = ClobClient(
-            host=host,
-            chain_id=POLYGON,
-            key=os.getenv("PRIVATE_KEY"),
-            creds=None,
-            signature_type=0,
-            funder=os.getenv("FUNDER")
-        )
-    return _client
 
 # Simple data structures for organizing market + token data
 class TokenInfo(NamedTuple):
@@ -95,10 +89,12 @@ class TokenInfo(NamedTuple):
     outcome: str        # "Yes" or "No" usually
     winner: bool        # Is this the winning token?
 
+
 class MarketTokens(NamedTuple):
-    """Combines market info with its trading tokens"""
+    """Combines market info with its trading token s"""
     market: Dict[str, Any]    # All market data from API
     tokens: List[TokenInfo]   # Trading tokens for this market
+
 
 # Global client - reused to avoid creating new connections
 _client = None
@@ -110,6 +106,9 @@ CLOB_API_BASE = "https://clob.polymarket.com"
 def _get_client() -> ClobClient:
     """Get or create the Polymarket client (internal function)"""
     global _client
+    if ClobClient is None:
+        raise ModuleNotFoundError("py_clob_client is not installed")
+
     if _client is None:
         host = os.getenv("CLOB_API_URL", CLOB_API_BASE)
         _client = ClobClient(
@@ -346,7 +345,7 @@ def get_all_active_markets() -> List[Dict[str, Any]]:
     print(f"[INFO] Total unique active markets: {len(unique_markets)}")
     return unique_markets
 
-def search_markets_by_event_slug(event_slug: str) -> List[MarketTokens]:
+def search_markets_by_event_slug(event_slug: str) -> List[List[str]]:
     """
     Search markets by event slug using comprehensive market data
     
@@ -356,7 +355,7 @@ def search_markets_by_event_slug(event_slug: str) -> List[MarketTokens]:
     Args:
         event_slug: Event slug to search for (e.g., "presidential-election-winner-2024")
         
-    Returns: List of MarketTokens objects for all markets matching the event
+    Returns: List of lists, each inner list contains `clobTokenIds` for a market
     
     Example:
         markets = search_markets_by_event_slug("presidential-election")
@@ -364,55 +363,64 @@ def search_markets_by_event_slug(event_slug: str) -> List[MarketTokens]:
             print(f"Market: {market_data.market['question']}")
             print(f"Tokens: {[t.clob_token_id for t in market_data.tokens]}")
     """
+    # If Gamma helpers are available, fetch the event directly (recommended)
+    if GAMMA_HELPERS:
+        try:
+            evt = get_event_by_slug(event_slug)
+            if not evt:
+                print(f"[ERROR] No event found for slug: {event_slug}")
+                return []
+
+            markets = evt.get("markets") or []
+            if not markets:
+                print(f"[ERROR] Event found but no markets for slug: {event_slug}")
+                return []
+
+            token_lists: List[List[str]] = []
+            for m in markets:
+                clob_ids = _normalize_clob_token_ids(m.get("clobTokenIds", []))
+                token_lists.append(clob_ids)
+
+            print(f"[INFO] Found {len(token_lists)} markets for event: {event_slug}")
+            return token_lists
+        except Exception as e:
+            print(f"[ERROR] Event lookup failed for slug {event_slug}: {e}")
+            return []
+
+    # Legacy behavior: scan all markets (slow)
     # Get all markets using the comprehensive function
     all_markets = get_all_active_markets()
     if not all_markets:
         print("[ERROR] No markets available")
         return []
-    
+
     # Search for matching markets
     matching_markets = []
     event_slug_lower = event_slug.lower()
-    
+
     for market in all_markets:
         # Check slug match
         market_slug = market.get('slug', '').lower()
         question = market.get('question', '').lower()
-        
+
         # Search in slug and question
-        if (event_slug_lower in market_slug or 
+        if (event_slug_lower in market_slug or
             event_slug_lower.replace('-', ' ') in question):
             matching_markets.append(market)
-    
+
     if not matching_markets:
         print(f"[ERROR] No markets found for event slug: {event_slug}")
         return []
-    
+
     print(f"[INFO] Found {len(matching_markets)} markets for event: {event_slug}")
-    
-    # Convert to MarketTokens format
-    markets_with_tokens = []
+
+    # Convert to token id lists
+    token_lists: List[List[str]] = []
     for market in matching_markets:
-        # Extract token information
-        tokens = []
         clob_token_ids = market.get('clobTokenIds', [])
-        
-        # Create tokens based on available clob token IDs
-        if len(clob_token_ids) >= 2:
-            tokens.append(TokenInfo(
-                clob_token_id=clob_token_ids[0],
-                outcome="Yes",
-                winner=False
-            ))
-            tokens.append(TokenInfo(
-                clob_token_id=clob_token_ids[1],
-                outcome="No", 
-                winner=False
-            ))
-        
-        markets_with_tokens.append(MarketTokens(market=market, tokens=tokens))
-    
-    return markets_with_tokens
+        token_lists.append(_normalize_clob_token_ids(clob_token_ids))
+
+    return token_lists
 
 def search_markets(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """
@@ -469,13 +477,29 @@ def get_market_by_slug(slug: str) -> Optional[Dict[str, Any]]:
         if market:
             print(f"Found: {market['question']}")
     """
+    # Prefer direct Gamma API endpoint when available
+    if GAMMA_HELPERS:
+        try:
+            m = get_markets_by_slug(slug)
+            if not m:
+                print(f"[ERROR] No market found with slug: {slug}")
+                return None
+            # Normalize clobTokenIds if present
+            if "clobTokenIds" in m:
+                m["clobTokenIds"] = _normalize_clob_token_ids(m.get("clobTokenIds"))
+            print(f"[INFO] Found market: {m.get('question', 'Unknown')}")
+            return m
+        except Exception as e:
+            print(f"[ERROR] Gamma market lookup failed for slug {slug}: {e}")
+            return None
+
     markets = get_all_active_markets()
-    
+
     for market in markets:
         if market.get('slug') == slug:
             print(f"[INFO] Found market: {market.get('question', 'Unknown')}")
             return market
-    
+
     print(f"[ERROR] No market found with slug: {slug}")
     return None
 

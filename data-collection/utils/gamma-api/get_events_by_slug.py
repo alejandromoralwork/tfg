@@ -1,4 +1,46 @@
 #!/usr/bin/env python3
+"""Fetch event data from Gamma API by slug"""
+
+import requests
+from typing import Dict, Any, List, Optional
+
+
+def get_event_by_slug(slug: str, fields: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Fetch event data from Gamma API /events/slug/{slug}
+
+    Returns the event dict (including its markets) or raises on network/HTTP errors.
+    """
+    base_url = "https://gamma-api.polymarket.com"
+    clean_slug = slug.lower().strip().replace(" ", "-")
+    url = f"{base_url}/events/slug/{clean_slug}"
+
+    headers = {"User-Agent": "PolyTrading/1.0", "Accept": "application/json"}
+
+    resp = requests.get(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+
+    if fields is None:
+        return data
+
+    # Extract requested fields
+    extracted = {}
+    for f in fields:
+        extracted[f] = data.get(f)
+    return extracted
+
+
+if __name__ == "__main__":
+    import sys
+    slug = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not slug:
+        print("Usage: get_events_by_slug.py <slug>")
+        raise SystemExit(2)
+
+    evt = get_event_by_slug(slug)
+    print(f"Event slug {slug}: keys={list(evt.keys())}")
+#!/usr/bin/env python3
 """
 Simple function to fetch data from Gamma API /events/slug/ endpoint
 """
