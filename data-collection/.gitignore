@@ -1,0 +1,137 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+.virtualenv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+config/.env
+*.env
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache
+.cache/
+*.cache
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Project specific
+data/quickbuy_config.json
+data/*.csv
+data/*.json
+!data/ws_active_tokens_example.json
+!data/all_active_markets.json
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Compiled files
+*.pyc
+*.pyo
+*.pyd
+
+# Documentation builds
+docs/_build/
+site/
+
+# Package management
+poetry.lock
+Pipfile.lock
+
+# Flask
+instance/
+.webassets-cache
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+credentials.json
+secrets/
+
+# Node modules (if using any JS tools)
+node_modules/
+
+# Large data files
+*.csv
+*.xlsx
+*.xls
+!data/all_active_markets.csv
+
+# Model files
+*.pkl
+*.pickle
+*.h5
+*.pt
+*.pth
+
+# Ignore implementation/summary docs (optional - uncomment if needed)
+# IMPLEMENTATION_SUMMARY.md
+# PYTHON_COMPAT_FIX.md
