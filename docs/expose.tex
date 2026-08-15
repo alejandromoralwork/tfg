@@ -1,0 +1,493 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{hyperref}
+
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\title{Thesis Expose: Design and Empirical Evaluation of Discrete-Time Market Models:\\ Architecture of a Frequent Batch Auction Engine and a Simulation-Based Comparison against Continuous Trading}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+
+\section{Preliminary title of the thesis}
+Design and Empirical Evaluation of Discrete-Time Market Models: Architecture of a Frequent Batch Auction Engine and a Simulation-Based Comparison against Continuous Trading.
+
+
+\section{Introduction, Problem and Research Questions}
+
+\subsection{Introduction}
+
+Traditional Continuous Double Auctions (CDAs), implemented as Continuous Limit Order Books (CLOBs), suffer from a fundamental structural vulnerability: the latency arms race. Because orders are processed serially on a first-come, first-served basis, market participants are incentivized to compete on execution speed to exploit microsecond arbitrage opportunities. This speed race induces significant market friction, leading to widened spreads and reduced overall market efficiency (Budish, Cramton, and Shim, 2015; Aquilina, Budish, and O'Neill, 2022). To mitigate these structural flaws, the Frequent Batch Auction (FBA) is a compelling alternative design, shifting market competition from latency to price discovery.
+
+A Frequent Batch Auction engine aggregates incoming orders over a discrete, short time interval and clears them simultaneously at a uniform execution price. By eliminating continuous execution, the model neutralizes speed advantages within the batch window.
+
+This thesis addresses the topic in two connected parts. The \textbf{first part is theoretical}: it develops the design space of an FBA matching engine and analyses, on the basis of market microstructure and auction theory, which architectural options an exchange operator has and what strategic behaviour each option induces. The \textbf{second part is empirical}: it uses two matching engines that have been implemented for this thesis --- a continuous engine (CDA) and a batch auction engine (FBA) --- feeds both with identical real market data, and compares the resulting outcomes across order book, execution, and market quality metrics.
+
+\subsection{Problem Statement and Research Gap}
+
+The literature establishes convincingly \emph{that} discrete time reduces the value of speed. What remains underspecified is \emph{how} such an engine should actually be built: the interval rule, the disclosure regime, the flow architecture, and the rationing rule are usually treated as implementation details, although each of them re-introduces a different strategic incentive. This is the gap addressed by the theoretical part.
+
+At the same time, most empirical evidence compares \emph{different} markets, venues, or time periods, so that order flow, asset, and participant population change together with the market mechanism. A controlled, like-for-like comparison in which one and the same order flow is executed once continuously and once in batches cannot be obtained from field data at all, because a given order stream exists only under the mechanism that produced it. A simulation with two interchangeable engines is the only way to hold the order flow constant and vary the mechanism. This is the gap addressed by the empirical part.
+
+\subsection{Research Questions}
+
+The thesis is structured around two research questions: one theoretical (the design of an FBA engine) and one empirical (the measured comparison of the two engines).
+
+\paragraph{RQ1 (theoretical) --- How is a Frequent Batch Auction engine designed, and which design options exist for each of its architectural components?}
+
+The question is answered by decomposing the engine into its structural design blocks, presenting the available options for each block, and deriving from market microstructure and auction theory which strategic behaviour each option induces:
+
+\begin{itemize}
+    \item \textbf{The Time Window (Batch Interval $\tau$).} How long the engine collects orders before matching them, and whether the auction closes at a fixed time (for example, exactly every 100 milliseconds) or at a randomized time. A fixed window is predictable, but a randomized window prevents fast traders from timing and attacking the auction at the very last microsecond (``boundary sniping''). The length of $\tau$ itself trades off the neutralization of speed against the delay imposed on every trader.
+
+    \item \textbf{Information Disclosure (Privacy Rules).} What traders can see while the auction is collecting orders. An open-book engine shows buying and selling interest in real time and helps the market find the true price, but exposes traders to front-running. A sealed-bid (blind) engine hides all information until the auction closes and stops front-running completely, but the resulting price uncertainty can cause traders to bid less aggressively. Intermediate regimes (indicative clearing price only, aggregated imbalance only, delayed disclosure) sit between these two poles.
+
+    \item \textbf{Order Flow Segregation.} Whether all participants trade in one pool or are separated into different paths. A unified pool exposes passive market makers to predatory institutional algorithms. A segregated dual-flow architecture splits incoming orders into separate queues, protecting market makers so that they can quote tighter prices to uninformed retail flow.
+
+    \item \textbf{Matching, Rationing and Clearing Rules.} The core rule is a single uniform clearing price for the whole batch, formulated as an optimization problem that maximizes executed volume (equivalently, trader surplus) subject to flow conservation, coherent cross-rates, and limit price bounds. The design question arises where buy and sell volume do not match exactly at that price and the marginal side must be rationed: price-time priority (rewards early submission inside the batch), pro-rata (scales all orders down proportionally), size priority or maximal fill (favours large orders), random allocation (lottery), or hybrid rules such as the CME K-Algorithm. This choice determines whether participants game the system by inflating order sizes (``order stuffing'') or by restarting a micro-scale speed race.
+
+    \item \textbf{Settlement and Residual Handling.} How the cleared batch is settled: gross transfers versus net settlement optimization (minimizing the number of non-zero transfers), and what happens to the residual imbalance that the batch cannot internalize --- carry-over to the next batch, cancellation, or routing to an external liquidity source such as an AMM pool.
+\end{itemize}
+
+The output of RQ1 is a complete description of the design space and, for each block, the strategic behaviour that theory predicts each option induces.
+
+\paragraph{RQ2 (empirical) --- How do a continuous double auction and a frequent batch auction differ when both engines are fed with the same order flow?}
+
+The general question is broken down into three measurable dimensions, each of which is operationalized by a concrete set of metrics computable from the data described in Section~\ref{sec:data}:
+
+\begin{itemize}
+    \item \textbf{RQ2.1 --- Liquidity and transaction costs.} Do spreads, depth, and the realized cost of executing a given order differ between the two mechanisms? Metrics: quoted and effective spreads, realized spread and price impact, order book depth and the shape of the depth curve, Amihud illiquidity, Kyle's $\lambda$, and the implementation shortfall of standardized probe orders.
+
+    \item \textbf{RQ2.2 --- Price discovery and market quality.} Which mechanism produces a more informationally efficient price series? Metrics: variance ratios, short-horizon return autocorrelation, realized volatility, intra-interval price dispersion, pricing error relative to an external reference price, and the speed with which an exogenous price shock is incorporated.
+
+    \item \textbf{RQ2.3 --- Execution, allocation, and the latency race.} Who gets filled, at what delay, at what cost, and how much of the trading surplus is captured by speed? Metrics: fill rates and time to execution, executed volume, realized trader surplus and allocative efficiency, the distribution of fills across participants under different rationing rules, the share of volume executed against stale quotes, the profit of a simulated latency arbitrageur, maker markout PnL as a measure of adverse selection, the order-to-trade ratio, and the concentration of order arrivals at the batch boundary. This dimension also covers engine-level performance: throughput, clearing latency, netting ratio, and settlement transfers per unit of volume.
+\end{itemize}
+
+RQ2 is also the empirical counterpart of RQ1: the batch interval $\tau$ and the rationing rule are varied as treatments, so that those predictions of RQ1 that do not depend on strategic re-optimization by traders can be confronted with measured outcomes. The scope condition for this link is stated in Section~\ref{sec:limitations}.
+
+
+\section{Theoretical Foundation}
+To evaluate both the design options and the measured outcomes, this research uses five pillars of market economics.
+
+\subsection{Discrete-Time Market Design}
+This research builds on the discrete-time market theory developed by Budish, Cramton, and Shim (2015). Their work shows that traditional continuous exchanges have a fundamental flaw: they process orders one after another in real time. Because new information takes time to travel, this continuous setup creates a wasteful speed race between fast trading firms. The discrete-time model solves this issue by gathering orders into short, fixed time intervals ($\tau$). By clearing orders in batches rather than continuously, the system removes the advantage of microsecond speed, forcing traders to compete on offering the best price instead. Aquilina, Budish, and O'Neill (2022) quantify the size of the resulting ``latency tax'' in field data, which provides the order of magnitude against which the simulation results are interpreted.
+
+\subsection{Information Asymmetry and Adverse Selection}
+This section uses standard market microstructure models that explain how unequal information affects markets (Kyle, 1985; Glosten and Milgrom, 1985). In traditional markets where all trades go into a single pool, passive market makers are at a disadvantage when trading against fast, highly informed institutional traders. This risk forces market makers to widen their bid-ask spreads to protect themselves from losses, which ultimately increases costs for regular retail traders. Relying on these frameworks, this thesis investigates how separating order flows can protect market makers and allow them to offer tighter spreads. Empirically, adverse selection is captured by decomposing the effective spread into a realized spread and a price impact component, and by computing markout PnL per liquidity provider.
+
+\subsection{Market Transparency Theory}
+To evaluate privacy choices in FBA architectures, this research applies market transparency theory (Madhavan, 1996; O'Hara, 1995). This theory studies how showing or hiding pending orders affects price discovery, liquidity, and trading costs. Showing order book details helps the market find accurate prices, but exposes traders to front-running. Conversely, completely hiding orders (sealed-bid auctions) prevents front-running, but creates price uncertainty that causes traders to submit overly cautious bids. This thesis uses this framework to analyse the trade-offs between open and hidden FBA matching engines.
+
+\subsection{Auction Theory and Uniform Price Clearing}
+The rules for matching trades inside each batch rely on standard auction theory for uniform-price markets (Vickrey, 1961; Klemperer, 1999). Setting a single, shared clearing price for all executed orders removes the advantage of microsecond speed and front-running. However, when buy and sell volumes do not match perfectly at that price, the rationing rule changes how participants behave (Haynes and Onur, 2020). Using auction theory, this thesis examines whether these priority rules encourage traders to inflate order sizes or to restart a speed race.
+
+\subsection{Measurement of Market Quality}
+The empirical part requires an explicit measurement framework. This thesis uses the standard transaction-cost and price-efficiency measures of the empirical microstructure literature: effective and realized spreads and price impact (Hasbrouck, 1993; Hendershott, Jones, and Menkveld, 2011), the Amihud (2002) illiquidity ratio, Kyle's (1985) price impact coefficient, variance ratios as a test of informational efficiency, and allocative efficiency in the sense of Gode and Sunder (1993). Because the study is a simulation rather than a field study, it also follows the methodological conventions of agent-based and experimental market research (LeBaron, 2006; Aldrich and L\'opez Vargas, 2020), in particular the requirement that both institutions are exposed to exactly the same order flow.
+
+
+\section{Research Design and Methodology}
+
+This thesis uses a two-part, mixed-method design. Part~I is a conceptual and architectural analysis answering RQ1. Part~II is a quantitative simulation study answering RQ2. The parts are linked: the design blocks derived in Part~I define the parameters that Part~II varies, and the measured results feed back into the final architectural recommendation.
+
+\subsection{Part I: Architectural Analysis (RQ1)}
+
+Part~I proceeds by theoretical synthesis, supported throughout by a review of the relevant literature. For each design block identified above, this thesis applies standard microeconomic theory --- auction theory, information economics, and market transparency theory, as introduced in Section~3 --- and grounds each argument in the corresponding empirical and theoretical literature, to reason through the available options and the strategic behaviour each one induces, in order to answer RQ1.
+
+\subsection{Part II: Simulation Study (RQ2)}
+
+\subsubsection{Simulation Environment}
+Two matching engines have been implemented in Rust for this thesis. They share a common order, trade, and order book type system and implement one common matching interface, so that both consume exactly the same input events and the engine becomes the only treatment variable:
+
+\begin{itemize}
+    \item \textbf{The continuous engine (CDA)} maintains a price-time priority limit order book per asset pair and matches every incoming order immediately against the opposite side of the book, executing at the resting (maker) price.
+    \item \textbf{The batch auction engine (FBA)} buffers all orders arriving within an interval $\tau$ and, at the end of the interval, computes a single uniform clearing price per asset pair. Clearing is encoded as a linear program that maximizes executed volume subject to flow conservation, cross-rate coherence, and limit price bounds, and solved with an open-source LP solver. A settlement optimizer reduces the resulting gross transfers to a minimal set of net transfers, and an AMM pool acts as counterparty of last resort for the residual imbalance that the batch cannot internalize.
+\end{itemize}
+
+A shared simulation harness replays an event stream into either engine, triggers epoch boundaries for the FBA, and records every order, trade, and book state to a structured log for offline metric computation.
+
+\subsubsection{Data Source, Data Levels, and Control}
+\label{sec:data}
+
+\paragraph{Source.} The simulation is fed with real market data rather than synthetic order flow. Instead of operating a collector against a live venue, this thesis uses the publicly released \textbf{Hyperliquid Level~4 order book dataset} of Albers, Cucuringu, Howison, and Shestopaloff (2026), obtained by the authors from a non-validating Hyperliquid blockchain node and published on Zenodo. Hyperliquid is a limit-order-book-based decentralized exchange for perpetual futures with billions of USD in daily turnover, so the dataset combines the message-level completeness of an on-exchange feed with pseudonymous wallet-level participant identifiers. Relative to conventional Level~3 feeds such as LOBSTER, the dataset additionally records rejected orders and failed cancellation attempts (which normally never reach a public feed), the counterparty identity on both sides of every trade, and each participant's inventory position after every transaction, all at nanosecond-precision timestamps. Using a single, purpose-built dataset rather than an in-house collector removes the collection pipeline as a source of error and gives genuine order-by-order granularity instead of one reconstructed from periodic snapshots (see below).
+
+\paragraph{Data levels and what they permit.} Which metrics can be computed is determined entirely by the granularity of the recorded feed. Table~\ref{tab:levels} states the levels explicitly, because every metric in Section~\ref{sec:metrics} is tagged with the level it requires.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Market data levels and the metrics they enable.}
+\label{tab:levels}
+\begin{tabularx}{\textwidth}{@{}p{1.3cm} p{4.0cm} L@{}}
+\hline
+\textbf{Level} & \textbf{Content} & \textbf{What it enables} \\
+\hline
+L1 & Best bid and offer, last trade & Quoted spread, midpoint series, realized volatility, effective spread \\
+L2 & Aggregated depth per price level (the ladder) & Depth at best and within $x$ bps, depth curve shape, book imbalance, slippage of a hypothetical order \\
+L3 & Order-by-order feed: every add, modify, cancel and execution with an order ID and timestamp & Exact book reconstruction, queue position, time priority effects, cancellation and order-to-trade ratios, arrival-time distribution inside an interval \\
+L4 & L3 plus participant attribution (wallet or account identifier) per order and per fill & Per-participant metrics: maker inventory and markout PnL, adverse selection by counterparty type, fill distribution across participants under a rationing rule, order size inflation, flow classification into benign and toxic \\
+\hline
+\end{tabularx}
+\end{table}
+
+This thesis works with \textbf{L4 data}, which is the necessary condition for the whole empirical design: an order-by-order feed with participant attribution is what allows the historical flow to be replayed order by order through a \emph{different} matching engine. With L1 or L2 data alone, only aggregate statistics could be compared and no re-execution would be possible. Because the Hyperliquid dataset is captured directly at the node rather than sampled from periodic book snapshots, it delivers genuine, complete L3/L4 granularity without the differencing-based reconstruction that lower-resolution feeds would require; no snapshot-to-event reconstruction step is needed for this data source, and the accompanying caveat about degraded granularity in Section~\ref{sec:limitations} therefore applies only if a lower-resolution feed is added for robustness. Three fields go beyond the L4 definition in Table~\ref{tab:levels} and are used specifically where indicated in Section~\ref{sec:metrics}: \emph{rejected orders} and \emph{failed cancellations}, which are needed for the order-to-trade and message-traffic metrics and are otherwise invisible in a standard feed; \emph{counterparty identity on both sides of each trade}, which sharpens the flow-classification and adverse-selection metrics beyond what one-sided attribution allows; and \emph{post-trade inventory}, which is used directly for the maker markout and inventory-risk metrics instead of having to be reconstructed from the fill history.
+
+\paragraph{What the simulation controls, observes, and cannot observe.} Because the engines are our own, several quantities that are unobservable in field data become directly observable, and several others become experimentally controllable:
+\begin{itemize}
+    \item \textbf{Controlled (treatment variables):} the engine (CDA or FBA), the batch interval $\tau$, the interval rule (fixed or randomized), the rationing rule, the disclosure regime, the AMM seed liquidity, the latency assigned to each participant class, and the random seeds.
+    \item \textbf{Controlled (experimental probes):} standardized probe orders of fixed size injected at fixed points in time into both engines, which give an identical benchmark order whose realized execution cost can be compared directly across mechanisms; and an optional simulated latency arbitrageur whose profit measures how much value the mechanism leaves on the table for speed.
+    \item \textbf{Observed but not observable in the field:} every submitted limit price including unexecuted orders (hence the attainable maximum surplus and therefore allocative efficiency), the exact rationing outcome, the internal clearing state, the LP solve time, the netting ratio, and the residual routed to the AMM.
+    \item \textbf{Not observable:} the true fundamental value (proxied by an external reference price, taken from Hyperliquid's own oracle/mark price index or from the AMM pool), hidden or iceberg liquidity, the true latency of real participants (modelled, not measured), and the counterfactual behaviour of traders under a mechanism they were not trading in (see Section~\ref{sec:limitations}).
+\end{itemize}
+
+\subsubsection{Experimental Design and Comparability Protocol}
+The unit of observation is a replay window of fixed length drawn from the collected data. Each window is executed under every treatment condition, so that all comparisons are paired:
+
+\begin{itemize}
+    \item \textbf{Treatment A (engine):} CDA vs.\ FBA.
+    \item \textbf{Treatment B (batch interval):} $\tau \in \{0.1, 1, 5, 15, 60\}$ seconds, subject to the timestamp resolution of the underlying feed.
+    \item \textbf{Treatment C (rationing rule):} price-time vs.\ pro-rata allocation of the marginal side at the clearing price.
+    \item \textbf{Controls:} identical order flow, identical asset universe, identical AMM seed liquidity, identical seeds where randomization is used.
+\end{itemize}
+
+Several standard order book metrics are not defined identically in the two mechanisms: a continuous book has a quoted spread at every instant, whereas a sealed batch has none until it clears, and a batch has no intra-interval price dispersion by construction. The comparability protocol is therefore to \textbf{compute every metric on the same time grid $\tau$ for both engines}: continuous outcomes are aggregated into interval-level observations (time-weighted for state variables, volume-weighted for trade variables), and each interval yields one observation per engine. For the FBA, the counterpart of the quoted spread is the implied spread of the aggregated demand and supply schedules at the clearing point, that is, the price gap between the marginal unexecuted buy and the marginal unexecuted sell. Where a metric has no meaningful counterpart, this is reported as a structural difference rather than forced into a common number.
+
+\subsubsection{Metric Catalogue}
+\label{sec:metrics}
+
+Notation: $a_t$ and $b_t$ are the best ask and bid, $m_t = (a_t+b_t)/2$ the midpoint, $p_k$ the execution price of trade $k$, $q_k$ its size, $D_k \in \{+1,-1\}$ its sign (buyer- or seller-initiated), $\pi_k$ the submitted limit price, $p^{*}$ the uniform clearing price of a batch, and $\Delta$ a markout horizon. The column ``Data'' gives the minimum data level required.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{RQ2.1 --- Liquidity and transaction cost metrics.}
+\label{tab:liquidity}
+\begin{tabularx}{\textwidth}{@{}p{3.3cm} L p{1.1cm}@{}}
+\hline
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data} \\
+\hline
+Quoted spread & $(a_t-b_t)/m_t$, time-weighted per interval; for the FBA the implied spread between the marginal unexecuted buy and sell of the batch & L1/L2 \\
+Depth at best & Displayed volume at the best bid and ask, time-weighted; for the FBA the volume at $p^{*}$ in the batch schedules & L2 \\
+Depth within $x$ bps & Cumulative volume within $x$ basis points of $m_t$ (or of $p^{*}$), for several $x$ & L2 \\
+Depth curve slope & Regression of cumulative volume on distance from the midpoint; measures how quickly liquidity thins out & L2 \\
+Book imbalance & $(V^{bid}-V^{ask})/(V^{bid}+V^{ask})$ at the top $n$ levels, and its predictive power for the next price change & L2 \\
+Effective spread & $2D_k(p_k-m_k)/m_k$, volume-weighted; $m_k$ is the pre-trade midpoint, for the FBA the midpoint at the start of the batch & L1 + trades \\
+Realized spread & $2D_k(p_k-m_{k+\Delta})/m_k$ for $\Delta \in \{1,5,30\}$ seconds; the part of the spread the liquidity provider keeps & L1 + trades \\
+Price impact & Effective spread minus realized spread; the adverse selection component & L1 + trades \\
+Amihud illiquidity & $|r_t|/\text{volume}_t$ averaged over intervals & L1 + trades \\
+Kyle's $\lambda$ & Slope of the regression of interval returns on signed order flow & L2/L3 \\
+Probe order cost & Implementation shortfall of a standardized probe order of fixed size injected identically into both engines & control \\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{RQ2.2 --- Price discovery and market quality metrics.}
+\label{tab:quality}
+\begin{tabularx}{\textwidth}{@{}p{3.3cm} L p{1.1cm}@{}}
+\hline
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data} \\
+\hline
+Realized volatility & Standard deviation of interval midpoint or clearing price returns & L1 \\
+Intra-interval price dispersion & Standard deviation of execution prices within one interval; zero by construction for the FBA, strictly positive for the CDA, and therefore a direct measure of the uniform-price property & L1 + trades \\
+Variance ratio & $|VR(q)-1|$ for several aggregation horizons $q$; distance from a random walk & L1 \\
+Return autocorrelation & First-order autocorrelation of interval returns; negative values indicate transitory noise and reversal & L1 \\
+Pricing error & $|p^{*}-p^{ref}|$ or $|m_t-p^{ref}|$ against an external reference price (Hyperliquid's own oracle/mark price, or the AMM pool price), in bps & L1 + ref \\
+Price discovery speed & Number of intervals until a given exogenous reference price move is fully reflected in the executed price & L1 + ref \\
+Information share & Hasbrouck (1995) share of the reference price variance attributable to each mechanism's price series & L1 + ref \\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{RQ2.3 --- Execution, allocation, latency race, and engine performance metrics.}
+\label{tab:execution}
+\begin{tabularx}{\textwidth}{@{}p{3.3cm} L p{1.1cm}@{}}
+\hline
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data} \\
+\hline
+Executed volume & Matched quantity and notional per interval; number of trades & L1 + trades \\
+Fill rate & Filled quantity divided by submitted quantity, overall and by participant class & L3/L4 \\
+Time to execution & Elapsed time from submission to fill; for the FBA bounded below by the time to the next batch boundary, which quantifies the delay cost of batching & L3 \\
+Trader surplus & $\sum_k |\pi_k - p^{*}| \, q_k$ over executed orders: the gain relative to the submitted limit price & L3/L4 \\
+Allocative efficiency & Realized surplus divided by the maximum attainable surplus of the same interval, computed from all submitted limit prices including unexecuted orders & L3/L4 \\
+Fill distribution & Distribution (and Gini coefficient) of fills across participants for a given rationing rule; detects concentration of execution & L4 \\
+Order size inflation & Ratio of submitted to filled size per participant over time; the empirical signature of order stuffing under pro-rata & L4 \\
+Stale-quote volume & Share of volume executed against quotes that had become stale relative to the reference price at the moment of execution & L3/L4 + ref \\
+Latency arbitrage profit & PnL of a simulated fast arbitrageur trading against stale quotes; the direct measure of the latency tax under each mechanism & control \\
+Maker markout PnL & Realized PnL of liquidity-providing fills at $\Delta \in \{1,5,30\}$ seconds, per participant; adverse selection borne by market makers & L4 \\
+Order-to-trade ratio & Submitted messages per executed trade; cancellation rate per interval; measures message traffic and quote flickering & L3 \\
+Boundary concentration & Share of order arrivals in the final $x\%$ of the batch interval; the empirical test of boundary sniping under fixed vs.\ randomized $\tau$ & L3 \\
+Throughput & Orders processed per second under identical load & control \\
+Clearing latency & Wall-clock time per batch clearing (LP solve) and per continuous match & control \\
+Netting ratio & Gross transfer volume divided by net transfer volume after settlement optimization & control \\
+Settlement transfers & Number of non-zero transfers after netting per unit of executed volume (proxy for gas or settlement cost) & control \\
+Residual imbalance & Share of batch volume routed to the AMM pool because it cannot be internalized & control \\
+\hline
+\end{tabularx}
+\end{table}
+
+\subsubsection{Analysis Strategy}
+Because every replay window is executed under all treatments, the primary analysis is a paired comparison of interval-level metrics between the two engines, reported as mean differences with bootstrapped confidence intervals rather than as single-run point estimates. The $\tau$-sweep is analysed as a response curve per metric, to detect monotonicity or an interior optimum. Robustness is checked by varying the window length, the asset sample, and the AMM seed liquidity, and by repeating all randomized configurations across several seeds. Results are reported together with the number of windows and the dispersion across them, so that differences which are statistically detectable but economically small are visible as such.
+
+\subsubsection{Validation and Limitations}
+\label{sec:limitations}
+Two validation steps precede the main experiments. First, both engines are verified on constructed micro-scenarios with a known analytical solution (crossing orders, exact clearing, over- and undersubscribed batches, out-of-the-money orders), so that clearing price, executed volume, and conservation of flow can be checked by hand. Second, the CDA engine is validated against the historical feed itself: replaying the recorded order flow through the continuous engine must reproduce the observed trades and book states within a documented tolerance. This establishes that any deviation measured in the FBA condition comes from the mechanism and not from the harness.
+
+The central limitation is behavioural. Replaying order flow that was generated under a continuous mechanism through a batch mechanism holds trader behaviour fixed, although changing that behaviour is the entire point of the FBA. The results therefore measure the \emph{mechanical} effect of batching on identical order flow, not the equilibrium outcome after participants re-optimize. This is stated explicitly as a scope condition, it is the reason why RQ1 remains a theoretical question, and it is partially addressed by a robustness condition in which a simple population of zero-intelligence and latency-sensitive agents (Gode and Sunder, 1993) is layered on top of the replayed flow to test whether the sign of the measured effects survives endogenous order placement. Further limitations are the restriction of the sample to a single venue and a single asset class (Hyperliquid perpetual futures), so that findings may not transfer to other market structures such as spot equities or prediction markets; the fact that participant latency is modelled on top of the recorded timestamps rather than physically measured; the use of an exchange-internal reference price as a proxy for fundamental value; and the coverage of the publicly released Zenodo sample, which is a subset of the full dataset held by the original authors and may not span every market condition (e.g.\ periods of extreme volatility or outages) relevant to the comparison.
+
+\subsection{Expected Contribution}
+The thesis contributes (i) a structured design space for FBA matching engines, with the available options per architectural block and an explicit trade-off matrix; (ii) two working, interoperable engine implementations with a shared replay harness that allows the two market institutions to be compared on identical order flow; and (iii) quantitative evidence, based on the Hyperliquid L4 order book dataset, on how batching and batch interval length affect liquidity, price discovery, allocative efficiency, exposure to the latency race, and system-level settlement cost.
+
+
+\newpage
+
+\section{Preliminary Chapter Outline}
+
+\begin{description}
+    \item[Chapter 1: Introduction] \hfill \\
+    Introduces the limitations of continuous limit order books, details the mechanics of the latency arms race, states the two research gaps, and establishes RQ1 and RQ2.
+
+    \item[Chapter 2: Theoretical Foundations and Literature Review] \hfill \\
+    Establishes the economic frameworks: discrete-time market design, information asymmetry and adverse selection, market transparency theory, uniform-price auction theory, and the measurement framework for market quality.
+
+    \item[Chapter 3: Design of a Frequent Batch Auction Engine] \hfill \\
+    \textbf{Answers RQ1.} Develops the design space block by block --- batch interval, information disclosure, order flow segregation, matching and rationing rules, settlement and residual handling --- including the formal statement of the uniform clearing problem, and closes with the structural trade-off matrix and a case-study review of deployed batch-auction systems.
+
+    \item[Chapter 4: Simulation Design and Data] \hfill \\
+    Documents the two engines and their shared matching interface, the Hyperliquid L4 dataset and the data-level framework used to scope the metric catalogue, what the simulation controls and observes, the experimental design and comparability protocol, the metric catalogue, and the validation of the harness.
+
+    \item[Chapter 5: Results --- Comparing CDA and FBA] \hfill \\
+    \textbf{Answers RQ2.} Reports the paired comparison along the three dimensions: liquidity and transaction costs (RQ2.1), price discovery and market quality (RQ2.2), and execution, allocation and the latency race (RQ2.3), including the batch interval sweep and the rationing rule comparison.
+
+    \item[Chapter 6: Discussion] \hfill \\
+    Synthesizes the theoretical design analysis and the measured results into design recommendations, states which predictions of Chapter~3 the simulation can and cannot test, and positions the findings relative to the existing empirical literature.
+
+    \item[Chapter 7: Conclusion] \hfill \\
+    Summarizes the answers to both research questions, states the limitations of a replay-based simulation, and outlines future work on strategic agent populations and hybrid exchange architectures.
+\end{description}
+
+
+\section{Preliminary Work Plan}
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l L@{}}
+\hline
+\textbf{Phase} & \textbf{Work package} \\
+\hline
+Phase 1 & Literature review and theoretical foundation (Chapters 1--2) \\
+Phase 2 & Design space analysis of the FBA engine and case studies (Chapter 3, RQ1) \\
+Phase 3 & Completion of the two engines, data collection pipeline, and harness validation (Chapter 4) \\
+Phase 4 & Execution of the experiments and computation of the metric catalogue (Chapter 5, RQ2) \\
+Phase 5 & Discussion, synthesis, and final revision (Chapters 6--7) \\
+\hline
+\end{tabularx}
+\end{table}
+
+
+\begin{thebibliography}{99}
+
+\bibitem{albers2026openbook}
+Albers, J., Cucuringu, M., Howison, S., \& Shestopaloff, A. Y. (2026).
+An open book: Level 4 order book data from the Hyperliquid exchange.
+\textit{SSRN Working Paper}.
+\url{https://dx.doi.org/10.2139/ssrn.6465720} \\
+Dataset: \url{https://zenodo.org/records/18184441}
+
+\bibitem{budish2015high}
+Budish, E., Cramton, P., \& Shim, J. (2015).
+The high-frequency trading arms race: Frequent batch auctions as a market design response.
+\textit{The Quarterly Journal of Economics}, 130(4), 1547--1621.
+\url{https://doi.org/10.1093/qje/qjv027}
+
+\bibitem{aquilina2022quantifying}
+Aquilina, M., Budish, E., \& O'Neill, P. (2022).
+Quantifying the high-frequency trading ``arms race''.
+\textit{The Quarterly Journal of Economics}, 137(1), 493--564.
+\url{https://doi.org/10.1093/qje/qjab032}
+
+\bibitem{aldrich2020experiments}
+Aldrich, E. M., \& L{\'o}pez Vargas, K. (2020).
+Experiments in high-frequency trading: comparing two market institutions.
+\textit{Experimental Economics}, 23(2), 322--352.
+\url{https://doi.org/10.1007/s10683-019-09605-2}
+
+\bibitem{gong2023case}
+Gong, T., Liu, Z., \& Kate, A. (2023).
+\textit{The case of FBA as a DEX processing model} (arXiv:2302.01177).
+arXiv. \url{https://arxiv.org/abs/2302.01177}
+
+\bibitem{eibelshauser2022frequent}
+Eibelsh{\"a}user, S., \& Smetak, F. (2022).
+Frequent Batch Auctions and Informed Trading (SAFE Working Paper No. 344).
+\textit{Leibniz Institute for Financial Research SAFE}.
+\url{https://dx.doi.org/10.2139/ssrn.4065547}
+
+\bibitem{zoican2021speed}
+Zoican, M., Haas, M., \& Khapko, M. (2021).
+Speed and learning in high-frequency auctions.
+\textit{Journal of Financial Markets}, 54, 100583.
+\url{https://doi.org/10.2139/ssrn.2738071}
+
+\bibitem{lee2026frequent}
+Lee, Y.-T., Wang, K., \& Ricc{\`o}, R. (2026).
+Frequent batch auctions vs. continuous trading: Evidence from Taiwan.
+\textit{Journal of Financial Markets}, 101082.
+\url{https://doi.org/10.1016/j.finmar.2026.101082}
+
+\bibitem{wang2018loopring}
+Wang, D. N., Zhou, J., Wang, A., \& Finestone, M. (2018).
+\textit{Loopring: A Decentralized Token Exchange Protocol} (Whitepaper).
+Loopring Foundation.
+\url{https://www.scribd.com/document/487503692/Loopring-whitepaper}
+
+\bibitem{walther2021multitoken}
+Walther, T. (2021).
+\textit{Multi-token batch auctions with uniform clearing prices: Features and models}.
+Gnosis DEX Research Technical Report.
+\url{https://github.com/gnosis/dex-research/blob/master/BatchAuctionOptimization/batchauctions.pdf}
+
+\bibitem{haynes2020precedence}
+Haynes, R., \& Onur, E. (2020).
+Precedence rules in matching algorithms.
+\textit{Journal of Commodity Markets}, 19, 100106.
+\url{https://ssrn.com/abstract=3910732}
+
+\bibitem{dutta2025cow}
+Dutta, A., \& Team, E. (2025).
+A coincidence of wants mechanism for swap trade execution in decentralized exchanges.
+\textit{arXiv preprint arXiv:2507.10149}.
+\url{https://arxiv.org/abs/2507.10149}
+
+\bibitem{harrison2025hybrid}
+Harrison, B., \& Pardo-Guerra, J. P. (2025).
+Hybrid genetic algorithm for optimal user order routing: Multi-objective solver optimization in CoW Protocol batch auctions.
+\textit{arXiv preprint arXiv:2510.21647}.
+\url{https://arxiv.org/abs/2510.21647}
+
+\bibitem{ramsay2023speedex}
+Ramsay, G., Goel, A., \& Mazieres, D. (2023).
+SPEEDEX: A high-throughput, arbitrage-free decentralized exchange.
+\textit{arXiv preprint arXiv:2111.02719}.
+\url{https://arxiv.org/abs/2111.02719}
+
+\bibitem{canidio2026faircombinatorialauctionsendogenous}
+Canidio, A., \& Henneke, F. (2026).
+Fair Combinatorial Auctions: Endogenous Best Execution in Blockchain Trade-Intent Markets.
+\textit{arXiv preprint arXiv:2408.12225}.
+\url{https://arxiv.org/abs/2408.12225}
+
+\bibitem{bishara2024intent}
+Bishara, A., \& Moallemi, C. C. (2024).
+An analysis of intent-based markets.
+\textit{arXiv preprint arXiv:2403.02525}.
+\url{https://arxiv.org/abs/2403.02525}
+
+\bibitem{glosten1985bid}
+Glosten, L. R., \& Milgrom, P. R. (1985).
+Bid, ask and transaction prices in a specialist market with heterogeneously informed traders.
+\textit{Journal of Financial Economics}, 14(1), 71--100.
+\url{https://doi.org/10.1016/0304-405X(85)90044-3}
+
+\bibitem{kyle1985continuous}
+Kyle, A. S. (1985).
+Continuous auctions and insider trading.
+\textit{Econometrica}, 53(6), 1315--1335.
+\url{https://doi.org/10.2307/1913210}
+
+\bibitem{madhavan1996market}
+Madhavan, A. (1996).
+\textit{Market transparency}.
+Journal of Financial Intermediation, 5(3), 255--283.
+\url{https://doi.org/10.1006/jfin.1996.0015}
+
+\bibitem{ohara1995market}
+O'Hara, M. (1995).
+\textit{Market Microstructure Theory}.
+Blackwell Publishers, Cambridge, MA.
+\url{https://www.wiley.com/en-us/Market+Microstructure+Theory-p-9781557864437}
+
+\bibitem{vickrey1961counterspeculation}
+Vickrey, W. (1961).
+\textit{Counterspeculation, auctions, and competitive sealed tenders}.
+The Journal of Finance, 16(1), 8--37.
+\url{https://doi.org/10.1111/j.1540-6261.1961.tb02789.x}
+
+\bibitem{klemperer1999auction}
+Klemperer, P. (1999).
+\textit{Auction theory: A guide to the literature}.
+Journal of Economic Surveys, 13(3), 227--286.
+\url{https://doi.org/10.1111/1467-6419.00083}
+
+\bibitem{hasbrouck1993assessing}
+Hasbrouck, J. (1993).
+Assessing the quality of a security market: A new approach to transaction-cost measurement.
+\textit{The Review of Financial Studies}, 6(1), 191--212.
+\url{https://doi.org/10.1093/rfs/6.1.191}
+
+\bibitem{hasbrouck1995one}
+Hasbrouck, J. (1995).
+One security, many markets: Determining the contributions to price discovery.
+\textit{The Journal of Finance}, 50(4), 1175--1199.
+\url{https://doi.org/10.1111/j.1540-6261.1995.tb04054.x}
+
+\bibitem{hendershott2011algorithmic}
+Hendershott, T., Jones, C. M., \& Menkveld, A. J. (2011).
+Does algorithmic trading improve liquidity?
+\textit{The Journal of Finance}, 66(1), 1--33.
+\url{https://doi.org/10.1111/j.1540-6261.2010.01624.x}
+
+\bibitem{amihud2002illiquidity}
+Amihud, Y. (2002).
+Illiquidity and stock returns: Cross-section and time-series effects.
+\textit{Journal of Financial Markets}, 5(1), 31--56.
+\url{https://doi.org/10.1016/S1386-4181(01)00024-6}
+
+\bibitem{roll1984simple}
+Roll, R. (1984).
+A simple implicit measure of the effective bid-ask spread in an efficient market.
+\textit{The Journal of Finance}, 39(4), 1127--1139.
+\url{https://doi.org/10.1111/j.1540-6261.1984.tb03897.x}
+
+\bibitem{gode1993allocative}
+Gode, D. K., \& Sunder, S. (1993).
+Allocative efficiency of markets with zero-intelligence traders: Market as a partial substitute for individual rationality.
+\textit{Journal of Political Economy}, 101(1), 119--137.
+\url{https://doi.org/10.1086/261868}
+
+\bibitem{lebaron2006agent}
+LeBaron, B. (2006).
+Agent-based computational finance.
+In L. Tesfatsion \& K. L. Judd (Eds.), \textit{Handbook of Computational Economics} (Vol. 2, pp. 1187--1233). Elsevier.
+\url{https://doi.org/10.1016/S1574-0021(05)02024-1}
+
+\bibitem{menkveld2016economics}
+Menkveld, A. J. (2016).
+The economics of high-frequency trading: Taking stock.
+\textit{Annual Review of Financial Economics}, 8, 1--24.
+\url{https://doi.org/10.1146/annurev-financial-121415-033010}
+
+\bibitem{wood2014ethereum}
+Wood, G. (2014).
+\textit{Ethereum: A secure decentralised generalised transaction ledger} (Ethereum Yellow Paper).
+\url{https://ethereum.github.io/yellowpaper/paper.pdf}
+
+\end{thebibliography}
+\end{document}

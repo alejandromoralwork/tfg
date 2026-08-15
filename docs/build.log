@@ -1,0 +1,54 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex.fmt)
+ restricted \write18 enabled.
+entering extended mode
+(expose.tex
+LaTeX2e <2025-11-01>
+L3 programming layer <2025-12-24>
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/base\article.cls
+Document Class: article 2025/01/22 v1.4n Standard LaTeX document class
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/base\size11.clo))
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/geometry\geometry.sty
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/graphics\keyval.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/generic/iftex\ifvtex.sty
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/generic/iftex\iftex.sty))
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/geometry\geometry.cfg))
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/base\fontenc.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/base\inputenc.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/lm\lmodern.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/microtype\microtype.sty
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/etoolbox\etoolbox.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/microtype\microtype-pdftex
+.def)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/microtype\microtype.cfg))
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/amsmath\amsmath.sty
+For additional information on amsmath, use the `?' option.
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/amsmath\amstext.sty
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/amsmath\amsgen.sty))
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/amsmath\amsbsy.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/amsmath\amsopn.sty))
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/tools\array.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/tools\tabularx.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/hyperref\hyperref.sty
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/latex/kvsetkeys\kvsetkeys.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/generic/kvdefinekeys\kvdefinekey
+s.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/generic/pdfescape\pdfescape.sty
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/generic/ltxcmds\ltxcmds.sty)
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/generic/pdftexcmds\pdftexcmds.st
+y
+(C:\Users\pc\AppData\Local\Programs\MiKTeX\tex/generic/infwarerr\infwarerr.sty)
+))
+
+! LaTeX Error: File `hycolor.sty' not found.
+
+Type X to quit or <RETURN> to proceed,
+or enter new name. (Default extension: sty)
+
+Enter file name: 
+! Emergency stop.
+<read *> 
+         
+l.128 \RequirePackage
+                     {nameref}[2012/07/28]^^M
+!  ==> Fatal error occurred, no output PDF file produced!
+Transcript written on expose.log.

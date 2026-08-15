@@ -1,0 +1,27 @@
+# --- Hyperliquid L4 dataset (Albers et al., 2026 — https://zenodo.org/records/18184441) ---
+# Too large for GitHub. Re-download and extract with data/download_data.sh.
+data/order_statuses/
+data/trades/
+data/mapdir/
+data/sample/order_statuses/
+data/sample/trades/
+data/sample/mapdir/users.csv
+data/sample/mapdir/value_stats.csv
+data/sample/**/*.gz
+data/*.tar
+data/*.tar.xz
+data/*.log
+data/__pycache__/
+
+# --- Rust build artifacts ---
+target/
+**/target/
+
+# --- Python cache ---
+__pycache__/
+*.pyc
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+*.swp

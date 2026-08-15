@@ -1,0 +1,7 @@
+Limit,0
+Market,1
+Stop Market,2
+Take Profit Market,3
+Take Profit Limit,4
+Stop Limit,5
+Vault Close,6
