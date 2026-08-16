@@ -1,0 +1,12 @@
+[package]
+name = "metrics"
+version = "0.1.0"
+edition = "2021"
+
+# Depends only on `engines::common`'s plain data types (Order, Trade, Side).
+# It never depends on the matching modules (`engines::cda`, `engines::fba`)
+# and calls no engine internals — it only consumes the events an engine
+# produces. That's the boundary that keeps the engines independent of how
+# their output gets turned into thesis metrics.
+[dependencies]
+engines = { path = "../engines" }

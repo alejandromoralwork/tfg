@@ -1,87 +1,76 @@
-use std::collections::{HashMap, BTreeMap};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
+use std::time::Instant;
 use engines::common::{AssetPair, Order, Trade, Side, PRICE_SCALE};
-use engines::fba::{BatchAuctionEngine, SettlementOptimizer, AMMPool, ArbitrageEngine};
+use engines::fba::{BatchAuctionEngine, SettlementOptimizer};
+use metrics::{BatchClearedEvent, EngineKind, IntervalMetrics, MetricsCollector, OrderMessage, TradeEvent, DEPTH_BPS_THRESHOLDS};
 
+// This simulation only ever trades a single asset pair — SOL/USD (see
+// AssetPair::default()) — so there is no per-pair routing anywhere below.
+//
+// FbaSimulator drives the FBA engine AND independently records every order
+// message / trade / batch outcome into a `MetricsCollector`. The engine
+// itself (`BatchAuctionEngine`) has no idea this collector exists — see
+// metrics::collector for that boundary.
 pub struct FbaSimulator {
-    pub reference_ccy: String,
     pub batch_engine: BatchAuctionEngine,
     pub optimizer: SettlementOptimizer,
-    pub arb_engine: ArbitrageEngine,
-    pub amm_pools: HashMap<AssetPair, AMMPool>,
     pub pending_orders: Vec<Order>,
     pub global_order_history: Vec<Order>,
     pub global_trade_history: Vec<Trade>,
     pub order_id_counter: u64,
     pub trade_id_counter: u64,
+    pub metrics: MetricsCollector,
 }
 
 impl FbaSimulator {
-    pub fn new(reference_ccy: &str) -> Self {
-        let mut sim = Self {
-            reference_ccy: reference_ccy.to_string(),
+    pub fn new(interval_width_ns: u64) -> Self {
+        Self {
             batch_engine: BatchAuctionEngine::new(),
             optimizer: SettlementOptimizer::new(),
-            arb_engine: ArbitrageEngine::new(),
-            amm_pools: HashMap::new(),
             pending_orders: Vec::new(),
             global_order_history: Vec::new(),
             global_trade_history: Vec::new(),
             order_id_counter: 1,
             trade_id_counter: 0,
-        };
-        sim.seed_default_pools();
-        sim
-    }
-
-    fn seed_default_pools(&mut self) {
-        let default_assets = vec![
-            ("BTC", 65_000, 10, 650_000), //this are initial prices that we load into the ORACLE, so that if there is no trade history it fills order at this price.
-            ("ETH", 3_500, 100, 350_000),
-            ("SOL", 150, 1_000, 150_000),
-        ];
-        
-        for (base, target_price, reserve_x, reserve_y) in default_assets {
-            let pair = AssetPair::new(base, &self.reference_ccy);
-            let pool = AMMPool::new(pair.clone(), reserve_x, reserve_y * PRICE_SCALE);
-            self.amm_pools.insert(pair.clone(), pool);
-            self.arb_engine.oracle.seed_price(pair.clone(), target_price * PRICE_SCALE);
+            metrics: MetricsCollector::new(EngineKind::Fba, interval_width_ns),
         }
     }
 
-   pub fn add_order(&mut self, side: Side, asset: &str, raw_price: u128, qty: u128, user: String) -> u64 {
-    let pair = AssetPair::new(asset, &self.reference_ccy);
-    
-    // 1. Calculate the internal scaled price first
-    let internal_price = raw_price * PRICE_SCALE;
-
-    if !self.amm_pools.contains_key(&pair) {
-        println!("🌱 [MARKET CREATION] Initializing new pool for {} at {} USDT...", pair.label(), raw_price);
-        
-        // 2. Define a starting liquidity depth (e.g., 100 units of the base asset)
-        let initial_reserve_x = 100;
-        
-        // 3. The quote asset reserve MUST match the price formula: Y = X * Price
-        // We multiply by PRICE_SCALE here to match your existing pool initialization math
-        let initial_reserve_y = initial_reserve_x * raw_price * PRICE_SCALE; 
-        
-        // 4. Create the pool and seed the oracle with the dynamically calculated price
-        let fallback_pool = AMMPool::new(pair.clone(), initial_reserve_x, initial_reserve_y);
-        self.amm_pools.insert(pair.clone(), fallback_pool);
-        self.arb_engine.oracle.seed_price(pair.clone(), internal_price);
+    pub fn metrics_series(&self) -> Vec<IntervalMetrics> {
+        self.metrics.finalize()
     }
 
-    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    pub fn add_order(&mut self, side: Side, raw_price: u128, qty: u128, user: String) -> u64 {
+        let pair = AssetPair::default();
 
-    let order = Order::limit(
-        self.order_id_counter, 
-        user, 
-        pair, 
-        side, 
-        internal_price, 
-        qty, 
-        timestamp
-    );
+        // Calculate the internal scaled price
+        let internal_price = raw_price * PRICE_SCALE;
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        let order = Order::limit(
+            self.order_id_counter,
+            user,
+            pair,
+            side,
+            internal_price,
+            qty,
+            timestamp
+        );
+
+        self.metrics.record_message(OrderMessage {
+            ts: order.ts,
+            oid: order.oid,
+            user_id: order.user_id.clone(),
+            side: order.side(),
+            limit_price: order.limit_price(),
+            quantity: order.orig_sz,
+            accepted: order.is_new_live_order(),
+        });
+
         self.pending_orders.push(order.clone());
         self.global_order_history.push(order);
 
@@ -97,144 +86,163 @@ impl FbaSimulator {
         }
 
         println!("\n🔄 [FBA Window Closed] Computing Uniform Market Clearing...");
-        
-        // 🟢 FIXED: Changed to BTreeMap to guarantee deterministic execution sequence for asset clusters
-        let mut orders_by_pair: BTreeMap<AssetPair, Vec<Order>> = BTreeMap::new();
-        for order in self.pending_orders.drain(..) {
-            orders_by_pair.entry(order.pair.clone()).or_default().push(order);
+        println!("==============================================================");
+
+        let original_orders: Vec<Order> = self.pending_orders.drain(..).collect();
+        let batch_open_ts = original_orders.iter().map(|o| o.ts).min().unwrap_or(0);
+        let batch_close_ts = original_orders.iter().map(|o| o.ts).max().unwrap_or(0);
+
+        for order in original_orders.clone() {
+            self.batch_engine.submit(order);
         }
 
-        for (pair, orders) in orders_by_pair {
-            println!("\n📊 Processing Liquidity Matrix for Cluster: {}", pair.label());
-            println!("==============================================================");
-            
-            let original_orders = orders.clone();
+        // Capture the reference price BEFORE clearing mutates it — this is
+        // what any trades produced by this batch get measured against for
+        // effective-spread purposes (see TradeEvent::reference_price docs).
+        let reference_before = self.batch_engine.last_clearing_price;
 
-            for order in orders {
-                self.batch_engine.submit(order);
-            }
+        let clear_start = Instant::now();
+        let clearing_opt = self.batch_engine.clear();
+        let compute_time = clear_start.elapsed();
 
-            
+        if let Some(mut clearing) = clearing_opt {
+            println!("✅ Uniform Clearing Calculated Successfully!");
+            println!("   Execution Rate (Uniform Price) : {} USDT", crate::display::format_price(clearing.clearing_price));
+            println!("   Total Executed Asset Mass       : {} units", clearing.traded_quantity);
 
-            if let Some(mut clearing) = self.batch_engine.clear_pair(&pair) {
-                println!("✅ Uniform Clearing Calculated Successfully!");
-                println!("   Execution Rate (Uniform Price) : {} USDT", crate::display::format_price(clearing.clearing_price));
-                println!("   Total Executed Asset Mass       : {} units", clearing.traded_quantity);
-                
-                println!("\n📜 Detailed Execution Trade Log:");
-                if clearing.trades.is_empty() {
-                    println!("   (No trades matched within this crossover threshold)");
-                } else {
-                    for trade in &mut clearing.trades {
-                        self.trade_id_counter += 1;
-                        trade.trade_id = self.trade_id_counter;
-                        
-                        println!("   Match ID #{:<3} | {} (Order #{}) bought {} units from {} (Order #{}) @ {} USDT",
-                            trade.trade_id,
-                            trade.buyer_id,
-                            trade.buy_order_id,
-                            trade.quantity,
-                            trade.seller_id,
-                            trade.sell_order_id,
-                            crate::display::format_price(trade.price)
-                        );
-                    }
-                }
-
-                self.global_trade_history.extend(clearing.trades.clone());
-
-                let summary = self.optimizer.optimize_trades(&clearing.trades);
-                println!("\n📦 Graph Settlement Optimization Performance:");
-                println!("   Raw Bilateral Trades Count      : {}", clearing.trades.len());
-                println!("   Compressed Structural Transfers : {}", summary.plan.optimized_transfer_count);
-                
-                let savings = if clearing.trades.len() > summary.plan.optimized_transfer_count {
-                    let total_trades = clearing.trades.len() as f64;
-                    let optimized_transfers = summary.plan.optimized_transfer_count as f64;
-                    ((total_trades - optimized_transfers) / total_trades) * 100.0
-                } else {
-                    0.0
-                };
-                println!("   Blockchain Transaction Savings  : {:.1}%", savings);
-
-                if let Some(pool) = self.amm_pools.get_mut(&pair) {
-                    println!("\n⚖️ Automated Rebalancing Invariant Check:");
-                    if let Some(target) = self.arb_engine.synchronize_amm(pool, &clearing.trades) {
-                        println!("   AMM structural curve realigned to true target: {} USDT", crate::display::format_price(target));
-                    }
-                }
-
-                let mut fills: HashMap<u64, u128> = HashMap::new();
-                for trade in &clearing.trades {
-                    *fills.entry(trade.buy_order_id).or_insert(0) += trade.quantity;
-                    *fills.entry(trade.sell_order_id).or_insert(0) += trade.quantity;
-                }
-
-                let mut residual_orders = Vec::new();
-                for mut order in original_orders {
-                    let filled = fills.get(&order.id).cloned().unwrap_or(0);
-                    if filled >= order.remaining {
-                        order.remaining = 0;
-                    } else {
-                        order.remaining = order.remaining.saturating_sub(filled);
-                    }
-
-                    if order.remaining > 0 {
-                        residual_orders.push(order);
-                    }
-                }
-
-if !residual_orders.is_empty() {
-    if let Some(pool) = self.amm_pools.get_mut(&pair) {
-        let pool_price = pool.price();
-        let oracle_price = self.arb_engine.oracle.get_price(&pair).unwrap_or(pool_price);
-
-        // 1. Calculate absolute difference safely
-        let diff = if pool_price > oracle_price {
-            pool_price.saturating_sub(oracle_price)
-        } else {
-            oracle_price.saturating_sub(pool_price)
-        };
-
-        // 2. Cross-multiplication check: (diff * 100) > (oracle * 5)
-        // This is mathematically equivalent to (diff/oracle) > 0.05 without integer truncation
-        let is_deviation_too_high = oracle_price > 0 && 
-            diff.saturating_mul(100) > oracle_price.saturating_mul(5);
-
-        if is_deviation_too_high {
-            println!("⚠️ SECURITY ALERT: AMM Pool price deviation > 5%. Blocking residual fill.");
-            // Orders stay in 'residual_orders', so they will be pushed back to 'pending_orders' below
-        } else {
-            println!("🌊 Routing Leftover Residual Orders through AMM Pool Curve...");
-            
-            let amm_executed_trades = self.arb_engine.fill_residual_orders(
-                pool, 
-                &mut residual_orders, 
-                &mut self.trade_id_counter
-            );
-            
-            if amm_executed_trades.is_empty() {
-                println!("   No leftover orders satisfied constant-product curve limit constraints.");
+            println!("\n📜 Detailed Execution Trade Log:");
+            if clearing.trades.is_empty() {
+                println!("   (No trades matched within this crossover threshold)");
             } else {
-                for trade in &amm_executed_trades {
-                    let direction_str = if trade.buyer_id == "AMM_POOL" { "SELL" } else { "BUY" };
-                    println!("   [AMM FILL] Match ID #{:<3} | {} routed order to AMM pool (Quantity: {} units @ Effective Rate: {} USDT)", 
-                        trade.trade_id, direction_str, trade.quantity, crate::display::format_price(trade.price));
+                for trade in &mut clearing.trades {
+                    self.trade_id_counter += 1;
+                    trade.trade_id = self.trade_id_counter;
+
+                    println!("   Match ID #{:<3} | {} (Order #{}) bought {} units from {} (Order #{}) @ {} USDT",
+                        trade.trade_id,
+                        trade.buyer_id,
+                        trade.buy_order_id,
+                        trade.quantity,
+                        trade.seller_id,
+                        trade.sell_order_id,
+                        crate::display::format_price(trade.price)
+                    );
                 }
-                self.global_trade_history.extend(amm_executed_trades);
             }
-        }
-    }
-}
+
+            for trade in &clearing.trades {
+                self.metrics.record_trade(TradeEvent {
+                    trade: trade.clone(),
+                    reference_price: reference_before,
+                    // No taker/maker distinction in a uniform-price batch
+                    // auction — see TradeEvent::aggressor_side docs.
+                    aggressor_side: None,
+                });
+            }
+            self.global_trade_history.extend(clearing.trades.clone());
+
+            let summary = self.optimizer.optimize_trades(&clearing.trades);
+            println!("\n📦 Graph Settlement Optimization Performance:");
+            println!("   Raw Bilateral Trades Count      : {}", clearing.trades.len());
+            println!("   Compressed Structural Transfers : {}", summary.plan.optimized_transfer_count);
+
+            let savings = if clearing.trades.len() > summary.plan.optimized_transfer_count {
+                let total_trades = clearing.trades.len() as f64;
+                let optimized_transfers = summary.plan.optimized_transfer_count as f64;
+                ((total_trades - optimized_transfers) / total_trades) * 100.0
+            } else {
+                0.0
+            };
+            println!("   Blockchain Transaction Savings  : {:.1}%", savings);
+
+            // Determine the residual: whatever remains unfilled on the heavier
+            // side of the book at the clearing price. There is no external
+            // liquidity source (e.g. an AMM) to absorb it — it simply stays
+            // unexecuted and rolls over into the next batch window.
+            let mut fills: HashMap<u64, u128> = HashMap::new();
+            for trade in &clearing.trades {
+                *fills.entry(trade.buy_order_id).or_insert(0) += trade.quantity;
+                *fills.entry(trade.sell_order_id).or_insert(0) += trade.quantity;
+            }
+
+            // Depth-within-bps schedule computed from the batch's own order
+            // list, around the clearing price — before it's consumed below.
+            let depth_schedule = crate::depth::depth_schedule(
+                clearing.clearing_price,
+                original_orders.iter().map(|o| {
+                    // Market orders have no limit price; treat them as
+                    // resting exactly at the clearing price (distance 0),
+                    // since they're willing to transact at any price.
+                    (o.limit_price().unwrap_or(clearing.clearing_price), o.side(), o.remaining)
+                }),
+            );
+
+            let mut residual_orders = Vec::new();
+            for mut order in original_orders {
+                let filled = fills.get(&order.oid).cloned().unwrap_or(0);
+                if filled >= order.remaining {
+                    order.remaining = 0;
+                } else {
+                    order.remaining = order.remaining.saturating_sub(filled);
+                }
+
+                if order.remaining > 0 {
+                    residual_orders.push(order);
+                }
+            }
+
+            let best_unfilled_buy = residual_orders.iter()
+                .filter(|o| o.side() == Side::Buy)
+                .filter_map(|o| o.limit_price())
+                .max();
+            let best_unfilled_sell = residual_orders.iter()
+                .filter(|o| o.side() == Side::Sell)
+                .filter_map(|o| o.limit_price())
+                .min();
+            let unexecuted_quantity: u128 = residual_orders.iter().map(|o| o.remaining).sum();
+
+            self.metrics.record_batch(BatchClearedEvent {
+                ts: batch_close_ts,
+                batch_open_ts,
+                clearing_price: Some(clearing.clearing_price),
+                demand_at_price: clearing.demand_at_price,
+                supply_at_price: clearing.supply_at_price,
+                traded_quantity: clearing.traded_quantity,
+                unexecuted_quantity,
+                best_unfilled_buy,
+                best_unfilled_sell,
+                depth_schedule,
+                compute_time,
+            });
+
+            if !residual_orders.is_empty() {
+                println!("\n⏭️  {} order(s) left unexecuted at this clearing price — rolled over to the next window.", residual_orders.len());
                 for order in residual_orders {
                     self.pending_orders.push(order);
                 }
+            }
+        } else {
+            // No clearing price could be determined for this batch (see
+            // BatchAuctionEngine::clear_orders) — still record the attempt so
+            // throughput/clearing-latency account for the wasted computation.
+            let unexecuted_quantity: u128 = original_orders.iter().map(|o| o.remaining).sum();
+            self.metrics.record_batch(BatchClearedEvent {
+                ts: batch_close_ts,
+                batch_open_ts,
+                clearing_price: None,
+                demand_at_price: 0,
+                supply_at_price: 0,
+                traded_quantity: 0,
+                unexecuted_quantity,
+                best_unfilled_buy: None,
+                best_unfilled_sell: None,
+                depth_schedule: [(0, 0); DEPTH_BPS_THRESHOLDS.len()],
+                compute_time,
+            });
 
-            } else {
-                println!("❌ Convergence Failure: No mathematical crossover found inside this batch window.");
-                for order in original_orders {
-                    self.pending_orders.push(order);
-                }
+            println!("❌ Convergence Failure: No mathematical crossover found inside this batch window.");
+            for order in original_orders {
+                self.pending_orders.push(order);
             }
         }
     }

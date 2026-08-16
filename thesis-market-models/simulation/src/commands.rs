@@ -7,12 +7,14 @@ pub enum EngineMode {
 }
 
 pub enum CliCommand {
-    Add { side: Side, asset: String, price: u128, qty: u128, user: String },
+    // This simulation only trades the single default SOL/USD pair, so orders
+    // no longer carry an asset argument.
+    Add { side: Side, price: u128, qty: u128, user: String },
     Engine(EngineMode), // New command variant
     Batch,
-    Amm,
     Clear,
     Log,
+    Metrics,
     Help,
     Exit,
 }
@@ -24,18 +26,17 @@ impl CliCommand {
 
         match parts[0].to_lowercase().as_str() {
             "add" => {
-                if parts.len() < 6 { return None; }
+                if parts.len() < 5 { return None; }
                 let side = match parts[1].to_lowercase().as_str() {
                     "buy" => Side::Buy,
                     "sell" => Side::Sell,
                     _ => return None,
                 };
-                let asset = parts[2].to_uppercase();
-                let price = parts[3].parse::<u128>().ok()?;
-                let qty = parts[4].parse::<u128>().ok()?;
-                let user = parts[5].to_string();
-                
-                Some(CliCommand::Add { side, asset, price, qty, user })
+                let price = parts[2].parse::<u128>().ok()?;
+                let qty = parts[3].parse::<u128>().ok()?;
+                let user = parts[4].to_string();
+
+                Some(CliCommand::Add { side, price, qty, user })
             }
             "engine" => {
                 if parts.len() < 2 { 
@@ -52,9 +53,9 @@ impl CliCommand {
                 }
             }
             "batch" => Some(CliCommand::Batch),
-            "amm" => Some(CliCommand::Amm),
             "clear" => Some(CliCommand::Clear),
             "log" => Some(CliCommand::Log),
+            "metrics" | "stats" => Some(CliCommand::Metrics),
             "help" => Some(CliCommand::Help),
             "exit" | "quit" => Some(CliCommand::Exit),
             _ => None,

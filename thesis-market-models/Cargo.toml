@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "engines",
+    "metrics",
     "simulation"
 ]
 resolver = "2"

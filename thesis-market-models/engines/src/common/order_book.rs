@@ -27,13 +27,13 @@ impl OrderBookState {
 
         let mut trades = Vec::new();
 
-        match order.side {
+        match order.side() {
             Side::Buy => self.match_buy(&mut order, &mut trades),
             Side::Sell => self.match_sell(&mut order, &mut trades),
         }
 
         // Only store remaining limit orders
-        if order.remaining > 0 && matches!(order.kind, OrderKind::Limit { .. }) {
+        if order.remaining > 0 && matches!(order.kind(), OrderKind::Limit { .. }) {
             self.store(order);
         }
 
@@ -45,7 +45,7 @@ impl OrderBookState {
     }
 
     fn store(&mut self, order: Order) {
-        match order.side {
+        match order.side() {
             Side::Buy => self.bids.push(order),
             Side::Sell => self.asks.push(order),
         }
@@ -93,12 +93,12 @@ impl OrderBookState {
         self.asks
             .iter()
             .enumerate()
-            .filter(|(_, order)| order.remaining > 0 && order.participant_id != incoming.participant_id)
-            .filter(|(_, order)| match incoming.kind {
+            .filter(|(_, order)| order.remaining > 0 && order.user_id != incoming.user_id)
+            .filter(|(_, order)| match incoming.kind() {
                 OrderKind::Market => true,
                 OrderKind::Limit { price } => order.limit_price().map_or(false, |resting| resting <= price),
             })
-            .min_by_key(|(_, order)| (order.limit_price().unwrap_or(PRICE_SCALE * 2), order.timestamp, order.id))
+            .min_by_key(|(_, order)| (order.limit_price().unwrap_or(PRICE_SCALE * 2), order.ts, order.oid))
             .map(|(index, _)| index)
     }
 
@@ -106,12 +106,12 @@ impl OrderBookState {
         self.bids
             .iter()
             .enumerate()
-            .filter(|(_, order)| order.remaining > 0 && order.participant_id != incoming.participant_id)
-            .filter(|(_, order)| match incoming.kind {
+            .filter(|(_, order)| order.remaining > 0 && order.user_id != incoming.user_id)
+            .filter(|(_, order)| match incoming.kind() {
                 OrderKind::Market => true,
                 OrderKind::Limit { price } => order.limit_price().map_or(false, |resting| resting >= price),
             })
-            .max_by_key(|(_, order)| (order.limit_price().unwrap_or(0), Reverse(order.timestamp), Reverse(order.id)))
+            .max_by_key(|(_, order)| (order.limit_price().unwrap_or(0), Reverse(order.ts), Reverse(order.oid)))
             .map(|(index, _)| index)
     }
 
@@ -127,14 +127,23 @@ impl OrderBookState {
             pair: self.pair.clone(),
             price,
             quantity,
-            buyer_id: buy.participant_id.clone(),
-            seller_id: sell.participant_id.clone(),
-            buy_order_id: buy.id,
-            sell_order_id: sell.id,
+            buyer_id: buy.user_id.clone(),
+            seller_id: sell.user_id.clone(),
+            buy_order_id: buy.oid,
+            sell_order_id: sell.oid,
+            ts: buy.ts.max(sell.ts),
             trade_tx_hash: None,
             chain_id: None,
         };
         self.next_trade_id += 1;
         trade
+    }
+}
+
+impl Default for OrderBookState {
+    /// This simulation only trades the default SOL/USD pair, so a book can
+    /// always be constructed without specifying one explicitly.
+    fn default() -> Self {
+        Self::new(AssetPair::default())
     }
 }

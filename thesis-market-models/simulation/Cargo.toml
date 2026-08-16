@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 engines = { path = "../engines" }
+metrics = { path = "../metrics" }
 
 [features]
 simulation_logging = []

@@ -156,9 +156,9 @@ mod tests {
     fn optimizer_reduces_cleared_transfer_count() {
         let pair = AssetPair::new("AAA", "BBB");
         let trades = vec![
-            Trade { trade_id: 1, pair: pair.clone(), price: PRICE_SCALE, quantity: 10, buyer_id: "A".into(), seller_id: "B".into(), buy_order_id: 1, sell_order_id: 2, trade_tx_hash: None, chain_id: None },
-            Trade { trade_id: 2, pair: pair.clone(), price: PRICE_SCALE, quantity: 10, buyer_id: "B".into(), seller_id: "C".into(), buy_order_id: 3, sell_order_id: 4, trade_tx_hash: None, chain_id: None },
-            Trade { trade_id: 3, pair: pair.clone(), price: PRICE_SCALE, quantity: 10, buyer_id: "C".into(), seller_id: "A".into(), buy_order_id: 5, sell_order_id: 6, trade_tx_hash: None, chain_id: None },
+            Trade { trade_id: 1, pair: pair.clone(), price: PRICE_SCALE, quantity: 10, buyer_id: "A".into(), seller_id: "B".into(), buy_order_id: 1, sell_order_id: 2, ts: 0, trade_tx_hash: None, chain_id: None },
+            Trade { trade_id: 2, pair: pair.clone(), price: PRICE_SCALE, quantity: 10, buyer_id: "B".into(), seller_id: "C".into(), buy_order_id: 3, sell_order_id: 4, ts: 0, trade_tx_hash: None, chain_id: None },
+            Trade { trade_id: 3, pair: pair.clone(), price: PRICE_SCALE, quantity: 10, buyer_id: "C".into(), seller_id: "A".into(), buy_order_id: 5, sell_order_id: 6, ts: 0, trade_tx_hash: None, chain_id: None },
         ];
 
         let optimizer = SettlementOptimizer::new();

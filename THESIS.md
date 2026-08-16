@@ -1594,3 +1594,28 @@ pandoc THESIS.md -o THESIS.pdf --pdf-engine=xetex
 
 **Output:** `THESIS.pdf` (typeset thesis document)
 
+
+
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{RQ2.3 --- Execution, allocation, latency race, and engine performance metrics.}
+\label{tab:execution}
+\begin{tabularx}{\textwidth}{@{}p{3.3cm} L p{1.1cm}@{}}
+\hline
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data} \\
+\hline
+Executed volume & Matched quantity and notional per interval; number of trades & L1 + trades \\
+Fill rate & Filled quantity divided by submitted quantity, overall and by participant class & L3/L4 \\
+Time to execution & Elapsed time from submission to fill; for the FBA bounded below by the time to the next batch boundary, which quantifies the delay cost of batching & L3 \\
+Trader surplus & $\sum_k |\pi_k - p^{*}| \, q_k$ over executed orders: the gain relative to the submitted limit price & L3/L4 \\
+Order size inflation & Ratio of submitted to filled size per participant over time; the empirical signature of order stuffing under pro-rata & L4 \\
+Order-to-trade ratio & Submitted messages per executed trade; cancellation rate per interval; measures message traffic and quote flickering & L3 \\
+Boundary concentration & Share of order arrivals in the final $x\%$ of the batch interval & L3 \\
+Throughput & Orders processed per second under identical load & control \\
+Clearing latency & Wall-clock time per batch clearing computation and per continuous match & control \\
+Unexecuted residual & Share of batch volume on the heavier side of the book that cannot be matched at the clearing price and remains unexecuted (rolled over or cancelled, per time-in-force) & control \\
+\hline
+\end{tabularx}
+\end{table}

@@ -1,23 +1,21 @@
-amm
 batch
-add buy BTC 65000 2 Alice
-add sell BTC 65000 2 Bob
+add buy 127 2 Alice
+add sell 127 2 Bob
 batch
-add buy ETH 3600 5 Charlie
-add sell ETH 3400 3 Dave
+add buy 128 5 Charlie
+add sell 126 3 Dave
 batch
 clear
 log
-amm
 exit
 
 # 1. Setup liquidity
-add buy BTC 65000 5 Alice
-add sell BTC 65000 3 Alice
+add buy 127 5 Alice
+add sell 127 3 Alice
 
 # 2. Setup counterparties to create cross-netting
-add sell BTC 65000 5 Bob
-add buy BTC 65000 3 Bob
+add sell 127 5 Bob
+add buy 127 3 Bob
 
 # 3. Trigger the Batch
 clear
