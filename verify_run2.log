@@ -1,0 +1,29 @@
+﻿======================================================================
+🚀 Cross-Paradigm Market Research Simulator Core
+   Trading Pair: SOL/USD (this simulation trades a single fixed pair)
+======================================================================
+
+Available Simulation Interaction Inputs:
+  engine <continuous|batch>           - Dynamically flip between matching engine paradigms
+  add <buy|sell> <price|market> <qty> <user> - Submit a limit order (numeric price) or a market order ('market') to the active engine (SOL/USD)
+  batch                               - Inspect active continuous book state or FBA buffer state
+  clear                               - Force close batch window, clear matching equations, and log data
+  load <path> [path...]               - Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine
+  simulate <path|btc|eth|sol> [interval_secs] - Replay real .csv/.gz order-status data (a file/folder, or 'btc'/'eth'/'sol' for data/order_statuses/<coin>/) through BOTH engines, write time-series metrics to output/
+  download <btc|eth|sol|all>          - Fetch that coin's order-status archive from Zenodo and extract it into data/order_statuses/<coin>/, ready for 'simulate <coin>'
+  log                                 - Audit chronological ledger (combined FBA + CDA executed trades)
+  metrics                             - Print core metrics computed so far, for both engines
+  orderbook (alias: ob)                - Print the active engine's orderbook state + its own core metrics, in one view
+  test engine <continuous|batch>      - Run the built-in test checklist against a fresh, isolated instance of that engine
+  help                                - Review configuration tools
+  exit                                - Safely close terminal stream
+
+sim [FBA]> 🚀 Simulating 1 file(s) from '..\data\order_statuses\20251201\sol_00.data.gz', interval=60s ...
+📂 [1/1] ..\data\order_statuses\20251201\sol_00.data.gz
+   ... 250000 records so far
+   ... 500000 records so far
+   ... 750000 records so far
+   ... 1000000 records so far
+   ... 1250000 records so far
+   ... 1500000 records so far
+   ... 1750000 records so far

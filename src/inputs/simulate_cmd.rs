@@ -356,7 +356,29 @@ fn stat_of_f64(series: &[timeseries::IntervalMetrics], f: impl Fn(&timeseries::I
     stat_of(series, |m| Some(f(m)))
 }
 
-fn fmt_stat_row(label: &str, s: &Stat, total: usize) -> String {
+/// Why a metric can legitimately be `n/a` for *every* interval, distinct
+/// from "just happened to have no trades this run" — a bare "n/a" reads
+/// the same in both cases, which is exactly what made the old summary
+/// noisy. `Universal` metrics still show avg/min/max/(n=computable/total)
+/// as before; the other three print a one-line reason instead of three
+/// `n/a`s, and only for the engine(s) the reason actually applies to.
+#[derive(Clone, Copy)]
+enum Scope {
+    Universal,
+    FbaOnly,
+    CdaOnly,
+    /// Structurally uncomputable from this dataset alone, for either
+    /// engine — e.g. needs an external oracle/mark-price feed.
+    NeedsExternalData(&'static str),
+}
+
+fn fmt_stat_row(label: &str, s: &Stat, total: usize, scope: Scope, engine: &str) -> String {
+    match scope {
+        Scope::FbaOnly if engine != "FBA" => return format!("  {label:<32} n/a — FBA-only (no batch window in a CDA)\n"),
+        Scope::CdaOnly if engine != "CDA" => return format!("  {label:<32} n/a — CDA-only (no resting book to measure in FBA's uniform-price batch)\n"),
+        Scope::NeedsExternalData(reason) => return format!("  {label:<32} n/a — {reason}\n"),
+        _ => {}
+    }
     let fmt = |v: Option<f64>| v.map(|x| format!("{x:.4}")).unwrap_or_else(|| "n/a".to_string());
     format!("  {label:<32} avg={:<12} min={:<12} max={:<12} (n={}/{total})\n", fmt(s.avg), fmt(s.min), fmt(s.max), s.n)
 }
@@ -372,42 +394,42 @@ fn stats_section(label: &str, series: &[timeseries::IntervalMetrics]) -> String 
     }
     let total = series.len();
 
-    let rows: Vec<(&str, Stat)> = vec![
-        ("quoted_spread_bps", stat_of(series, |m| m.quoted_spread_bps)),
-        ("depth_at_best", stat_of(series, |m| m.depth_at_best)),
-        ("depth_within_10bps", stat_of(series, |m| m.depth_within_bps[0])),
-        ("depth_within_50bps", stat_of(series, |m| m.depth_within_bps[1])),
-        ("depth_within_100bps", stat_of(series, |m| m.depth_within_bps[2])),
-        ("book_imbalance", stat_of(series, |m| m.book_imbalance)),
-        ("total_book_depth", stat_of(series, |m| m.total_book_depth)),
-        ("effective_spread_bps", stat_of(series, |m| m.effective_spread_bps)),
-        ("realized_spread_bps_1s", stat_of(series, |m| m.realized_spread_bps_1s)),
-        ("realized_spread_bps_5s", stat_of(series, |m| m.realized_spread_bps_5s)),
-        ("realized_spread_bps_30s", stat_of(series, |m| m.realized_spread_bps_30s)),
-        ("price_impact_bps_1s", stat_of(series, |m| m.price_impact_bps_1s)),
-        ("price_impact_bps_5s", stat_of(series, |m| m.price_impact_bps_5s)),
-        ("price_impact_bps_30s", stat_of(series, |m| m.price_impact_bps_30s)),
-        ("amihud_illiquidity", stat_of(series, |m| m.amihud_illiquidity)),
-        ("realized_volatility", stat_of(series, |m| m.realized_volatility)),
-        ("intra_interval_price_dispersion", stat_of(series, |m| m.intra_interval_price_dispersion)),
-        ("pricing_error_bps", stat_of(series, |m| m.pricing_error_bps)),
-        ("executed_volume", stat_of_f64(series, |m| m.executed_volume)),
-        ("executed_notional", stat_of_f64(series, |m| m.executed_notional)),
-        ("vwap", stat_of(series, |m| m.vwap)),
-        ("trader_surplus", stat_of_f64(series, |m| m.trader_surplus)),
-        ("fill_rate", stat_of(series, |m| m.fill_rate)),
-        ("avg_time_to_execution_secs", stat_of(series, |m| m.avg_time_to_execution_secs)),
-        ("order_size_inflation", stat_of(series, |m| m.order_size_inflation)),
-        ("order_to_trade_ratio", stat_of(series, |m| m.order_to_trade_ratio)),
-        ("boundary_concentration", stat_of(series, |m| m.boundary_concentration)),
-        ("throughput_orders_per_sec", stat_of(series, |m| m.throughput_orders_per_sec)),
-        ("avg_clearing_latency_micros", stat_of(series, |m| m.avg_clearing_latency_micros)),
-        ("unexecuted_residual_share", stat_of(series, |m| m.unexecuted_residual_share)),
+    let rows: Vec<(&str, Stat, Scope)> = vec![
+        ("quoted_spread_bps", stat_of(series, |m| m.quoted_spread_bps), Scope::Universal),
+        ("depth_at_best", stat_of(series, |m| m.depth_at_best), Scope::Universal),
+        ("depth_within_10bps", stat_of(series, |m| m.depth_within_bps[0]), Scope::Universal),
+        ("depth_within_50bps", stat_of(series, |m| m.depth_within_bps[1]), Scope::Universal),
+        ("depth_within_100bps", stat_of(series, |m| m.depth_within_bps[2]), Scope::Universal),
+        ("book_imbalance", stat_of(series, |m| m.book_imbalance), Scope::CdaOnly),
+        ("total_book_depth", stat_of(series, |m| m.total_book_depth), Scope::CdaOnly),
+        ("effective_spread_bps", stat_of(series, |m| m.effective_spread_bps), Scope::Universal),
+        ("realized_spread_bps_1s", stat_of(series, |m| m.realized_spread_bps_1s), Scope::Universal),
+        ("realized_spread_bps_5s", stat_of(series, |m| m.realized_spread_bps_5s), Scope::Universal),
+        ("realized_spread_bps_30s", stat_of(series, |m| m.realized_spread_bps_30s), Scope::Universal),
+        ("price_impact_bps_1s", stat_of(series, |m| m.price_impact_bps_1s), Scope::Universal),
+        ("price_impact_bps_5s", stat_of(series, |m| m.price_impact_bps_5s), Scope::Universal),
+        ("price_impact_bps_30s", stat_of(series, |m| m.price_impact_bps_30s), Scope::Universal),
+        ("amihud_illiquidity", stat_of(series, |m| m.amihud_illiquidity), Scope::Universal),
+        ("realized_volatility", stat_of(series, |m| m.realized_volatility), Scope::Universal),
+        ("intra_interval_price_dispersion", stat_of(series, |m| m.intra_interval_price_dispersion), Scope::Universal),
+        ("pricing_error_bps", stat_of(series, |m| m.pricing_error_bps), Scope::NeedsExternalData("requires an external oracle/mark-price feed; not in this dataset (see IntervalMetrics::pricing_error_bps)")),
+        ("executed_volume", stat_of_f64(series, |m| m.executed_volume), Scope::Universal),
+        ("executed_notional", stat_of_f64(series, |m| m.executed_notional), Scope::Universal),
+        ("vwap", stat_of(series, |m| m.vwap), Scope::Universal),
+        ("trader_surplus", stat_of_f64(series, |m| m.trader_surplus), Scope::Universal),
+        ("fill_rate", stat_of(series, |m| m.fill_rate), Scope::Universal),
+        ("avg_time_to_execution_secs", stat_of(series, |m| m.avg_time_to_execution_secs), Scope::Universal),
+        ("order_size_inflation", stat_of(series, |m| m.order_size_inflation), Scope::Universal),
+        ("order_to_trade_ratio", stat_of(series, |m| m.order_to_trade_ratio), Scope::Universal),
+        ("boundary_concentration", stat_of(series, |m| m.boundary_concentration), Scope::FbaOnly),
+        ("throughput_orders_per_sec", stat_of(series, |m| m.throughput_orders_per_sec), Scope::Universal),
+        ("avg_clearing_latency_micros", stat_of(series, |m| m.avg_clearing_latency_micros), Scope::Universal),
+        ("unexecuted_residual_share", stat_of(series, |m| m.unexecuted_residual_share), Scope::FbaOnly),
     ];
 
     let mut out = format!("\n{label} stats (avg/min/max across intervals where computable; n = computable/total intervals):\n");
-    for (name, stat) in &rows {
-        out.push_str(&fmt_stat_row(name, stat, total));
+    for (name, stat, scope) in &rows {
+        out.push_str(&fmt_stat_row(name, stat, total, *scope, label));
     }
     out
 }
