@@ -1,0 +1,10 @@
+[package]
+name = "market_sim"
+version = "0.1.0"
+edition = "2021"
+
+# Cargo.toml lives directly in this folder (not a level above it), so the
+# binary entry point is `main.rs` here, not the default `src/main.rs`.
+[[bin]]
+name = "market_sim"
+path = "main.rs"

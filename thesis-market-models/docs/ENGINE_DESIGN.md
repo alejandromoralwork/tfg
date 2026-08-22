@@ -126,9 +126,10 @@ sequential matching loop — no separate rationing step is needed.
   per-pair bucketing.
 - **No general LP solver.** For a single asset the volume-maximizing price
   has a closed-form solution (the candidate scan above), so no external
-  linear-programming dependency is needed at runtime.
-  `engines/src/fba/lp_encoder.rs` still encodes the same problem as a formal
-  LP for the theoretical write-up, but the working engine doesn't call it.
+  linear-programming dependency is needed at runtime. An earlier LP-encoder
+  module existed purely for a theoretical write-up and was never called by
+  the working engine; it has since been removed as dead code — the
+  closed-form scan above is the only clearing-price implementation.
 
 ---
 

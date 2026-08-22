@@ -51,8 +51,9 @@ impl FbaSimulator {
             .unwrap()
             .as_nanos() as u64;
 
+        let assigned_id = self.order_id_counter;
         let order = Order::limit(
-            self.order_id_counter,
+            assigned_id,
             user,
             pair,
             side,
@@ -60,7 +61,18 @@ impl FbaSimulator {
             qty,
             timestamp
         );
+        self.order_id_counter += 1;
 
+        self.ingest(order);
+        assigned_id
+    }
+
+    /// Records the message and queues the order — the part of `add_order`
+    /// that doesn't care how the `Order` was built. Also the entry point
+    /// used by the `load` CLI command (see `loader::load_order_status_csv`)
+    /// to feed real historical orders (real `oid`/`ts`/`status_id`) through
+    /// the exact same metrics/matching path, without duplicating this logic.
+    pub fn ingest(&mut self, order: Order) {
         self.metrics.record_message(OrderMessage {
             ts: order.ts,
             oid: order.oid,
@@ -73,10 +85,6 @@ impl FbaSimulator {
 
         self.pending_orders.push(order.clone());
         self.global_order_history.push(order);
-
-        let assigned_id = self.order_id_counter;
-        self.order_id_counter += 1;
-        assigned_id
     }
 
     pub fn clear_window(&mut self) {

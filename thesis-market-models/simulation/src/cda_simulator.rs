@@ -40,6 +40,16 @@ impl CdaSimulator {
 
         let order = Order::limit(self.order_id_counter, user, pair, side, internal_price, qty, timestamp);
 
+        self.ingest(order)
+    }
+
+    /// Records the message, matches/rests the order, and snapshots the
+    /// book — the part of `add_order` that doesn't care how the `Order`
+    /// was built. Also the entry point used by the `load` CLI command (see
+    /// `loader::load_order_status_csv`) to feed real historical orders
+    /// (real `oid`/`ts`/`status_id`) through the exact same
+    /// metrics/matching path, without duplicating this logic.
+    pub fn ingest(&mut self, order: Order) -> Vec<Trade> {
         self.metrics.record_message(OrderMessage {
             ts: order.ts,
             oid: order.oid,

@@ -6,6 +6,7 @@ mod simulator;
 mod cda_simulator;
 mod depth;
 mod display;
+mod loader;
 
 
 use crate::commands::{CliCommand, EngineMode};
@@ -82,6 +83,34 @@ fn main() {
 
             Some(CliCommand::Metrics) => display::render_metrics(&sim, &cda),
 
+            Some(CliCommand::Load { paths }) => {
+                let mut total = 0usize;
+                let mut live = 0usize;
+
+                for path in &paths {
+                    match loader::load_order_status_csv(path) {
+                        Ok(orders) => {
+                            for order in orders {
+                                total += 1;
+                                if order.is_new_live_order() {
+                                    live += 1;
+                                }
+                                match current_mode {
+                                    EngineMode::Batch => sim.ingest(order),
+                                    EngineMode::Continuous => { cda.ingest(order); }
+                                }
+                            }
+                        }
+                        Err(err) => println!("❌ Failed to load '{}': {}", path, err),
+                    }
+                }
+
+                println!(
+                    "📥 Loaded {} order-status record(s) ({} live) into the {} engine.",
+                    total, live, mode_label
+                );
+            }
+
             Some(CliCommand::Help)  => print_help(),
 
             Some(CliCommand::Exit)  => {
@@ -100,6 +129,7 @@ fn print_help() {
     println!("  add <buy|sell> <price> <qty> <user> - Commit limit liquidity parameters to active engine (SOL/USD)");
     println!("  batch                               - Inspect active continuous book state or FBA buffer state");
     println!("  clear                               - Force close batch window, clear matching equations, and log data");
+    println!("  load <path> [path...]               - Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine");
     println!("  log                                 - Audit chronological ledger (System wide orders and P2P clearing trades)");
     println!("  metrics                             - Print the RQ2 metric time series computed so far, for both engines");
     println!("  help                                - Review configuration tools");

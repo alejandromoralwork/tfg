@@ -15,6 +15,9 @@ pub enum CliCommand {
     Clear,
     Log,
     Metrics,
+    // One or more order-status CSV paths (see data/SCHEMA.md's PREVIEW
+    // format) to replay into whichever engine is currently active.
+    Load { paths: Vec<String> },
     Help,
     Exit,
 }
@@ -56,6 +59,14 @@ impl CliCommand {
             "clear" => Some(CliCommand::Clear),
             "log" => Some(CliCommand::Log),
             "metrics" | "stats" => Some(CliCommand::Metrics),
+            "load" => {
+                if parts.len() < 2 {
+                    println!(" Usage: load <path> [path...]");
+                    return None;
+                }
+                let paths = parts[1..].iter().map(|s| s.to_string()).collect();
+                Some(CliCommand::Load { paths })
+            }
             "help" => Some(CliCommand::Help),
             "exit" | "quit" => Some(CliCommand::Exit),
             _ => None,

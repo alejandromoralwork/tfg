@@ -98,6 +98,9 @@ impl BatchAuctionEngine {
         // prior clearing price to anchor on: there is no basis to discover a
         // price from, so this batch simply does not execute.
         let (clearing_price, demand_at_price, supply_at_price) = self.select_price(orders, candidate_prices)?;
+        //please to check the file I have about auction price calculation
+
+
 
         let mut buys = self.eligible_orders(orders, Side::Buy, clearing_price);
         let mut sells = self.eligible_orders(orders, Side::Sell, clearing_price);
@@ -106,6 +109,7 @@ impl BatchAuctionEngine {
         let mut buy_index = 0usize;
         let mut sell_index = 0usize;
 
+        //loop through the eligible buy and sell orders to match them and create trades
         while buy_index < buys.len() && sell_index < sells.len() {
             let fill = buys[buy_index].remaining.min(sells[sell_index].remaining);
             if fill == 0 {
