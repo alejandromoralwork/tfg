@@ -13,9 +13,19 @@ data/*.tar.xz
 data/*.log
 data/__pycache__/
 
+# --- `download` command's own data (BTC/ETH/SOL order-status archives,
+# fetched on demand by src/inputs/download_cmd.rs) — separate from the
+# top-level data/ tree above, entirely downloaded artifacts, nothing here
+# is ever meant to be committed ---
+src/data/
+src/output/*.csv
+
 # --- Rust build artifacts ---
 target/
 **/target/
+
+# --- `simulate` command output (generated, can be large) ---
+output/
 
 # --- Python cache ---
 __pycache__/

@@ -8,3 +8,10 @@ edition = "2021"
 [[bin]]
 name = "market_sim"
 path = "main.rs"
+
+# First (and only) external dependency this project has: gzip decoding for
+# `simulate`'s real-data intake (data/order_statuses/**/*.gz). Hand-writing
+# DEFLATE is not a reasonable alternative. rust_backend = miniz_oxide, pure
+# Rust, no C/zlib toolchain needed.
+[dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

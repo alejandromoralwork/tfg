@@ -116,6 +116,22 @@ fn check_price_match(taker_kind: &OrderKind, maker_kind: &OrderKind, taker_side:
     }
 }
 
+/// Sort key for `bids`: ascending order on this key gives price
+/// DESCENDING (best/highest bid first, via `Reverse`), then ts ascending,
+/// then oid ascending — identical ordering to the old
+/// `p_b.cmp(&p_a).then(ts).then(oid)` comparator, just expressed as a key
+/// so `partition_point`/binary search can use it directly.
+fn bid_sort_key(o: &Order) -> (std::cmp::Reverse<u128>, u64, u64) {
+    (std::cmp::Reverse(o.limit_price().unwrap_or(0)), o.ts, o.oid)
+}
+
+/// Sort key for `asks`: ascending on this key gives price ascending
+/// (best/lowest ask first), then ts ascending, then oid ascending —
+/// identical ordering to the old `p_a.cmp(&p_b).then(ts).then(oid)`.
+fn ask_sort_key(o: &Order) -> (u128, u64, u64) {
+    (o.limit_price().unwrap_or(u128::MAX), o.ts, o.oid)
+}
+
 impl CdaOrderBook {
     pub fn new() -> Self {
         Self {
@@ -193,12 +209,18 @@ impl CdaOrderBook {
                 }
 
                 if order.remaining > 0 && matches!(order.kind(), OrderKind::Limit { .. }) {
-                    self.bids.push(order);
-                    self.bids.sort_by(|a, b| {
-                        let p_a = a.limit_price().unwrap_or(0);
-                        let p_b = b.limit_price().unwrap_or(0);
-                        p_b.cmp(&p_a).then_with(|| a.ts.cmp(&b.ts)).then_with(|| a.oid.cmp(&b.oid))//sort by price descending, then time ascending, then order id ascending
-                    });
+                    // Binary-search for the insertion point rather than
+                    // push+full-sort — `bids` is already sorted, so this
+                    // needs only O(log n) comparisons instead of
+                    // re-comparing the entire book on every single
+                    // incoming order. At real-data scale (hundreds of
+                    // thousands of resting orders) the O(n log n) full
+                    // sort made `submit` effectively quadratic overall —
+                    // this doesn't change what order the book ends up in,
+                    // only how cheaply it gets there.
+                    let key = bid_sort_key(&order);
+                    let idx = self.bids.partition_point(|o| bid_sort_key(o) < key);
+                    self.bids.insert(idx, order);
                 }
             }
             Side::Sell => {
@@ -239,12 +261,10 @@ impl CdaOrderBook {
                 }
 
                 if order.remaining > 0 && matches!(order.kind(), OrderKind::Limit { .. }) {
-                    self.asks.push(order);
-                    self.asks.sort_by(|a, b| {
-                        let p_a = a.limit_price().unwrap_or(u128::MAX);
-                        let p_b = b.limit_price().unwrap_or(u128::MAX);
-                        p_a.cmp(&p_b).then_with(|| a.ts.cmp(&b.ts)).then_with(|| a.oid.cmp(&b.oid))
-                    });
+                    // Same binary-search insertion as the bid side above.
+                    let key = ask_sort_key(&order);
+                    let idx = self.asks.partition_point(|o| ask_sort_key(o) < key);
+                    self.asks.insert(idx, order);
                 }
             }
         }

@@ -392,6 +392,7 @@ pub fn run_fba_tests() -> Vec<TestCase> {
         fba_empty_batch_no_clear(),
         fba_simple_full_match(),
         fba_rationing_price_time_priority(),
+        fba_market_order_queues_then_clears_at_uniform_price(),
         fba_tie_no_history_picks_lower_price(),
         fba_all_market_no_history_preserves_orders(),
         fba_all_market_with_history_still_rolls_over(),
@@ -465,6 +466,57 @@ fn fba_rationing_price_time_priority() -> TestCase {
             result.clearing_price,
             result.traded_quantity,
             result.trades.iter().map(|t| (t.buyer_id.clone(), t.quantity)).collect::<Vec<_>>(),
+            book.pending_orders.iter().map(|o| (o.user_id.clone(), o.remaining)).collect::<Vec<_>>()
+        ),
+    )
+}
+
+/// Regression test for a real point of user confusion: a market order
+/// added to an FBA batch does NOT execute on `submit` — it only queues,
+/// exactly like a limit order, and waits for `clear()` like everything
+/// else in the batch. Once `clear()` runs, the market order gets top
+/// matching priority (`order_priority` gives it `(0, 0)`, ahead of every
+/// limit order) and walks the cheapest resting sells first.
+///
+/// Also pins down something easy to get wrong by eyeballing real data
+/// alone (as happened live: the sample data's resting sells all happened
+/// to share one price, so it wasn't visible from the CLI output alone
+/// whether a trade prices at the uniform clearing price or at each
+/// maker's own price — they looked identical by coincidence). Here S1@100
+/// and S2@105 are deliberately DIFFERENT prices, so this test can prove
+/// both trades print at the single uniform clearing price (105 — the
+/// volume-maximizing candidate, since it lets S2's extra supply in), not
+/// each maker's own resting price the way CDA would.
+fn fba_market_order_queues_then_clears_at_uniform_price() -> TestCase {
+    let mut book = FbaOrderBook::new();
+    book.submit(limit(1, "S1", Side::Sell, 100, 8, 1));
+    book.submit(limit(2, "S2", Side::Sell, 105, 20, 1));
+
+    let trades_before_clear = book.executed_trades.len();
+    book.submit(market(3, "Buyer", Side::Buy, 12, 2));
+    let queued_without_executing = book.executed_trades.len() == trades_before_clear && book.pending_orders.len() == 3;
+
+    let Some(result) = book.clear() else {
+        return check("fba_market_order_queues_then_clears_at_uniform_price", false, "clear() returned None, expected a match at 105");
+    };
+
+    let ok = queued_without_executing
+        && result.clearing_price == 105
+        && result.traded_quantity == 12
+        && result.trades.len() == 2
+        && result.trades[0].seller_id == "S1" && result.trades[0].quantity == 8 && result.trades[0].price == 105
+        && result.trades[1].seller_id == "S2" && result.trades[1].quantity == 4 && result.trades[1].price == 105
+        && book.pending_orders.len() == 1
+        && book.pending_orders[0].user_id == "S2"
+        && book.pending_orders[0].remaining == 16;
+    check(
+        "fba_market_order_queues_then_clears_at_uniform_price",
+        ok,
+        format!(
+            "queued_without_executing={queued_without_executing} price={} qty={} trades={:?} pending={:?}",
+            result.clearing_price,
+            result.traded_quantity,
+            result.trades.iter().map(|t| (t.seller_id.clone(), t.quantity, t.price)).collect::<Vec<_>>(),
             book.pending_orders.iter().map(|o| (o.user_id.clone(), o.remaining)).collect::<Vec<_>>()
         ),
     )
