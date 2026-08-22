@@ -93,10 +93,10 @@ impl FbaOrderBook {
 
         let candidates = self.candidate_prices(&orders);
         let Some((clearing_price, demand_at_price, supply_at_price)) = self.select_price(&orders, candidates) else {
-            // No candidate price to anchor on (e.g. an all-market-order
-            // batch with no price history yet) — nothing executes. Put the
-            // batch back rather than silently dropping it: `orders` was
-            // already drained out of `self.pending_orders` above via
+            // No candidate price at all (e.g. an all-market-order batch —
+            // see `candidate_prices`) — nothing executes this round.
+            // Put the batch back rather than silently dropping it: `orders`
+            // was already drained out of `self.pending_orders` above via
             // `mem::take`, so without this it would just vanish.
             self.pending_orders = orders;
             return None;
@@ -193,18 +193,19 @@ impl FbaOrderBook {
     /// Candidate clearing prices are exactly the submitted limit prices: the
     /// demand/supply step functions only change value at those points, so
     /// the volume-maximizing price is always achievable at one of them.
+    ///
+    /// A batch with no limit orders at all (every order in it happens to be
+    /// a market order) has no price information of its own to clear at —
+    /// this deliberately does NOT anchor on `last_clearing_price` to
+    /// invent one. Better to do nothing this round: an empty candidate set
+    /// makes `select_price` find nothing, so `clear()` rolls the whole
+    /// batch into `pending_orders` for the next batch instead of pricing
+    /// market orders off of what may be stale history.
     fn candidate_prices(&self, orders: &[Order]) -> BTreeSet<Price> {
         let mut candidates = BTreeSet::new();
         for order in orders {
             if let Some(price) = order.limit_price() {
                 candidates.insert(price);
-            }
-        }
-        if candidates.is_empty() {
-            // All-market-order batch: no price info of its own, anchor on
-            // the last price this book actually cleared a trade at.
-            if let Some(last_price) = self.last_clearing_price {
-                candidates.insert(last_price);
             }
         }
         candidates

@@ -1,31 +1,95 @@
 //! Continuous Double Auction: every order is matched (or rested) the
-//! instant it arrives, against a live resting book of bids/asks. Ported
-//! from the inline matching logic proven out in the earlier
-//! `thesis-market-models` workspace — no separate shared "orderbook"
-//! abstraction, this engine just walks its own `bids`/`asks` directly.
+//! instant it arrives, against a live resting book of bids/asks.
+// Orderbook struct carries the live resting book, executed trades, 
+// and metrics so that module metrics can calculate the metrics at running time on each snapshot.
 
 use crate::types::{Amount, EngineKind, Order, OrderKind, Price, Side, Trade, PRICE_SCALE};
 
 /// CDA's own orderbook: the live resting bids/asks, this engine's full
 /// trade history, and the running state its own metric methods read from.
+
 pub struct CdaOrderBook {
     pub bids: Vec<Order>,
     pub asks: Vec<Order>,
     pub executed_trades: Vec<Trade>,
     next_trade_id: u64,
 
-    // Cumulative quantity ever submitted as live demand.
+    // ---- Bookkeeping for fill_rate() = total_filled_qty / total_submitted_qty ----
+    //
+    // total_submitted_qty: every live order that ever entered this book
+    // adds its OWN quantity here, regardless of side. A buy for 6 and a
+    // sell for 6 add 6 + 6 = 12 to this total, not 6 — each order's
+    // demand/supply is counted independently, the same way a trader would
+    // count "how much volume has been thrown at this book in total."
+    //
+    // total_filled_qty: every time a trade of quantity `q` executes, it
+    // fills `q` worth of the buy order's demand AND `q` worth of the sell
+    // order's supply — two separate quantities got satisfied, matching
+    // the two separate quantities total_submitted_qty counted for them.
+    // So each trade adds `q` twice here (`fill_qty * 2` at the call
+    // sites), once per side, to stay on the same footing as
+    // total_submitted_qty. If it only added `q` once, a book where
+    // *everything* submitted eventually got fully matched would still
+    // only reach fill_rate = 0.5, not 1.0.
+    //
+    // Worked example (see `cda_market_order_partial_liquidity_fill_rate`
+    // in inputs/test_suite.rs for this as a real, running test):
+    //   1. Jesus submits: sell 6 SOL @130 (limit)         total_submitted_qty:  0 -> 6
+    //      Nothing resting to match against -> it just rests, unfilled so far.
+    //   2. Alejandro submits:   buy  6 SOL (market order)        total_submitted_qty:  6 -> 12
+    //      Alejandro's order fully matches Jesus's resting sell -> ONE trade, qty 6.
+    //      That trade filled 6 of Jesus's supply AND 6 of Alejandro's demand:
+    //                                                       total_filled_qty:    0 -> 6 (Jesus's side) -> 12 (Alejandro's side)
+    //   3. Alvaro submits:   buy  3 SOL (market order)        total_submitted_qty: 12 -> 15
+    //      Jesus's ask is gone, nothing left to match -> Alvaro's order finds
+    //      NO liquidity. Market orders never rest (see `submit` below), so
+    //      it doesn't sit on the book either — it just vanishes.
+    //                                                       total_filled_qty:    stays 12
+    //
+    //   fill_rate = total_filled_qty / total_submitted_qty = 12 / 15 = 0.8
+    //   — correctly says Jesus and Alejandro's orders fully filled, but Alvaro's 3
+    //   units never traded.
+    //
+    // Why not derive this instead of tracking it separately? The tempting
+    // shortcut is `filled = total_submitted_qty - still_resting_qty`
+    // (`depth_at_best()`). That's exactly what `FbaOrderBook` does, and
+    // it's correct there because nothing in FBA ever disappears without
+    // either matching or staying queued for the next batch. It's WRONG
+    // here: in step 3 above, Alvaro's order never rests, so it would vanish
+    // from both sides of that subtraction — not counted as "still
+    // resting," but also never actually filled — silently inflating
+    // fill_rate to 12/12 = 1.0 instead of the correct 0.8. 
+    // Tracking total_filled_qty directly, incremented at the
+    // moment each trade happens, avoids that trap entirely.
+
     total_submitted_qty: Amount,
-    // Cumulative quantity actually matched, counted once per side (so a
-    // trade of qty `q` adds `2*q` — `q` toward the buy order's own
-    // fulfillment, `q` toward the sell order's — matching how
-    // `total_submitted_qty` counts each order's quantity independently of
-    // its side). Tracked directly rather than inferred as
-    // "submitted - still resting": a market order that finds no (or only
-    // partial) liquidity never rests, so it would otherwise vanish from
-    // that subtraction without ever counting as unfilled.
     total_filled_qty: Amount,
 }
+
+/// Picks the price a trade executes at. The standard continuous-matching
+/// convention: whoever posted liquidity first sets the price, and an
+/// incoming order's own price only ever decides whether it's eligible to
+/// cross — never what it pays. This is also
+/// what makes CDA's pricing different from FBA's, here every trade can
+/// print at a different price (whatever each maker posted), where FBA
+/// forces every trade in a batch to the same uniform clearing price.
+///
+/// `OrderKind::Limit { price } => *price` — correct and the only path
+/// that's actually reachable: the maker's own posted price.
+///
+/// `OrderKind::Market => PRICE_SCALE` — this branch exists only so the
+/// match is exhaustive; it can never actually run. A market order is
+/// never rested (see `submit` below: only `OrderKind::Limit` orders ever
+/// get pushed into `self.bids`/`self.asks`), so `best_ask`/`best_bid` —
+/// and therefore whatever gets passed into this function — can never BE a
+/// `Market` order. `PRICE_SCALE` here isn't a real price (it's the raw
+/// fixed-point value for "1.000000", with no relation to where the
+/// market is actually trading); it's a placeholder that happens to type-
+/// check. If some future change ever let a market order rest, this
+/// function would silently start returning that meaningless placeholder
+/// as a real trade price instead of failing loudly — worth hardening
+/// (e.g. `unreachable!()`) if that invariant ever becomes less obviously
+/// true than it is today.
 
 fn get_price(kind: &OrderKind) -> Price {
     match kind {
@@ -34,7 +98,7 @@ fn get_price(kind: &OrderKind) -> Price {
     }
 }
 
-/// Whether an incoming order (taker) can cross a resting order (maker) at
+/// Whether an incoming order (/taker) can cross a resting order (maker) at
 /// the maker's price. A market order on either side always crosses. The
 /// crossing direction depends on which side the taker is on: a buy
 /// crosses a resting ask when it's willing to pay at least the ask's
@@ -70,10 +134,10 @@ impl CdaOrderBook {
     /// `self.executed_trades`).
     pub fn submit(&mut self, mut order: Order) -> Vec<Trade> {
         // A cancellation removes a still-resting order by oid (see
-        // `Order::is_cancellation` for why `filled` events are
+        // `Order::is_cancellation` but `filled` events are
         // deliberately NOT handled the same way — this simulation's CDA
         // matching decides fills independently of whatever Hyperliquid's
-        // own engine did).
+        // own engine did). 
         if order.is_cancellation() {
             self.cancel(order.oid);
             return Vec::new();
@@ -90,13 +154,15 @@ impl CdaOrderBook {
 
         match order.side() {
             Side::Buy => {
+
+                //loop until ask side is empty or order is fully filled unless no match then stop
                 while !self.asks.is_empty() && order.remaining > 0 {
-                    let best_ask = &mut self.asks[0];
+                    let best_ask = &mut self.asks[0];//is a sorted vector, so the first element is the best ask
                     if !check_price_match(&order.kind(), &best_ask.kind(), Side::Buy) {
                         break;
-                    }
+                    } // if best ask and the incoming buy order do not match, break the loop
 
-                    let execution_price = get_price(&best_ask.kind());
+                    let execution_price = get_price(&best_ask.kind()); //kind() fun is called becausse get_price expects an OrderKind, and best_ask is an Order, so we need to get the kind of the best_ask order
                     let fill_qty = order.remaining.min(best_ask.remaining);
                     if fill_qty == 0 {
                         break;
@@ -131,7 +197,7 @@ impl CdaOrderBook {
                     self.bids.sort_by(|a, b| {
                         let p_a = a.limit_price().unwrap_or(0);
                         let p_b = b.limit_price().unwrap_or(0);
-                        p_b.cmp(&p_a).then_with(|| a.ts.cmp(&b.ts)).then_with(|| a.oid.cmp(&b.oid))
+                        p_b.cmp(&p_a).then_with(|| a.ts.cmp(&b.ts)).then_with(|| a.oid.cmp(&b.oid))//sort by price descending, then time ascending, then order id ascending
                     });
                 }
             }

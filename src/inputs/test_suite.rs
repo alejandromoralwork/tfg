@@ -394,7 +394,7 @@ pub fn run_fba_tests() -> Vec<TestCase> {
         fba_rationing_price_time_priority(),
         fba_tie_no_history_picks_lower_price(),
         fba_all_market_no_history_preserves_orders(),
-        fba_all_market_with_history_anchors(),
+        fba_all_market_with_history_still_rolls_over(),
         fba_non_live_order_filtered(),
         fba_cancellation_removes_pending_order(),
         fba_cancellation_of_unknown_oid_is_harmless(),
@@ -510,7 +510,16 @@ fn fba_all_market_no_history_preserves_orders() -> TestCase {
     )
 }
 
-fn fba_all_market_with_history_anchors() -> TestCase {
+/// An all-market-order batch never clears — not even when
+/// `last_clearing_price` exists. `candidate_prices` deliberately doesn't
+/// anchor on stale history to invent a price for market orders; instead
+/// the whole batch rolls into `pending_orders` for the next one, same as
+/// `fba_all_market_no_history_preserves_orders`. This test exists
+/// specifically to prove that having history present doesn't change that
+/// outcome — it used to (see git history), which was a bug: pricing
+/// market orders off of whatever the market happened to be doing several
+/// batches ago is exactly the kind of "guessing" clearing should never do.
+fn fba_all_market_with_history_still_rolls_over() -> TestCase {
     let mut book = FbaOrderBook::new();
     book.submit(limit(1, "A", Side::Buy, 100, 5, 1));
     book.submit(limit(2, "B", Side::Sell, 100, 5, 1));
@@ -518,15 +527,18 @@ fn fba_all_market_with_history_anchors() -> TestCase {
 
     book.submit(market(3, "C", Side::Buy, 8, 2));
     book.submit(market(4, "D", Side::Sell, 8, 2));
-    let Some(result) = book.clear() else {
-        return check("fba_all_market_with_history_anchors", false, "clear() returned None, expected it to anchor on last_clearing_price");
-    };
+    let result = book.clear();
 
-    let ok = result.clearing_price == 100 && result.traded_quantity == 8 && result.trades.len() == 1;
+    let ok = result.is_none() && book.last_clearing_price == Some(100) && book.pending_orders.len() == 2;
     check(
-        "fba_all_market_with_history_anchors",
+        "fba_all_market_with_history_still_rolls_over",
         ok,
-        format!("price={} qty={} trades={}", result.clearing_price, result.traded_quantity, result.trades.len()),
+        format!(
+            "result_is_some={} last_clearing_price={:?} pending={}",
+            result.is_some(),
+            book.last_clearing_price,
+            book.pending_orders.len()
+        ),
     )
 }
 
