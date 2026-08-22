@@ -35,10 +35,32 @@ fn market(oid: u64, user: &str, side: Side, qty: u128, ts: u64) -> Order {
     Order::market(oid, user, side, qty, ts)
 }
 
-/// A canceled order (status_id = 2) — should never enter either engine.
+/// A canceled order (status_id = 2) — should never enter either engine as
+/// a resting/pending order itself, though (since this session's
+/// cancellation fix) it now also carries a real side effect: it cancels
+/// any existing live order sharing its `oid`.
 fn non_live(oid: u64, user: &str, side: Side, price: u128, qty: u128, ts: u64) -> Order {
     let mut o = Order::limit(oid, user, side, price, qty, ts);
     o.status_id = 2;
+    o
+}
+
+/// A lifecycle event carrying `oid` with a cancellation-type status_id
+/// (`canceled` = 2, one of the 8 codes `Order::is_cancellation` matches).
+/// Other fields are irrelevant — only `oid` and `status_id` matter to
+/// `FbaOrderBook::cancel`/`CdaOrderBook::cancel`.
+fn cancel_event(oid: u64, ts: u64) -> Order {
+    let mut o = Order::limit(oid, "cancel-src", Side::Buy, 0, 0, ts);
+    o.status_id = 2;
+    o
+}
+
+/// A lifecycle event carrying `oid` with the `filled` status_id (5) —
+/// deliberately NOT a cancellation-type code, so it must NOT remove a
+/// matching live order (see `Order::is_cancellation`'s doc for why).
+fn filled_event(oid: u64, ts: u64) -> Order {
+    let mut o = Order::limit(oid, "fill-src", Side::Buy, 0, 0, ts);
+    o.status_id = 5;
     o
 }
 
@@ -80,7 +102,12 @@ pub fn run_cda_tests() -> Vec<TestCase> {
         cda_time_priority_same_price(),
         cda_market_crosses_at_maker_price(),
         cda_market_no_liquidity_no_rest(),
+        cda_market_order_partial_liquidity_fill_rate(),
         cda_non_live_order_filtered(),
+        cda_sell_crosses_bid_only_at_or_below_bid_price(),
+        cda_cancellation_removes_resting_order(),
+        cda_cancellation_of_unknown_oid_is_harmless(),
+        cda_filled_status_does_not_touch_resting_order(),
         cda_metrics_known_scenario(),
     ]
 }
@@ -198,9 +225,42 @@ fn cda_market_no_liquidity_no_rest() -> TestCase {
     let mut book = CdaOrderBook::new();
     let trades = book.submit(market(1, "Buyer", Side::Buy, 10, 1)); // empty book
 
-    // Market orders never rest, even unfilled.
-    let ok = trades.is_empty() && book.bids.is_empty() && book.asks.is_empty();
-    check("cda_market_no_liquidity_no_rest", ok, format!("trades={} bids={} asks={}", trades.len(), book.bids.len(), book.asks.len()))
+    // Market orders never rest, even unfilled. fill_rate must reflect that
+    // this order was never actually filled (0.0), not silently drop out of
+    // the accounting the way an inferred "submitted - still resting"
+    // formula would (a market order that never rests would otherwise
+    // vanish from both sides of that subtraction).
+    let ok = trades.is_empty() && book.bids.is_empty() && book.asks.is_empty() && book.fill_rate() == Some(0.0);
+    check(
+        "cda_market_no_liquidity_no_rest",
+        ok,
+        format!("trades={} bids={} asks={} fill_rate={:?}", trades.len(), book.bids.len(), book.asks.len(), book.fill_rate()),
+    )
+}
+
+/// Regression check for a real bug found via manual testing: a market
+/// order that finds NO liquidity at all disappears (doesn't rest, doesn't
+/// trade) — if `fill_rate` were inferred as "submitted - still resting" it
+/// would wrongly count that vanished order as filled, since it's absent
+/// from both the resting book AND the executed trades. Here Frank's ask
+/// gets fully consumed by Eve's market buy, then Zed's market buy arrives
+/// to an empty book and finds nothing.
+fn cda_market_order_partial_liquidity_fill_rate() -> TestCase {
+    let mut book = CdaOrderBook::new();
+    book.submit(limit(1, "Frank", Side::Sell, 130, 6, 1)); // rests
+    book.submit(market(2, "Eve", Side::Buy, 6, 2)); // fully consumes Frank's ask
+    book.submit(market(3, "Zed", Side::Buy, 3, 3)); // no liquidity left, vanishes unfilled
+
+    // total_submitted = 6 + 6 + 3 = 15; genuinely filled = 6 (Frank) + 6
+    // (Eve) = 12; Zed's 3 units never traded. fill_rate must be 12/15 =
+    // 0.8, NOT 1.0 (which is what "submitted - still_resting" would give,
+    // since still_resting is 0 here regardless of Zed's unfilled order).
+    let ok = book.trade_count() == 1 && book.executed_volume() == 6 && book.fill_rate().is_some_and(|v| approx_eq(v, 0.8));
+    check(
+        "cda_market_order_partial_liquidity_fill_rate",
+        ok,
+        format!("trade_count={} volume={} fill_rate={:?}", book.trade_count(), book.executed_volume(), book.fill_rate()),
+    )
 }
 
 fn cda_non_live_order_filtered() -> TestCase {
@@ -209,6 +269,72 @@ fn cda_non_live_order_filtered() -> TestCase {
 
     let ok = trades.is_empty() && book.bids.is_empty() && book.asks.is_empty();
     check("cda_non_live_order_filtered", ok, format!("trades={} bids={} asks={}", trades.len(), book.bids.len(), book.asks.len()))
+}
+
+/// Regression check for a real matching-direction bug found while writing
+/// the cancellation tests below: a sell only crosses a resting bid when
+/// its ask price is AT OR BELOW the bid (seller willing to accept no more
+/// than the buyer offers) — the previous `check_price_match` applied the
+/// same `taker_px >= maker_px` comparison used for buys-crossing-asks to
+/// this side too, which is backwards. Covers both directions: an
+/// aggressive sell (well below the bid) must cross, and a passive sell
+/// (above the bid) must NOT cross and should simply rest instead.
+fn cda_sell_crosses_bid_only_at_or_below_bid_price() -> TestCase {
+    let mut book = CdaOrderBook::new();
+    book.submit(limit(1, "Buyer", Side::Buy, 100, 10, 1)); // resting bid @100
+
+    let aggressive_trades = book.submit(limit(2, "AggressiveSeller", Side::Sell, 90, 4, 2)); // 90 <= 100 -> must cross
+    let aggressive_ok = aggressive_trades.len() == 1 && aggressive_trades[0].quantity == 4 && aggressive_trades[0].price == 100;
+
+    let passive_trades = book.submit(limit(3, "PassiveSeller", Side::Sell, 105, 3, 3)); // 105 > 100 -> must NOT cross, must rest
+    let passive_ok = passive_trades.is_empty() && book.asks.len() == 1 && book.asks[0].user_id == "PassiveSeller";
+
+    let ok = aggressive_ok && passive_ok;
+    check(
+        "cda_sell_crosses_bid_only_at_or_below_bid_price",
+        ok,
+        format!("aggressive_trades={aggressive_trades:?} passive_trades={passive_trades:?} asks={:?}", book.asks.iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
+    )
+}
+
+fn cda_cancellation_removes_resting_order() -> TestCase {
+    let mut book = CdaOrderBook::new();
+    book.submit(limit(1, "Alice", Side::Buy, 100, 10, 1)); // rests, no counterparty
+    book.submit(limit(2, "Bob", Side::Sell, 105, 5, 2)); // rests too, doesn't cross
+    book.submit(cancel_event(1, 3)); // cancel Alice's resting bid by oid
+
+    let ok = book.bids.is_empty() && book.asks.len() == 1 && book.asks[0].user_id == "Bob";
+    check(
+        "cda_cancellation_removes_resting_order",
+        ok,
+        format!("bids={} asks={:?}", book.bids.len(), book.asks.iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
+    )
+}
+
+fn cda_cancellation_of_unknown_oid_is_harmless() -> TestCase {
+    let mut book = CdaOrderBook::new();
+    book.submit(limit(1, "Alice", Side::Buy, 100, 10, 1)); // rests
+
+    // Cancel an oid that was never submitted as live.
+    let removed = book.cancel(999);
+
+    let ok = !removed && book.bids.len() == 1 && book.bids[0].oid == 1;
+    check("cda_cancellation_of_unknown_oid_is_harmless", ok, format!("removed={removed} bids={}", book.bids.len()))
+}
+
+fn cda_filled_status_does_not_touch_resting_order() -> TestCase {
+    let mut book = CdaOrderBook::new();
+    book.submit(limit(1, "Alice", Side::Buy, 100, 10, 1)); // rests
+    book.submit(filled_event(1, 2)); // an external "filled" event for the same oid
+
+    // Per the design decision, fills are NOT replayed — Alice's order must
+    // still be sitting there completely untouched.
+    let ok = book.bids.len() == 1 && book.bids[0].oid == 1 && book.bids[0].remaining == 10;
+    check(
+        "cda_filled_status_does_not_touch_resting_order",
+        ok,
+        format!("bids={:?}", book.bids.iter().map(|o| (o.oid, o.remaining)).collect::<Vec<_>>()),
+    )
 }
 
 fn cda_metrics_known_scenario() -> TestCase {
@@ -270,6 +396,9 @@ pub fn run_fba_tests() -> Vec<TestCase> {
         fba_all_market_no_history_preserves_orders(),
         fba_all_market_with_history_anchors(),
         fba_non_live_order_filtered(),
+        fba_cancellation_removes_pending_order(),
+        fba_cancellation_of_unknown_oid_is_harmless(),
+        fba_filled_status_does_not_touch_pending_order(),
         fba_residual_rolls_into_pending(),
         fba_metrics_after_partial_clear(),
         fba_tie_with_history_picks_closest_price(),
@@ -407,6 +536,45 @@ fn fba_non_live_order_filtered() -> TestCase {
 
     let ok = book.pending_orders.is_empty() && book.clear().is_none();
     check("fba_non_live_order_filtered", ok, format!("pending={}", book.pending_orders.len()))
+}
+
+fn fba_cancellation_removes_pending_order() -> TestCase {
+    let mut book = FbaOrderBook::new();
+    book.submit(limit(1, "Alice", Side::Buy, 100, 10, 1)); // queued, no counterparty yet
+    book.submit(limit(2, "Bob", Side::Buy, 95, 5, 2)); // also queued, different oid
+    book.submit(cancel_event(1, 3)); // cancel Alice's queued order by oid
+
+    let ok = book.pending_orders.len() == 1 && book.pending_orders[0].user_id == "Bob";
+    check(
+        "fba_cancellation_removes_pending_order",
+        ok,
+        format!("pending={:?}", book.pending_orders.iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
+    )
+}
+
+fn fba_cancellation_of_unknown_oid_is_harmless() -> TestCase {
+    let mut book = FbaOrderBook::new();
+    book.submit(limit(1, "Alice", Side::Buy, 100, 10, 1)); // queued
+
+    let removed = book.cancel(999); // never submitted
+
+    let ok = !removed && book.pending_orders.len() == 1 && book.pending_orders[0].oid == 1;
+    check("fba_cancellation_of_unknown_oid_is_harmless", ok, format!("removed={removed} pending={}", book.pending_orders.len()))
+}
+
+fn fba_filled_status_does_not_touch_pending_order() -> TestCase {
+    let mut book = FbaOrderBook::new();
+    book.submit(limit(1, "Alice", Side::Buy, 100, 10, 1)); // queued
+    book.submit(filled_event(1, 2)); // an external "filled" event for the same oid
+
+    // Per the design decision, fills are NOT replayed — Alice's order must
+    // still be sitting there completely untouched.
+    let ok = book.pending_orders.len() == 1 && book.pending_orders[0].oid == 1 && book.pending_orders[0].remaining == 10;
+    check(
+        "fba_filled_status_does_not_touch_pending_order",
+        ok,
+        format!("pending={:?}", book.pending_orders.iter().map(|o| (o.oid, o.remaining)).collect::<Vec<_>>()),
+    )
 }
 
 fn fba_residual_rolls_into_pending() -> TestCase {

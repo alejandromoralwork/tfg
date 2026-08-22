@@ -1,9 +1,7 @@
 //! Frequent Batch Auction: collects orders into `pending_orders` and clears
 //! them all at once at a single uniform price, chosen to maximize matched
-//! volume. Ported from the closed-form clearing logic proven out in the
-//! earlier `thesis-market-models` workspace — this project trades a single
-//! fixed pair, so the uniform clearing price has a closed-form solution (a
-//! scan over submitted limit prices); no external LP solver is needed.
+//! volume.  See ENGINE_DESIGN.md for a full description of the FBA algorithm and its
+//! implementation details.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -23,6 +21,9 @@ pub struct ClearingResult {
 /// `clear()`, this engine's full trade history, and the running state its
 /// own metric methods read from. Self-contained — a caller just calls
 /// `submit`/`clear`/the metric getters, nothing else needs to reach inside.
+
+
+
 pub struct FbaOrderBook {
     pub pending_orders: Vec<Order>,
     pub executed_trades: Vec<Trade>,
@@ -55,15 +56,30 @@ impl FbaOrderBook {
         }
     }
 
-    /// Rejections, cancellations, fill/lifecycle records, and un-triggered
-    /// conditional orders never enter the batch — drop them here rather
-    /// than let a naive replay of the raw L4 stream corrupt the batch with
-    /// records that were never actually live demand.
+    /// Rejections and un-triggered conditional orders never enter the
+    /// batch. A genuinely new live order is queued; a cancellation for an
+    /// `oid` still sitting in `pending_orders` removes it (see
+    /// `Order::is_cancellation` for why `filled` events are deliberately
+    /// NOT handled the same way — this simulation's FBA clearing decides
+    /// fills independently of whatever Hyperliquid's own engine did).
     pub fn submit(&mut self, order: Order) {
         if order.is_new_live_order() {
             self.total_submitted_qty = self.total_submitted_qty.saturating_add(order.remaining);
             self.pending_orders.push(order);
+        } else if order.is_cancellation() {
+            self.cancel(order.oid);
         }
+    }
+
+    /// Removes a still-pending order by `oid`, if one is sitting in
+    /// `pending_orders` (i.e. it was submitted as live and hasn't cleared
+    /// yet). Returns whether anything was actually removed — a cancel for
+    /// an `oid` this book never saw as live, or that already cleared, is a
+    /// harmless no-op.
+    pub fn cancel(&mut self, oid: u64) -> bool {
+        let before = self.pending_orders.len();
+        self.pending_orders.retain(|o| o.oid != oid);
+        self.pending_orders.len() != before
     }
 
     /// Clear the current batch at a single uniform price, rationing by

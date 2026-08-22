@@ -212,6 +212,32 @@ impl Order {
         }
     }
 
+    /// Whether this record represents the order's owner/venue withdrawing
+    /// it — trader-initiated (or venue-initiated) intent to remove the
+    /// order, independent of which matching engine processes the flow. An
+    /// engine that has this `oid` still sitting in its own book/pending
+    /// buffer should remove it in response (see
+    /// `FbaOrderBook::submit`/`CdaOrderBook::submit`).
+    ///
+    /// The 8 cancel-type codes from `statuses.csv`: `canceled`(2),
+    /// `reduceOnlyCanceled`(7), `scheduledCancel`(10),
+    /// `siblingFilledCanceled`(11), `selfTradeCanceled`(12),
+    /// `marginCanceled`(13), `vaultWithdrawalCanceled`(14),
+    /// `liquidatedCanceled`(16).
+    ///
+    /// Deliberately does **not** include `filled`(5), even though it's
+    /// also a way an order stops being live: a fill is Hyperliquid's *own*
+    /// matching engine's outcome, not something this simulation's
+    /// independently-computed CDA/FBA engines should trust — replaying it
+    /// would mean reconciling a "remaining size after this fill" against
+    /// whatever our own engine already independently did to that same
+    /// order, which is often ill-defined. Rejection codes are excluded
+    /// too — a rejected order never entered any book, so there's nothing
+    /// to remove.
+    pub fn is_cancellation(&self) -> bool {
+        matches!(self.status_id, 2 | 7 | 10 | 11 | 12 | 13 | 14 | 16)
+    }
+
     pub fn reduce(&mut self, fill: Amount) {
         self.remaining = self.remaining.saturating_sub(fill);
     }

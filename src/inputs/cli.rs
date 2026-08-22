@@ -19,7 +19,9 @@ enum EngineMode {
 }
 
 enum CliCommand {
-    Add { side: Side, price: u128, qty: u128, user: String },
+    // `price: None` means a market order (fills at the resting/eligible
+    // book's own price rather than a limit the caller sets).
+    Add { side: Side, price: Option<u128>, qty: u128, user: String },
     Engine(EngineMode),
     Batch,
     Clear,
@@ -48,6 +50,7 @@ impl CliCommand {
         match parts[0].to_lowercase().as_str() {
             "add" => {
                 if parts.len() < 5 {
+                    println!(" Usage: add <buy|sell> <price|market> <qty> <user>");
                     return None;
                 }
                 let side = match parts[1].to_lowercase().as_str() {
@@ -55,7 +58,11 @@ impl CliCommand {
                     "sell" => Side::Sell,
                     _ => return None,
                 };
-                let price = parts[2].parse::<u128>().ok()?;
+                let price = if parts[2].eq_ignore_ascii_case("market") {
+                    None
+                } else {
+                    Some(parts[2].parse::<u128>().ok()?)
+                };
                 let qty = parts[3].parse::<u128>().ok()?;
                 let user = parts[4].to_string();
                 Some(CliCommand::Add { side, price, qty, user })
@@ -141,10 +148,15 @@ pub fn run() {
             }
 
             Some(CliCommand::Add { side, price, qty, user }) => {
-                let internal_price = price * PRICE_SCALE;
                 let timestamp = now_ns();
-                let order = Order::limit(order_id_counter, user, side, internal_price, qty, timestamp);
                 let assigned_id = order_id_counter;
+                let order = match price {
+                    Some(raw_price) => {
+                        let internal_price = raw_price * PRICE_SCALE;
+                        Order::limit(assigned_id, user, side, internal_price, qty, timestamp)
+                    }
+                    None => Order::market(assigned_id, user, side, qty, timestamp),
+                };
                 order_id_counter += 1;
 
                 match current_mode {
@@ -248,7 +260,7 @@ fn now_ns() -> u64 {
 fn print_help() {
     println!("\nAvailable Simulation Interaction Inputs:");
     println!("  engine <continuous|batch>           - Dynamically flip between matching engine paradigms");
-    println!("  add <buy|sell> <price> <qty> <user> - Commit limit liquidity parameters to active engine (SOL/USD)");
+    println!("  add <buy|sell> <price|market> <qty> <user> - Submit a limit order (numeric price) or a market order ('market') to the active engine (SOL/USD)");
     println!("  batch                               - Inspect active continuous book state or FBA buffer state");
     println!("  clear                               - Force close batch window, clear matching equations, and log data");
     println!("  load <path> [path...]               - Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine");
