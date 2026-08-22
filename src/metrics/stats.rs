@@ -3,6 +3,8 @@
 //! orderbook is responsible for computing its own numbers from its own
 //! state (see `engines::fba::FbaOrderBook` / `engines::cda::CdaOrderBook`).
 
+use colored::Colorize;
+
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
 
@@ -14,18 +16,19 @@ fn fmt_opt(v: Option<f64>) -> String {
 }
 
 pub fn print_summary(fba: &FbaOrderBook, cda: &CdaOrderBook) {
-    println!("\n==========================================================================");
-    println!("📈                              CORE METRICS                              ");
-    println!("==========================================================================");
+    let rule = "==========================================================================".cyan();
+    println!("\n{rule}");
+    println!("{}", "📈                              CORE METRICS                              ".cyan().bold());
+    println!("{rule}");
     print_fba(fba);
     print_cda(cda);
-    println!("==========================================================================\n");
+    println!("{rule}\n");
 }
 
 /// Just the FBA block — reused by both `print_summary` (both engines) and
 /// the `orderbook` CLI command (active engine only).
 pub fn print_fba(fba: &FbaOrderBook) {
-    println!("\n--- FBA ---");
+    println!("\n{}", "--- FBA ---".yellow().bold());
     println!("  quoted_spread_bps        : {}", fmt_opt(fba.quoted_spread_bps()));
     println!("  depth_at_best            : {}", fba.depth_at_best());
     println!("  trade_count              : {}", fba.trade_count());
@@ -38,7 +41,7 @@ pub fn print_fba(fba: &FbaOrderBook) {
 /// Just the CDA block — reused by both `print_summary` (both engines) and
 /// the `orderbook` CLI command (active engine only).
 pub fn print_cda(cda: &CdaOrderBook) {
-    println!("\n--- CDA ---");
+    println!("\n{}", "--- CDA ---".blue().bold());
     println!("  quoted_spread_bps        : {}", fmt_opt(cda.quoted_spread_bps()));
     println!("  depth_at_best            : {}", cda.depth_at_best());
     println!("  trade_count              : {}", cda.trade_count());

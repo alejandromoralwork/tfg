@@ -7,6 +7,8 @@
 //! independently hand-computed expectation — not just "whatever the code
 //! currently does".
 
+use colored::Colorize;
+
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
 use crate::types::{EngineKind, Order, Side, PRICE_SCALE};
@@ -65,15 +67,17 @@ fn filled_event(oid: u64, ts: u64) -> Order {
 }
 
 pub fn print_checklist(engine_label: &str, cases: &[TestCase]) {
-    println!("\n==========================================================================");
-    println!("🧪                      {engine_label} ENGINE TEST CHECKLIST                      ");
-    println!("==========================================================================");
+    let rule = "==========================================================================".cyan();
+    println!("\n{rule}");
+    println!("{}", format!("🧪                      {engine_label} ENGINE TEST CHECKLIST                      ").cyan().bold());
+    println!("{rule}");
 
     for c in cases {
-        let mark = if c.passed { "✅" } else { "❌" };
-        println!("  {mark} {}", c.name);
-        if !c.passed {
-            println!("      -> {}", c.detail);
+        if c.passed {
+            println!("  {} {}", "✅".green(), c.name);
+        } else {
+            println!("  {} {}", "❌".red(), c.name);
+            println!("{}", format!("      -> {}", c.detail).red());
         }
     }
 
@@ -81,11 +85,11 @@ pub fn print_checklist(engine_label: &str, cases: &[TestCase]) {
     let total = cases.len();
     println!("--------------------------------------------------------------------------");
     if passed == total {
-        println!("  RESULT: {passed}/{total} passed — {engine_label} engine OK ✅");
+        println!("{}", format!("  RESULT: {passed}/{total} passed — {engine_label} engine OK ✅").green().bold());
     } else {
-        println!("  RESULT: {passed}/{total} passed — {} case(s) FAILING ❌", total - passed);
+        println!("{}", format!("  RESULT: {passed}/{total} passed — {} case(s) FAILING ❌", total - passed).red().bold());
     }
-    println!("==========================================================================\n");
+    println!("{rule}\n");
 }
 
 // ============================================================================

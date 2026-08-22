@@ -14,6 +14,8 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
+use colored::Colorize;
+
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
 use crate::inputs::simulator;
@@ -39,20 +41,20 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let files = match simulator::collect_input_files(root) {
         Ok(files) if !files.is_empty() => files,
         Ok(_) if coin_shorthand => {
-            println!("❌ No .csv/.gz files found under '{resolved_path}'. Run 'download {path_str}' first?");
+            println!("{}", format!("❌ No .csv/.gz files found under '{resolved_path}'. Run 'download {path_str}' first?").red());
             return;
         }
         Ok(_) => {
-            println!("❌ No .csv/.gz files found under '{resolved_path}'.");
+            println!("{}", format!("❌ No .csv/.gz files found under '{resolved_path}'.").red());
             return;
         }
         Err(err) => {
-            println!("❌ Failed to read '{resolved_path}': {err}");
+            println!("{}", format!("❌ Failed to read '{resolved_path}': {err}").red());
             return;
         }
     };
 
-    println!("🚀 Simulating {} file(s) from '{resolved_path}', interval={interval_secs}s ...", files.len());
+    println!("{}", format!("🚀 Simulating {} file(s) from '{resolved_path}', interval={interval_secs}s ...", files.len()).cyan());
     std::io::stdout().flush().ok();
     let wall_clock_start = Instant::now();
 
@@ -149,7 +151,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let stats = match stream_result {
         Ok(stats) => stats,
         Err(err) => {
-            println!("❌ Error while streaming: {err}");
+            println!("{}", format!("❌ Error while streaming: {err}").red());
             return;
         }
     };
@@ -163,11 +165,15 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
 
     let elapsed = wall_clock_start.elapsed();
     println!(
-        "✅ Streamed {} file(s), {} record(s) seen ({} skipped), in {:.1}s wall-clock.",
-        stats.files_processed,
-        stats.records_seen,
-        stats.records_skipped,
-        elapsed.as_secs_f64()
+        "{}",
+        format!(
+            "✅ Streamed {} file(s), {} record(s) seen ({} skipped), in {:.1}s wall-clock.",
+            stats.files_processed,
+            stats.records_seen,
+            stats.records_skipped,
+            elapsed.as_secs_f64()
+        )
+        .green()
     );
 
     let fba_series = fba_recorder.finalize();
@@ -175,8 +181,8 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     println!("📊 FBA: {} interval(s)  |  CDA: {} interval(s)", fba_series.len(), cda_series.len());
 
     match write_output(&resolved_path, &stats, elapsed, &fba_series, &cda_series) {
-        Ok(dir) => println!("📁 Wrote time series + summary to {}", dir.display()),
-        Err(err) => println!("❌ Failed to write output: {err}"),
+        Ok(dir) => println!("{}", format!("📁 Wrote time series + summary to {}", dir.display()).green()),
+        Err(err) => println!("{}", format!("❌ Failed to write output: {err}").red()),
     }
 }
 

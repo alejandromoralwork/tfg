@@ -17,6 +17,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use colored::Colorize;
+
 const ZENODO_BASE: &str = "https://zenodo.org/records/18184441/files";
 const ARCHIVE_SUFFIX: &str = "orders_202512.tar.xz";
 
@@ -72,19 +74,19 @@ fn download_one(coin: Coin) {
     let dest = data_root.join("order_statuses").join(label);
 
     if let Err(err) = fs::create_dir_all(&dest) {
-        println!("❌ Failed to create '{}': {err}", dest.display());
+        println!("{}", format!("❌ Failed to create '{}': {err}", dest.display()).red());
         return;
     }
 
     if dest_already_populated(&dest) {
-        println!("✅ '{}' already has data — skipping download (delete it first to re-fetch).", dest.display());
+        println!("{}", format!("✅ '{}' already has data — skipping download (delete it first to re-fetch).", dest.display()).green());
         return;
     }
 
     let archive = data_root.join(coin.archive_filename());
     let url = coin.url();
 
-    println!("⬇️  Downloading {label} order-status data from Zenodo ...");
+    println!("{}", format!("⬇️  Downloading {label} order-status data from Zenodo ...").cyan());
     println!("   {url}");
     std::io::stdout().flush().ok();
 
@@ -98,16 +100,16 @@ fn download_one(coin: Coin) {
     match curl_status {
         Ok(status) if status.success() => {}
         Ok(status) => {
-            println!("❌ curl exited with {status} — download failed or the archive doesn't exist at that URL.");
+            println!("{}", format!("❌ curl exited with {status} — download failed or the archive doesn't exist at that URL.").red());
             return;
         }
         Err(err) => {
-            println!("❌ Couldn't run 'curl' ({err}). Is curl.exe on PATH?");
+            println!("{}", format!("❌ Couldn't run 'curl' ({err}). Is curl.exe on PATH?").red());
             return;
         }
     }
 
-    println!("📦 Extracting {} -> {}/ ...", archive.display(), dest.display());
+    println!("{}", format!("📦 Extracting {} -> {}/ ...", archive.display(), dest.display()).cyan());
     std::io::stdout().flush().ok();
 
     let tar_status = Command::new("tar").arg("-xf").arg(&archive).arg("-C").arg(&dest).status();
@@ -115,11 +117,11 @@ fn download_one(coin: Coin) {
     match tar_status {
         Ok(status) if status.success() => {}
         Ok(status) => {
-            println!("❌ tar exited with {status} — extraction failed. Archive left at '{}' for a manual retry.", archive.display());
+            println!("{}", format!("❌ tar exited with {status} — extraction failed. Archive left at '{}' for a manual retry.", archive.display()).red());
             return;
         }
         Err(err) => {
-            println!("❌ Couldn't run 'tar' ({err}). Is tar.exe on PATH? Archive left at '{}'.", archive.display());
+            println!("{}", format!("❌ Couldn't run 'tar' ({err}). Is tar.exe on PATH? Archive left at '{}'.", archive.display()).red());
             return;
         }
     }
@@ -127,10 +129,10 @@ fn download_one(coin: Coin) {
     // Multi-GB archives — not worth keeping once extracted, matching
     // download_data.sh's default behavior.
     if let Err(err) = fs::remove_file(&archive) {
-        println!("⚠️  Extracted OK, but couldn't remove archive '{}': {err}", archive.display());
+        println!("{}", format!("⚠️  Extracted OK, but couldn't remove archive '{}': {err}", archive.display()).yellow());
     }
 
-    println!("✅ {label} order-status data ready at '{}'. Try: simulate {label}", dest.display());
+    println!("{}", format!("✅ {label} order-status data ready at '{}'. Try: simulate {label}", dest.display()).green());
 }
 
 /// True if `dest` already contains at least one `.gz`/`.data` file — used

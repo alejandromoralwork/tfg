@@ -5,6 +5,8 @@
 
 use std::io::{self, Write};
 
+use colored::Colorize;
+
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
 use crate::inputs::download_cmd::{self, Coin, DownloadTarget};
@@ -320,19 +322,19 @@ pub fn run() {
     let mut order_id_counter: u64 = 1;
     let mut current_mode = EngineMode::Batch;
 
-    println!("======================================================================");
-    println!("🚀 Cross-Paradigm Market Research Simulator Core");
-    println!("   Trading Pair: SOL/USD (this simulation trades a single fixed pair)");
-    println!("======================================================================");
+    let rule = "======================================================================".cyan();
+    println!("{rule}");
+    println!("{}", "Cross-Paradigm Market Research Simulator Core".cyan().bold());
+    println!("{rule}");
     print_help();
 
     loop {
         let mode_label = match current_mode {
-            EngineMode::Continuous => "CDA",
-            EngineMode::Batch => "FBA",
+            EngineMode::Continuous => "CDA".blue().bold(),
+            EngineMode::Batch => "FBA".yellow().bold(),
         };
 
-        print!("\nsim [{mode_label}]> ");
+        print!("\n{} [{mode_label}]{} ", "sim".dimmed(), ">".dimmed());
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
@@ -343,7 +345,7 @@ pub fn run() {
         match CliCommand::parse(&input) {
             Some(CliCommand::Engine(mode)) => {
                 current_mode = mode;
-                println!("🔄 Switched simulation matching engine mode to: {current_mode:?}");
+                println!("{}", format!("🔄 Switched simulation matching engine mode to: {current_mode:?}").cyan());
             }
 
             Some(CliCommand::Add { side, price, qty, user }) => {
@@ -360,11 +362,11 @@ pub fn run() {
                 match current_mode {
                     EngineMode::Batch => {
                         fba.submit(order);
-                        println!("✅ Queued order successfully in FBA discrete window buffer [ID: {assigned_id}]");
+                        println!("{}", format!("✅ Queued order successfully in FBA discrete window buffer [ID: {assigned_id}]").green());
                     }
                     EngineMode::Continuous => {
                         let trades = cda.submit(order);
-                        println!("⚡ Continuous order processed. Instant trades cleared: {}", trades.len());
+                        println!("{}", format!("⚡ Continuous order processed. Instant trades cleared: {}", trades.len()).green());
                         for t in &trades {
                             println!("   [TRADE] Qty: {} at Price: {}", t.quantity, format_price(t.price));
                         }
@@ -379,7 +381,7 @@ pub fn run() {
 
             Some(CliCommand::Clear) => {
                 if current_mode == EngineMode::Continuous {
-                    println!("⚠️ Info: Continuous engine processes trades instantly. 'clear' applies to the FBA pipeline.");
+                    println!("{}", "⚠️ Info: Continuous engine processes trades instantly. 'clear' applies to the FBA pipeline.".yellow());
                 }
                 render_clear(&mut fba);
             }
@@ -429,10 +431,15 @@ pub fn run() {
                                 }
                             }
                         }
-                        Err(err) => println!("❌ Failed to load '{path}': {err}"),
+                        Err(err) => println!("{}", format!("❌ Failed to load '{path}': {err}").red()),
                     }
                 }
 
+                // Not wrapped in a single color: `mode_label` is itself
+                // colored (see the prompt above), and nesting a `colored`
+                // string inside another resets the outer color partway
+                // through the line — better to let the FBA/CDA token pop
+                // on its own against plain text here.
                 println!("📥 Loaded {total} order-status record(s) ({live} live) into the {mode_label} engine.");
             }
 
@@ -445,11 +452,11 @@ pub fn run() {
             Some(CliCommand::Help) => print_help(),
 
             Some(CliCommand::Exit) => {
-                println!("Terminating simulator core workspace...");
+                println!("{}", "Terminating simulator core workspace...".dimmed());
                 break;
             }
 
-            None => println!("❌ Command sequence unrecognized. Run 'help' to review syntax specifications."),
+            None => println!("{}", "❌ Command sequence unrecognized. Run 'help' to review syntax specifications.".red()),
         }
     }
 }
@@ -462,20 +469,29 @@ fn now_ns() -> u64 {
 }
 
 fn print_help() {
-    println!("\nAvailable Simulation Interaction Inputs:");
-    println!("  engine <continuous|batch>           - Dynamically flip between matching engine paradigms");
-    println!("  add <buy|sell> <price|market> <qty> <user> - Submit a limit order (numeric price) or a market order ('market') to the active engine (SOL/USD)");
-    println!("  batch                               - Inspect active continuous book state or FBA buffer state");
-    println!("  clear                               - Force close batch window, clear matching equations, and log data");
-    println!("  load <path> [path...]               - Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine");
-    println!("  simulate <path|btc|eth|sol> [interval_secs] - Replay real .csv/.gz order-status data (a file/folder, or 'btc'/'eth'/'sol' for data/order_statuses/<coin>/) through BOTH engines, write time-series metrics to output/");
-    println!("  download <btc|eth|sol|all>          - Fetch that coin's order-status archive from Zenodo and extract it into data/order_statuses/<coin>/, ready for 'simulate <coin>'");
-    println!("  log                                 - Audit chronological ledger (combined FBA + CDA executed trades)");
-    println!("  metrics                             - Print core metrics computed so far, for both engines");
-    println!("  orderbook (alias: ob)                - Print the active engine's orderbook state + its own core metrics, in one view");
-    println!("  test engine <continuous|batch>      - Run the built-in test checklist against a fresh, isolated instance of that engine");
-    println!("  help                                - Review configuration tools");
-    println!("  exit                                - Safely close terminal stream");
+    println!("\n{}", "Available Simulation Interaction Inputs:".bold());
+    const ROWS: &[(&str, &str)] = &[
+        ("engine <continuous|batch>", "Dynamically flip between matching engine paradigms"),
+        ("add <buy|sell> <price|market> <qty> <user>", "Submit a limit order (numeric price) or a market order ('market') to the active engine (SOL/USD)"),
+        ("batch", "Inspect active continuous book state or FBA buffer state"),
+        ("clear", "Force close batch window, clear matching equations, and log data"),
+        ("load <path> [path...]", "Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine"),
+        ("simulate <path|btc|eth|sol> [interval_secs]", "Replay real .csv/.gz order-status data (a file/folder, or 'btc'/'eth'/'sol' for data/order_statuses/<coin>/) through BOTH engines, write time-series metrics to output/"),
+        ("download <btc|eth|sol|all>", "Fetch that coin's order-status archive from Zenodo and extract it into data/order_statuses/<coin>/, ready for 'simulate <coin>'"),
+        ("log", "Audit chronological ledger (combined FBA + CDA executed trades)"),
+        ("metrics", "Print core metrics computed so far, for both engines"),
+        ("orderbook (alias: ob)", "Print the active engine's orderbook state + its own core metrics, in one view"),
+        ("test engine <continuous|batch>", "Run the built-in test checklist against a fresh, isolated instance of that engine"),
+        ("help", "Review configuration tools"),
+        ("exit", "Safely close terminal stream"),
+    ];
+    for (cmd, desc) in ROWS {
+        // Pad the plain text first, then color it — coloring first would
+        // wrap the string in invisible ANSI escape bytes that `{:<45}`
+        // would count toward the padding width, throwing off alignment.
+        let padded = format!("{cmd:<45}");
+        println!("  {} - {}", padded.cyan(), desc.dimmed());
+    }
 }
 
 // ---- display helpers ----
@@ -487,11 +503,11 @@ fn format_price(price: u128) -> String {
 }
 
 fn render_pending(fba: &FbaOrderBook) {
-    println!("---  Current Pending FBA Window Accumulation Buffer ---");
+    println!("{}", "---  Current Pending FBA Window Accumulation Buffer ---".bold());
 
     let best_buy = fba.best_unfilled_buy().map(format_price).unwrap_or_else(|| "n/a".to_string());
     let best_sell = fba.best_unfilled_sell().map(format_price).unwrap_or_else(|| "n/a".to_string());
-    println!("Best Unfilled Buy: {best_buy}  |  Best Unfilled Sell: {best_sell}");
+    println!("Best Unfilled Buy: {}  |  Best Unfilled Sell: {}", best_buy.green(), best_sell.red());
 
     if fba.pending_orders.is_empty() {
         println!("(No orders currently inside this discrete window buffer)");
@@ -508,51 +524,55 @@ fn render_pending(fba: &FbaOrderBook) {
     buys.sort_by_key(|o| std::cmp::Reverse(o.limit_price().unwrap_or(0)));
     sells.sort_by_key(|o| o.limit_price().unwrap_or(u128::MAX));
 
-    println!("Buy orders ({}):", buys.len());
+    // Buy/sell get their own color throughout — green for the bid side,
+    // red for the ask side, the same convention most trading terminals use.
+    println!("{}", format!("Buy orders ({}):", buys.len()).green().bold());
     for o in &buys {
         let price_str = o.limit_price().map_or("MARKET".to_string(), format_price);
-        println!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Max Limit: {} USDT", o.oid, o.user_id, o.remaining, price_str);
+        println!("{}", format!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Max Limit: {} USDT", o.oid, o.user_id, o.remaining, price_str).green());
     }
-    println!("Sell orders ({}):", sells.len());
+    println!("{}", format!("Sell orders ({}):", sells.len()).red().bold());
     for o in &sells {
         let price_str = o.limit_price().map_or("MARKET".to_string(), format_price);
-        println!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Max Limit: {} USDT", o.oid, o.user_id, o.remaining, price_str);
+        println!("{}", format!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Max Limit: {} USDT", o.oid, o.user_id, o.remaining, price_str).red());
     }
 }
 
 fn render_book(cda: &CdaOrderBook) {
-    println!("---  Current Continuous Order Book State ---");
+    println!("{}", "---  Current Continuous Order Book State ---".bold());
 
     let best_bid = cda.best_bid().map(format_price).unwrap_or_else(|| "n/a".to_string());
     let best_ask = cda.best_ask().map(format_price).unwrap_or_else(|| "n/a".to_string());
     let spread = cda.quoted_spread_bps().map(|v| format!("{v:.2} bps")).unwrap_or_else(|| "n/a".to_string());
-    println!("Best Bid: {best_bid}  |  Best Ask: {best_ask}  |  Spread: {spread}");
+    println!("Best Bid: {}  |  Best Ask: {}  |  Spread: {spread}", best_bid.green(), best_ask.red());
 
     // `bids`/`asks` are always kept sorted best-first (see submit()'s
     // sort_by calls), so no re-sort needed here — the first row under
     // each heading below IS the best bid / best ask from the summary line.
-    println!("Bids ({}):", cda.bids.len());
+    // Bids get green (the buy side), asks get red (the sell side) — same
+    // convention render_pending uses for FBA's buy/sell orders.
+    println!("{}", format!("Bids ({}):", cda.bids.len()).green().bold());
     for o in &cda.bids {
-        println!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Price: {}", o.oid, o.user_id, o.remaining, format_price(o.limit_px));
+        println!("{}", format!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Price: {}", o.oid, o.user_id, o.remaining, format_price(o.limit_px)).green());
     }
-    println!("Asks ({}):", cda.asks.len());
+    println!("{}", format!("Asks ({}):", cda.asks.len()).red().bold());
     for o in &cda.asks {
-        println!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Price: {}", o.oid, o.user_id, o.remaining, format_price(o.limit_px));
+        println!("{}", format!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Price: {}", o.oid, o.user_id, o.remaining, format_price(o.limit_px)).red());
     }
 }
 
 fn render_clear(fba: &mut FbaOrderBook) {
     if fba.pending_orders.is_empty() {
-        println!("⚠️ Window buffer is empty. No discrete allocations can clear!");
+        println!("{}", "⚠️ Window buffer is empty. No discrete allocations can clear!".yellow());
         return;
     }
 
-    println!("\n🔄 [FBA Window Closed] Computing Uniform Market Clearing...");
-    println!("==============================================================");
+    println!("\n{}", "🔄 [FBA Window Closed] Computing Uniform Market Clearing...".cyan());
+    println!("{}", "==============================================================".cyan());
 
     match fba.clear() {
         Some(clearing) => {
-            println!("✅ Uniform Clearing Calculated Successfully!");
+            println!("{}", "✅ Uniform Clearing Calculated Successfully!".green());
             println!("   Execution Rate (Uniform Price) : {} USDT", format_price(clearing.clearing_price));
             println!("   Total Executed Asset Mass       : {} units", clearing.traded_quantity);
 
@@ -576,19 +596,20 @@ fn render_clear(fba: &mut FbaOrderBook) {
 
             let unfilled = fba.pending_orders.len();
             if unfilled > 0 {
-                println!("\n⏭️  {unfilled} order(s) left unexecuted at this clearing price — rolled over to the next window.");
+                println!("{}", format!("\n⏭️  {unfilled} order(s) left unexecuted at this clearing price — rolled over to the next window.").yellow());
             }
         }
         None => {
-            println!("❌ Convergence Failure: No mathematical crossover found inside this batch window.");
+            println!("{}", "❌ Convergence Failure: No mathematical crossover found inside this batch window.".red());
         }
     }
 }
 
 fn render_log(fba: &FbaOrderBook, cda: &CdaOrderBook) {
-    println!("\n==========================================================================");
-    println!("📜                     SYSTEM HISTORICAL EXECUTION LOG                    ");
-    println!("==========================================================================");
+    let rule = "==========================================================================".cyan();
+    println!("\n{rule}");
+    println!("{}", "📜                     SYSTEM HISTORICAL EXECUTION LOG                    ".cyan().bold());
+    println!("{rule}");
 
     let mut combined: Vec<&Trade> = fba.executed_trades.iter().chain(cda.executed_trades.iter()).collect();
     combined.sort_by_key(|t| t.ts);
@@ -596,13 +617,23 @@ fn render_log(fba: &FbaOrderBook, cda: &CdaOrderBook) {
     if combined.is_empty() {
         println!("  No trades have executed yet.");
     } else {
-        println!("  {:<10} | {:<4} | {:<12} | {:<12} | {:<10} | {:<12}", "Trade ID", "Eng", "Buyer", "Seller", "Quantity", "Price");
+        println!(
+            "  {}",
+            format!("{:<10} | {:<4} | {:<12} | {:<12} | {:<10} | {:<12}", "Trade ID", "Eng", "Buyer", "Seller", "Quantity", "Price").bold()
+        );
         println!("  ------------------------------------------------------------------------");
         for t in combined {
+            // Pad the plain label first, then color it — see print_help's
+            // comment on why coloring before padding breaks alignment.
+            let engine_padded = format!("{:<4}", engine_label(t.engine_type));
+            let engine = match t.engine_type {
+                EngineKind::Fba => engine_padded.yellow(),
+                EngineKind::Cda => engine_padded.blue(),
+            };
             println!(
-                "  #{:<9} | {:<4} | {:<12} | {:<12} | {:<10} | {:<12}",
+                "  #{:<9} | {} | {:<12} | {:<12} | {:<10} | {:<12}",
                 t.trade_id,
-                engine_label(t.engine_type),
+                engine,
                 t.buyer_id,
                 t.seller_id,
                 t.quantity,
@@ -610,7 +641,7 @@ fn render_log(fba: &FbaOrderBook, cda: &CdaOrderBook) {
             );
         }
     }
-    println!("==========================================================================\n");
+    println!("{rule}\n");
 }
 
 fn engine_label(kind: EngineKind) -> &'static str {

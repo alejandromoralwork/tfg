@@ -9,9 +9,18 @@ edition = "2021"
 name = "market_sim"
 path = "main.rs"
 
-# First (and only) external dependency this project has: gzip decoding for
-# `simulate`'s real-data intake (data/order_statuses/**/*.gz). Hand-writing
-# DEFLATE is not a reasonable alternative. rust_backend = miniz_oxide, pure
-# Rust, no C/zlib toolchain needed.
+# flate2: gzip decoding for `simulate`'s real-data intake
+# (data/order_statuses/**/*.gz). Hand-writing DEFLATE is not a reasonable
+# alternative. rust_backend = miniz_oxide, pure Rust, no C/zlib toolchain
+# needed.
+#
+# colored: ANSI terminal colors for the CLI's output (prompt, success/error
+# messages, buy/sell order tables). Small, widely-used, and — critically —
+# handles enabling ANSI escape processing on Windows consoles itself (pulls
+# in windows-sys for that) and auto-disables color when stdout isn't a
+# real terminal (piped/redirected). A few `.green()`/`.red()` calls on
+# existing strings is simpler and more reliable than hand-rolling escape
+# codes plus that Windows console-mode setup ourselves.
 [dependencies]
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+colored = "2"

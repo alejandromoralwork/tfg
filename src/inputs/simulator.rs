@@ -27,6 +27,7 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
+use colored::Colorize;
 use flate2::read::MultiGzDecoder;
 
 use crate::inputs::binary_format::{self, RECORD_SIZE};
@@ -55,7 +56,7 @@ pub fn load_order_status_csv(path: &str) -> io::Result<Vec<Order>> {
             // Valid row, but its size rounds to nothing worth trading —
             // not an error, just not worth constructing an order for.
             Ok(None) => {}
-            Err(()) => eprintln!("⚠️  Skipping malformed row {} in {path}", line_no + 1),
+            Err(()) => eprintln!("{}", format!("⚠️  Skipping malformed row {} in {path}", line_no + 1).yellow()),
         }
     }
 
@@ -301,7 +302,7 @@ pub fn stream_records(files: &[PathBuf], mut on_record: impl FnMut(Order)) -> io
     let mut stats = RunStats::default();
 
     for (i, path) in files.iter().enumerate() {
-        println!("📂 [{}/{}] {}", i + 1, files.len(), path.display());
+        println!("{}", format!("📂 [{}/{}] {}", i + 1, files.len(), path.display()).dimmed());
         // Explicit flush: stdout is fully (not line-)buffered when it's
         // not a terminal (piped/redirected), which is exactly how a long
         // `simulate` run's output is normally consumed — without this,
@@ -350,7 +351,7 @@ fn stream_csv(reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::R
             Ok(None) => seen += 1, // parsed fine, size rounded to nothing
             Err(()) => {
                 skipped += 1;
-                eprintln!("⚠️  Skipping malformed CSV row {}", line_no + 1);
+                eprintln!("{}", format!("⚠️  Skipping malformed CSV row {}", line_no + 1).yellow());
             }
         }
     }
@@ -377,7 +378,7 @@ fn stream_binary(mut reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -
         // without an in-file progress indicator, one large file would give
         // no visibility at all between its start and end.
         if seen % 250_000 == 0 {
-            println!("   ... {seen} records so far");
+            println!("{}", format!("   ... {seen} records so far").dimmed());
             io::stdout().flush().ok();
         }
     }
