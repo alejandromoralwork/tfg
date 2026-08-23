@@ -18,7 +18,7 @@ fn fmt_opt(v: Option<f64>) -> String {
 pub fn print_summary(fba: &FbaOrderBook, cda: &CdaOrderBook) {
     let rule = "==========================================================================".cyan();
     println!("\n{rule}");
-    println!("{}", "📈                              CORE METRICS                              ".cyan().bold());
+    println!("{}", "                               CORE METRICS                               ".cyan().bold());
     println!("{rule}");
     print_fba(fba);
     print_cda(cda);

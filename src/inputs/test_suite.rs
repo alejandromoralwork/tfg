@@ -69,14 +69,14 @@ fn filled_event(oid: u64, ts: u64) -> Order {
 pub fn print_checklist(engine_label: &str, cases: &[TestCase]) {
     let rule = "==========================================================================".cyan();
     println!("\n{rule}");
-    println!("{}", format!("🧪                      {engine_label} ENGINE TEST CHECKLIST                      ").cyan().bold());
+    println!("{}", format!("                       {engine_label} ENGINE TEST CHECKLIST                      ").cyan().bold());
     println!("{rule}");
 
     for c in cases {
         if c.passed {
-            println!("  {} {}", "✅".green(), c.name);
+            println!("  {} {}", "[PASS]".green(), c.name);
         } else {
-            println!("  {} {}", "❌".red(), c.name);
+            println!("  {} {}", "[FAIL]".red(), c.name);
             println!("{}", format!("      -> {}", c.detail).red());
         }
     }
@@ -85,9 +85,9 @@ pub fn print_checklist(engine_label: &str, cases: &[TestCase]) {
     let total = cases.len();
     println!("--------------------------------------------------------------------------");
     if passed == total {
-        println!("{}", format!("  RESULT: {passed}/{total} passed — {engine_label} engine OK ✅").green().bold());
+        println!("{}", format!("  RESULT: {passed}/{total} passed — {engine_label} engine OK").green().bold());
     } else {
-        println!("{}", format!("  RESULT: {passed}/{total} passed — {} case(s) FAILING ❌", total - passed).red().bold());
+        println!("{}", format!("  RESULT: {passed}/{total} passed — {} case(s) FAILING", total - passed).red().bold());
     }
     println!("{rule}\n");
 }

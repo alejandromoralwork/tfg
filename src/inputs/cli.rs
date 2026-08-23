@@ -39,6 +39,7 @@ enum CliCommand {
     Load { paths: Vec<String> },
     Simulate { path: String, interval_secs: Option<u64> },
     Download(DownloadTarget),
+    Extract(DownloadTarget),
     Help,
     Exit,
 }
@@ -148,20 +149,34 @@ impl CliCommand {
                     println!(" Usage: download <btc|eth|sol|all>");
                     return None;
                 }
-                match parts[1].to_lowercase().as_str() {
-                    "btc" => Some(CliCommand::Download(DownloadTarget::Coin(Coin::Btc))),
-                    "eth" => Some(CliCommand::Download(DownloadTarget::Coin(Coin::Eth))),
-                    "sol" => Some(CliCommand::Download(DownloadTarget::Coin(Coin::Sol))),
-                    "all" => Some(CliCommand::Download(DownloadTarget::All)),
-                    _ => {
-                        println!(" Unknown coin. Choose 'btc', 'eth', 'sol', or 'all'.");
-                        None
-                    }
+                parse_download_target(parts[1]).map(CliCommand::Download)
+            }
+            "extract" => {
+                if parts.len() < 2 {
+                    println!(" Usage: extract <btc|eth|sol|all>");
+                    return None;
                 }
+                parse_download_target(parts[1]).map(CliCommand::Extract)
             }
             "help" => Some(CliCommand::Help),
             "exit" | "quit" => Some(CliCommand::Exit),
             _ => None,
+        }
+    }
+}
+
+/// Shared coin-argument parsing for `download`/`extract` — both take the
+/// exact same `<btc|eth|sol|all>` argument and print the same usage hint on
+/// an unrecognized one.
+fn parse_download_target(arg: &str) -> Option<DownloadTarget> {
+    match arg.to_lowercase().as_str() {
+        "btc" => Some(DownloadTarget::Coin(Coin::Btc)),
+        "eth" => Some(DownloadTarget::Coin(Coin::Eth)),
+        "sol" => Some(DownloadTarget::Coin(Coin::Sol)),
+        "all" => Some(DownloadTarget::All),
+        _ => {
+            println!(" Unknown coin. Choose 'btc', 'eth', 'sol', or 'all'.");
+            None
         }
     }
 }
@@ -286,6 +301,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_extract_command_and_rejects_unknown_coins() {
+        // Same argument shape as `download` — both go through
+        // `parse_download_target`.
+        assert_eq!(CliCommand::parse("extract btc"), Some(CliCommand::Extract(DownloadTarget::Coin(Coin::Btc))));
+        assert_eq!(CliCommand::parse("extract all"), Some(CliCommand::Extract(DownloadTarget::All)));
+        assert_eq!(CliCommand::parse("extract SOL"), Some(CliCommand::Extract(DownloadTarget::Coin(Coin::Sol)))); // case-insensitive
+        assert_eq!(CliCommand::parse("extract doge"), None); // not one of the three supported coins
+        assert_eq!(CliCommand::parse("extract"), None); // missing the coin argument
+    }
+
+    #[test]
     fn parses_test_engine_command_and_its_aliases() {
         assert_eq!(CliCommand::parse("test engine continuous"), Some(CliCommand::TestEngine(EngineMode::Continuous)));
         assert_eq!(CliCommand::parse("test engine cda"), Some(CliCommand::TestEngine(EngineMode::Continuous)));
@@ -345,7 +371,7 @@ pub fn run() {
         match CliCommand::parse(&input) {
             Some(CliCommand::Engine(mode)) => {
                 current_mode = mode;
-                println!("{}", format!("🔄 Switched simulation matching engine mode to: {current_mode:?}").cyan());
+                println!("{}", format!("[OK] Switched simulation matching engine mode to: {current_mode:?}").cyan());
             }
 
             Some(CliCommand::Add { side, price, qty, user }) => {
@@ -362,11 +388,11 @@ pub fn run() {
                 match current_mode {
                     EngineMode::Batch => {
                         fba.submit(order);
-                        println!("{}", format!("✅ Queued order successfully in FBA discrete window buffer [ID: {assigned_id}]").green());
+                        println!("{}", format!("[OK] Queued order successfully in FBA discrete window buffer [ID: {assigned_id}]").green());
                     }
                     EngineMode::Continuous => {
                         let trades = cda.submit(order);
-                        println!("{}", format!("⚡ Continuous order processed. Instant trades cleared: {}", trades.len()).green());
+                        println!("{}", format!("[OK] Continuous order processed. Instant trades cleared: {}", trades.len()).green());
                         for t in &trades {
                             println!("   [TRADE] Qty: {} at Price: {}", t.quantity, format_price(t.price));
                         }
@@ -381,7 +407,7 @@ pub fn run() {
 
             Some(CliCommand::Clear) => {
                 if current_mode == EngineMode::Continuous {
-                    println!("{}", "⚠️ Info: Continuous engine processes trades instantly. 'clear' applies to the FBA pipeline.".yellow());
+                    println!("{}", "[WARN] Continuous engine processes trades instantly. 'clear' applies to the FBA pipeline.".yellow());
                 }
                 render_clear(&mut fba);
             }
@@ -431,7 +457,7 @@ pub fn run() {
                                 }
                             }
                         }
-                        Err(err) => println!("{}", format!("❌ Failed to load '{path}': {err}").red()),
+                        Err(err) => println!("{}", format!("[ERROR] Failed to load '{path}': {err}").red()),
                     }
                 }
 
@@ -440,7 +466,7 @@ pub fn run() {
                 // string inside another resets the outer color partway
                 // through the line — better to let the FBA/CDA token pop
                 // on its own against plain text here.
-                println!("📥 Loaded {total} order-status record(s) ({live} live) into the {mode_label} engine.");
+                println!("[OK] Loaded {total} order-status record(s) ({live} live) into the {mode_label} engine.");
             }
 
             Some(CliCommand::Simulate { path, interval_secs }) => {
@@ -449,6 +475,8 @@ pub fn run() {
 
             Some(CliCommand::Download(target)) => download_cmd::run(target),
 
+            Some(CliCommand::Extract(target)) => download_cmd::run_extract(target),
+
             Some(CliCommand::Help) => print_help(),
 
             Some(CliCommand::Exit) => {
@@ -456,7 +484,7 @@ pub fn run() {
                 break;
             }
 
-            None => println!("{}", "❌ Command sequence unrecognized. Run 'help' to review syntax specifications.".red()),
+            None => println!("{}", "[ERROR] Command sequence unrecognized. Run 'help' to review syntax specifications.".red()),
         }
     }
 }
@@ -476,8 +504,9 @@ fn print_help() {
         ("batch", "Inspect active continuous book state or FBA buffer state"),
         ("clear", "Force close batch window, clear matching equations, and log data"),
         ("load <path> [path...]", "Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine"),
-        ("simulate <path|btc|eth|sol> [interval_secs]", "Replay real .csv/.gz order-status data (a file/folder, or 'btc'/'eth'/'sol' for data/order_statuses/<coin>/) through BOTH engines, write time-series metrics to output/"),
+        ("simulate <path|btc|eth|sol|all> [interval_secs]", "Replay real .csv/.gz order-status data (a file/folder, 'btc'/'eth'/'sol' for data/order_statuses/<coin>/, or 'all' for all three in sequence) through BOTH engines, write time-series metrics to output/"),
         ("download <btc|eth|sol|all>", "Fetch that coin's order-status archive from Zenodo and extract it into data/order_statuses/<coin>/, ready for 'simulate <coin>'"),
+        ("extract <btc|eth|sol|all>", "(Re-)extract an already-downloaded archive without re-fetching it — for when 'download's extraction step failed but the archive is already local"),
         ("log", "Audit chronological ledger (combined FBA + CDA executed trades)"),
         ("metrics", "Print core metrics computed so far, for both engines"),
         ("orderbook (alias: ob)", "Print the active engine's orderbook state + its own core metrics, in one view"),
@@ -563,20 +592,20 @@ fn render_book(cda: &CdaOrderBook) {
 
 fn render_clear(fba: &mut FbaOrderBook) {
     if fba.pending_orders.is_empty() {
-        println!("{}", "⚠️ Window buffer is empty. No discrete allocations can clear!".yellow());
+        println!("{}", "[WARN] Window buffer is empty. No discrete allocations can clear!".yellow());
         return;
     }
 
-    println!("\n{}", "🔄 [FBA Window Closed] Computing Uniform Market Clearing...".cyan());
+    println!("\n{}", "[FBA Window Closed] Computing Uniform Market Clearing...".cyan());
     println!("{}", "==============================================================".cyan());
 
     match fba.clear() {
         Some(clearing) => {
-            println!("{}", "✅ Uniform Clearing Calculated Successfully!".green());
+            println!("{}", "[OK] Uniform Clearing Calculated Successfully!".green());
             println!("   Execution Rate (Uniform Price) : {} USDT", format_price(clearing.clearing_price));
             println!("   Total Executed Asset Mass       : {} units", clearing.traded_quantity);
 
-            println!("\n📜 Detailed Execution Trade Log:");
+            println!("\nDetailed Execution Trade Log:");
             if clearing.trades.is_empty() {
                 println!("   (No trades matched within this crossover threshold)");
             } else {
@@ -596,11 +625,11 @@ fn render_clear(fba: &mut FbaOrderBook) {
 
             let unfilled = fba.pending_orders.len();
             if unfilled > 0 {
-                println!("{}", format!("\n⏭️  {unfilled} order(s) left unexecuted at this clearing price — rolled over to the next window.").yellow());
+                println!("{}", format!("\n[INFO] {unfilled} order(s) left unexecuted at this clearing price — rolled over to the next window.").yellow());
             }
         }
         None => {
-            println!("{}", "❌ Convergence Failure: No mathematical crossover found inside this batch window.".red());
+            println!("{}", "[ERROR] Convergence Failure: No mathematical crossover found inside this batch window.".red());
         }
     }
 }
@@ -608,7 +637,7 @@ fn render_clear(fba: &mut FbaOrderBook) {
 fn render_log(fba: &FbaOrderBook, cda: &CdaOrderBook) {
     let rule = "==========================================================================".cyan();
     println!("\n{rule}");
-    println!("{}", "📜                     SYSTEM HISTORICAL EXECUTION LOG                    ".cyan().bold());
+    println!("{}", "                      SYSTEM HISTORICAL EXECUTION LOG                     ".cyan().bold());
     println!("{rule}");
 
     let mut combined: Vec<&Trade> = fba.executed_trades.iter().chain(cda.executed_trades.iter()).collect();

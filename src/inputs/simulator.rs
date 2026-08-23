@@ -26,6 +26,8 @@
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use colored::Colorize;
 use flate2::read::MultiGzDecoder;
@@ -56,7 +58,7 @@ pub fn load_order_status_csv(path: &str) -> io::Result<Vec<Order>> {
             // Valid row, but its size rounds to nothing worth trading —
             // not an error, just not worth constructing an order for.
             Ok(None) => {}
-            Err(()) => eprintln!("{}", format!("⚠️  Skipping malformed row {} in {path}", line_no + 1).yellow()),
+            Err(()) => eprintln!("{}", format!("[WARN] Skipping malformed row {} in {path}", line_no + 1).yellow()),
         }
     }
 
@@ -281,12 +283,33 @@ fn is_supported_extension(path: &Path) -> bool {
     matches!(path.extension().and_then(|e| e.to_str()), Some("csv") | Some("gz"))
 }
 
+/// A `Read` wrapper that adds every byte actually read to a shared atomic
+/// counter — sits *below* the gzip decoder (wraps the raw file, not its
+/// decompressed output), so it tracks physical bytes consumed from disk
+/// (compressed size for `.gz`) rather than decoded record volume. That's
+/// what makes it a meaningful progress signal: it can be compared directly
+/// against each file's on-disk size (`fs::metadata`, no decompression
+/// needed), which `simulate_cmd` sums upfront for its live progress bar.
+struct CountingReader<R> {
+    inner: R,
+    count: Arc<AtomicU64>,
+}
+
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.count.fetch_add(n as u64, Ordering::Relaxed);
+        Ok(n)
+    }
+}
+
 /// Opens `path` as a buffered byte stream, transparently gzip-decompressing
 /// through `flate2::read::MultiGzDecoder` if the extension is `.gz`.
 /// Streams throughout — the decompressed content is never held in memory
-/// as one big buffer, only whatever the caller reads at a time.
-fn open_reader(path: &Path) -> io::Result<Box<dyn Read>> {
-    let file = BufReader::new(File::open(path)?);
+/// as one big buffer, only whatever the caller reads at a time. Every byte
+/// read from `path` itself (pre-decompression) is added to `bytes_read`.
+fn open_reader(path: &Path, bytes_read: &Arc<AtomicU64>) -> io::Result<Box<dyn Read>> {
+    let file = CountingReader { inner: BufReader::new(File::open(path)?), count: Arc::clone(bytes_read) };
     if path.extension().and_then(|e| e.to_str()) == Some("gz") {
         Ok(Box::new(MultiGzDecoder::new(file)))
     } else {
@@ -297,12 +320,15 @@ fn open_reader(path: &Path) -> io::Result<Box<dyn Read>> {
 /// Streams every file in `files`, calling `on_record` immediately for each
 /// decoded `Order` — never collects them into a `Vec`. Prints a short
 /// progress line per file (there are at most 48 per day, so this doesn't
-/// spam a multi-day run) so a long replay doesn't look hung.
-pub fn stream_records(files: &[PathBuf], mut on_record: impl FnMut(Order)) -> io::Result<RunStats> {
+/// spam a multi-day run) so a long replay doesn't look hung. `bytes_read`
+/// accumulates raw bytes consumed across every file — `simulate_cmd` polls
+/// it from another thread to drive a live progress bar against the total
+/// on-disk size of `files`, computed upfront.
+pub fn stream_records(files: &[PathBuf], bytes_read: &Arc<AtomicU64>, mut on_record: impl FnMut(Order)) -> io::Result<RunStats> {
     let mut stats = RunStats::default();
 
     for (i, path) in files.iter().enumerate() {
-        println!("{}", format!("📂 [{}/{}] {}", i + 1, files.len(), path.display()).dimmed());
+        println!("{}", format!("-> [{}/{}] {}", i + 1, files.len(), path.display()).dimmed());
         // Explicit flush: stdout is fully (not line-)buffered when it's
         // not a terminal (piped/redirected), which is exactly how a long
         // `simulate` run's output is normally consumed — without this,
@@ -310,7 +336,7 @@ pub fn stream_records(files: &[PathBuf], mut on_record: impl FnMut(Order)) -> io
         // appears until the process exits, making a multi-minute run look
         // hung even though it's working.
         io::stdout().flush().ok();
-        let (seen, skipped) = stream_file(path, &mut on_record)?;
+        let (seen, skipped) = stream_file(path, bytes_read, &mut on_record)?;
         stats.files_processed += 1;
         stats.records_seen += seen;
         stats.records_skipped += skipped;
@@ -319,9 +345,9 @@ pub fn stream_records(files: &[PathBuf], mut on_record: impl FnMut(Order)) -> io
     Ok(stats)
 }
 
-fn stream_file(path: &Path, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize)> {
+fn stream_file(path: &Path, bytes_read: &Arc<AtomicU64>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize)> {
     let is_csv = path.extension().and_then(|e| e.to_str()) == Some("csv");
-    let reader = open_reader(path)?;
+    let reader = open_reader(path, bytes_read)?;
 
     if is_csv {
         stream_csv(reader, on_record)
@@ -351,7 +377,7 @@ fn stream_csv(reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::R
             Ok(None) => seen += 1, // parsed fine, size rounded to nothing
             Err(()) => {
                 skipped += 1;
-                eprintln!("{}", format!("⚠️  Skipping malformed CSV row {}", line_no + 1).yellow());
+                eprintln!("{}", format!("[WARN] Skipping malformed CSV row {}", line_no + 1).yellow());
             }
         }
     }
@@ -372,14 +398,6 @@ fn stream_binary(mut reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -
         match binary_format::parse_record(&buf) {
             Some(order) => on_record(order),
             None => skipped += 1,
-        }
-
-        // A single hour's worth of real data is routinely ~1M records —
-        // without an in-file progress indicator, one large file would give
-        // no visibility at all between its start and end.
-        if seen % 250_000 == 0 {
-            println!("{}", format!("   ... {seen} records so far").dimmed());
-            io::stdout().flush().ok();
         }
     }
 
@@ -520,13 +538,21 @@ mod tests {
         let mut first_order: Option<Order> = None;
         let mut count = 0usize;
 
-        let stats = stream_records(&[path.to_path_buf()], |order| {
+        let bytes_read = Arc::new(AtomicU64::new(0));
+        let stats = stream_records(&[path.to_path_buf()], &bytes_read, |order| {
             if first_order.is_none() {
                 first_order = Some(order);
             }
             count += 1;
         })
         .expect("streaming the real sample file should succeed");
+
+        // The counted bytes are physical (compressed) file bytes, so they
+        // should land somewhere under the file's own on-disk size — not
+        // zero (nothing read), not wildly more than the compressed size.
+        let file_len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        assert!(bytes_read.load(Ordering::Relaxed) > 0, "should have counted some bytes read");
+        assert!(bytes_read.load(Ordering::Relaxed) <= file_len, "counted bytes shouldn't exceed the compressed file's own size");
 
         assert_eq!(stats.files_processed, 1);
         assert_eq!(stats.records_seen, count + stats.records_skipped);

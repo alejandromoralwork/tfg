@@ -10,14 +10,18 @@
 //! mutating what `add`/`load`/`metrics`/`orderbook` show the user
 //! afterward.
 
+use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use colored::Colorize;
 
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
+use crate::inputs::progress;
 use crate::inputs::simulator;
 use crate::metrics::timeseries::{self, MetricsRecorder};
 use crate::types::{EngineKind, Order, Side};
@@ -26,6 +30,18 @@ const DEFAULT_INTERVAL_SECS: u64 = 1;
 const NS_PER_SEC: u64 = 1_000_000_000;
 
 pub fn run(path_str: &str, interval_secs: Option<u64>) {
+    // `simulate all` is shorthand for running `btc`, `eth`, then `sol` back
+    // to back — same idea as `download all`/`extract all`, and just as
+    // simple to implement: each coin gets its own complete, independent
+    // run (files, engines, progress bar, output) rather than trying to
+    // merge three unrelated datasets into one combined replay.
+    if path_str.eq_ignore_ascii_case("all") {
+        for coin in ["btc", "eth", "sol"] {
+            run(coin, interval_secs);
+        }
+        return;
+    }
+
     let interval_secs = interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS);
     let interval_width_ns = interval_secs * NS_PER_SEC;
 
@@ -41,22 +57,32 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let files = match simulator::collect_input_files(root) {
         Ok(files) if !files.is_empty() => files,
         Ok(_) if coin_shorthand => {
-            println!("{}", format!("❌ No .csv/.gz files found under '{resolved_path}'. Run 'download {path_str}' first?").red());
+            println!("{}", format!("[ERROR] No .csv/.gz files found under '{resolved_path}'. Run 'download {path_str}' first?").red());
             return;
         }
         Ok(_) => {
-            println!("{}", format!("❌ No .csv/.gz files found under '{resolved_path}'.").red());
+            println!("{}", format!("[ERROR] No .csv/.gz files found under '{resolved_path}'.").red());
             return;
         }
         Err(err) => {
-            println!("{}", format!("❌ Failed to read '{resolved_path}': {err}").red());
+            println!("{}", format!("[ERROR] Failed to read '{resolved_path}': {err}").red());
             return;
         }
     };
 
-    println!("{}", format!("🚀 Simulating {} file(s) from '{resolved_path}', interval={interval_secs}s ...", files.len()).cyan());
+    println!("{}", format!("==> Simulating {} file(s) from '{resolved_path}', interval={interval_secs}s ...", files.len()).cyan());
     std::io::stdout().flush().ok();
     let wall_clock_start = Instant::now();
+
+    // Total on-disk size of every file about to be streamed — cheap (just
+    // `stat`s, no decompression) and the whole basis for the live progress
+    // bar below: `simulator::stream_records` counts raw bytes actually
+    // read from disk (compressed size for `.gz`) as it goes, so comparing
+    // that running count against this total gives a real percentage
+    // through the run, not just an unbounded "N records so far".
+    let total_bytes: u64 = files.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum();
+    let bytes_read = Arc::new(AtomicU64::new(0));
+    let records_seen = Arc::new(AtomicU64::new(0));
 
     let mut fba = FbaOrderBook::new();
     let mut cda = CdaOrderBook::new();
@@ -82,105 +108,120 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let mut cached_ask_depth: u128 = 0;
     let mut cached_depth_sched = [(0u128, 0u128); timeseries::DEPTH_BPS_THRESHOLDS.len()];
 
-    let stream_result = simulator::stream_records(&files, |order: Order| {
-        last_seen_ts = Some(order.ts);
+    let stream_result = progress::run_with_progress(
+        (total_bytes > 0).then_some(total_bytes),
+        {
+            let bytes_read = Arc::clone(&bytes_read);
+            move || bytes_read.load(Ordering::Relaxed)
+        },
+        progress::human_bytes,
+        {
+            let records_seen = Arc::clone(&records_seen);
+            move || format!("  {} record(s)", records_seen.load(Ordering::Relaxed))
+        },
+        || {
+            simulator::stream_records(&files, &bytes_read, |order: Order| {
+                records_seen.fetch_add(1, Ordering::Relaxed);
+                last_seen_ts = Some(order.ts);
 
-        // Both recorders see the raw message stream before any gating —
-        // same "sees rejections/cancellations too" principle the message
-        // log has always used, needed for order-to-trade ratio etc.
-        let msg = timeseries::OrderMessage {
-            ts: order.ts,
-            oid: order.oid,
-            user_id: order.user_id.clone(),
-            side: order.side(),
-            limit_price: order.limit_price(),
-            quantity: order.orig_sz,
-            accepted: order.is_new_live_order(),
-        };
-        fba_recorder.record_message(msg.clone());
-        cda_recorder.record_message(msg);
+                // Both recorders see the raw message stream before any gating —
+                // same "sees rejections/cancellations too" principle the message
+                // log has always used, needed for order-to-trade ratio etc.
+                let msg = timeseries::OrderMessage {
+                    ts: order.ts,
+                    oid: order.oid,
+                    user_id: order.user_id.clone(),
+                    side: order.side(),
+                    limit_price: order.limit_price(),
+                    quantity: order.orig_sz,
+                    accepted: order.is_new_live_order(),
+                };
+                fba_recorder.record_message(msg.clone());
+                cda_recorder.record_message(msg);
 
-        if next_fba_boundary.is_none() {
-            next_fba_boundary = Some(order.ts + interval_width_ns);
-            fba_batch_open_ts = Some(order.ts);
-        }
-        while order.ts >= next_fba_boundary.expect("just ensured Some above") {
-            let open_ts = fba_batch_open_ts.expect("set alongside next_fba_boundary");
-            let close_ts = next_fba_boundary.expect("checked by the while condition");
-            clear_fba_batch(&mut fba, &mut fba_recorder, open_ts, close_ts);
-            fba_batch_open_ts = Some(close_ts);
-            next_fba_boundary = Some(close_ts + interval_width_ns);
-        }
+                if next_fba_boundary.is_none() {
+                    next_fba_boundary = Some(order.ts + interval_width_ns);
+                    fba_batch_open_ts = Some(order.ts);
+                }
+                while order.ts >= next_fba_boundary.expect("just ensured Some above") {
+                    let open_ts = fba_batch_open_ts.expect("set alongside next_fba_boundary");
+                    let close_ts = next_fba_boundary.expect("checked by the while condition");
+                    clear_fba_batch(&mut fba, &mut fba_recorder, open_ts, close_ts);
+                    fba_batch_open_ts = Some(close_ts);
+                    next_fba_boundary = Some(close_ts + interval_width_ns);
+                }
 
-        // Rejections, cancellations of already-gone orders, fills, and
-        // un-triggered conditional orders are guaranteed no-ops in both
-        // `FbaOrderBook::submit` and `CdaOrderBook::submit` (see their own
-        // `is_new_live_order`/`is_cancellation` gating) — skip the clone +
-        // call entirely for those rather than paying for a call that's
-        // known in advance to do nothing.
-        let is_actionable = order.is_new_live_order() || order.is_cancellation();
+                // Rejections, cancellations of already-gone orders, fills, and
+                // un-triggered conditional orders are guaranteed no-ops in both
+                // `FbaOrderBook::submit` and `CdaOrderBook::submit` (see their own
+                // `is_new_live_order`/`is_cancellation` gating) — skip the clone +
+                // call entirely for those rather than paying for a call that's
+                // known in advance to do nothing.
+                let is_actionable = order.is_new_live_order() || order.is_cancellation();
 
-        if is_actionable {
-            fba.submit(order.clone());
-        }
+                if is_actionable {
+                    fba.submit(order.clone());
+                }
 
-        let reference_price = midpoint(cda.best_bid(), cda.best_ask());
-        let cda_start = Instant::now();
-        let trades = if is_actionable { cda.submit(order.clone()) } else { Vec::new() };
-        let compute_time = cda_start.elapsed();
+                let reference_price = midpoint(cda.best_bid(), cda.best_ask());
+                let cda_start = Instant::now();
+                let trades = if is_actionable { cda.submit(order.clone()) } else { Vec::new() };
+                let compute_time = cda_start.elapsed();
 
-        for trade in &trades {
-            cda_recorder.record_trade(timeseries::TradeEvent {
-                trade: trade.clone(),
-                reference_price,
-                aggressor_side: Some(order.side()),
-            });
-        }
+                for trade in &trades {
+                    cda_recorder.record_trade(timeseries::TradeEvent {
+                        trade: trade.clone(),
+                        reference_price,
+                        aggressor_side: Some(order.side()),
+                    });
+                }
 
-        let best_bid = cda.best_bid();
-        let best_ask = cda.best_ask();
-        // Bids/asks are kept sorted best-first (binary-search insertion —
-        // see `CdaOrderBook::bid_sort_key`/`ask_sort_key`), so index 0 IS
-        // the touch. Separate from `bid_depth`/`ask_depth` below, which sum
-        // the whole book.
-        let best_bid_qty: u128 = cda.bids.first().map(|o| o.remaining).unwrap_or(0);
-        let best_ask_qty: u128 = cda.asks.first().map(|o| o.remaining).unwrap_or(0);
+                let best_bid = cda.best_bid();
+                let best_ask = cda.best_ask();
+                // Bids/asks are kept sorted best-first (binary-search insertion —
+                // see `CdaOrderBook::bid_sort_key`/`ask_sort_key`), so index 0 IS
+                // the touch. Separate from `bid_depth`/`ask_depth` below, which sum
+                // the whole book.
+                let best_bid_qty: u128 = cda.bids.first().map(|o| o.remaining).unwrap_or(0);
+                let best_ask_qty: u128 = cda.asks.first().map(|o| o.remaining).unwrap_or(0);
 
-        // Only re-scan the whole book when this record could have changed
-        // it — otherwise `cda.bids`/`cda.asks` (and therefore best_bid/
-        // best_ask above) are identical to last time, so the cached values
-        // are still exactly right.
-        if is_actionable {
-            cached_bid_depth = cda.bids.iter().map(|o| o.remaining).sum();
-            cached_ask_depth = cda.asks.iter().map(|o| o.remaining).sum();
-            cached_depth_sched = match midpoint(best_bid, best_ask) {
-                Some(mid) => timeseries::depth_schedule(
-                    mid,
-                    cda.bids
-                        .iter()
-                        .map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))
-                        .chain(cda.asks.iter().map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))),
-                ),
-                None => [(0, 0); timeseries::DEPTH_BPS_THRESHOLDS.len()],
-            };
-        }
-        cda_recorder.record_book_snapshot(timeseries::BookSnapshot {
-            ts: order.ts,
-            best_bid,
-            best_ask,
-            best_bid_qty,
-            best_ask_qty,
-            bid_depth: cached_bid_depth,
-            ask_depth: cached_ask_depth,
-            depth_schedule: cached_depth_sched,
-            compute_time,
-        });
-    });
+                // Only re-scan the whole book when this record could have changed
+                // it — otherwise `cda.bids`/`cda.asks` (and therefore best_bid/
+                // best_ask above) are identical to last time, so the cached values
+                // are still exactly right.
+                if is_actionable {
+                    cached_bid_depth = cda.bids.iter().map(|o| o.remaining).sum();
+                    cached_ask_depth = cda.asks.iter().map(|o| o.remaining).sum();
+                    cached_depth_sched = match midpoint(best_bid, best_ask) {
+                        Some(mid) => timeseries::depth_schedule(
+                            mid,
+                            cda.bids
+                                .iter()
+                                .map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))
+                                .chain(cda.asks.iter().map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))),
+                        ),
+                        None => [(0, 0); timeseries::DEPTH_BPS_THRESHOLDS.len()],
+                    };
+                }
+                cda_recorder.record_book_snapshot(timeseries::BookSnapshot {
+                    ts: order.ts,
+                    best_bid,
+                    best_ask,
+                    best_bid_qty,
+                    best_ask_qty,
+                    bid_depth: cached_bid_depth,
+                    ask_depth: cached_ask_depth,
+                    depth_schedule: cached_depth_sched,
+                    compute_time,
+                });
+            })
+        },
+    );
 
     let stats = match stream_result {
         Ok(stats) => stats,
         Err(err) => {
-            println!("{}", format!("❌ Error while streaming: {err}").red());
+            println!("{}", format!("[ERROR] Streaming failed: {err}").red());
             return;
         }
     };
@@ -196,7 +237,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     println!(
         "{}",
         format!(
-            "✅ Streamed {} file(s), {} record(s) seen ({} skipped), in {:.1}s wall-clock.",
+            "[OK] Streamed {} file(s), {} record(s) seen ({} skipped), in {:.1}s wall-clock.",
             stats.files_processed,
             stats.records_seen,
             stats.records_skipped,
@@ -207,11 +248,11 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
 
     let fba_series = fba_recorder.finalize();
     let cda_series = cda_recorder.finalize();
-    println!("📊 FBA: {} interval(s)  |  CDA: {} interval(s)", fba_series.len(), cda_series.len());
+    println!("FBA: {} interval(s)  |  CDA: {} interval(s)", fba_series.len(), cda_series.len());
 
     match write_output(&resolved_path, &stats, elapsed, &fba_series, &cda_series) {
-        Ok(dir) => println!("{}", format!("📁 Wrote time series + summary to {}", dir.display()).green()),
-        Err(err) => println!("{}", format!("❌ Failed to write output: {err}").red()),
+        Ok(dir) => println!("{}", format!("[OK] Wrote time series + summary to {}", dir.display()).green()),
+        Err(err) => println!("{}", format!("[ERROR] Failed to write output: {err}").red()),
     }
 }
 
