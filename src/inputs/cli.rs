@@ -10,6 +10,7 @@ use colored::Colorize;
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
 use crate::inputs::download_cmd::{self, Coin, DownloadTarget};
+use crate::inputs::scan_cmd;
 use crate::inputs::simulate_cmd;
 use crate::inputs::simulator;
 use crate::inputs::test_suite;
@@ -38,6 +39,7 @@ enum CliCommand {
     TestEngine(EngineMode),
     Load { paths: Vec<String> },
     Simulate { path: String, interval_secs: Option<u64> },
+    Scan { path: String },
     Download(DownloadTarget),
     Extract(DownloadTarget),
     Help,
@@ -143,6 +145,13 @@ impl CliCommand {
                     None => None,
                 };
                 Some(CliCommand::Simulate { path, interval_secs })
+            }
+            "scan" => {
+                if parts.len() < 2 {
+                    println!(" Usage: scan <path|btc|eth|sol|all>");
+                    return None;
+                }
+                Some(CliCommand::Scan { path: parts[1].to_string() })
             }
             "download" => {
                 if parts.len() < 2 {
@@ -287,6 +296,16 @@ mod tests {
         );
         assert_eq!(CliCommand::parse("simulate"), None); // needs at least a path
         assert_eq!(CliCommand::parse("simulate some/path notanumber"), None); // interval must be numeric
+    }
+
+    #[test]
+    fn parses_scan_command() {
+        assert_eq!(CliCommand::parse("scan sol"), Some(CliCommand::Scan { path: "sol".to_string() }));
+        assert_eq!(
+            CliCommand::parse("scan ../data/order_statuses/20251201"),
+            Some(CliCommand::Scan { path: "../data/order_statuses/20251201".to_string() })
+        );
+        assert_eq!(CliCommand::parse("scan"), None); // needs at least a path
     }
 
     #[test]
@@ -473,6 +492,8 @@ pub fn run() {
                 simulate_cmd::run(&path, interval_secs);
             }
 
+            Some(CliCommand::Scan { path }) => scan_cmd::run(&path),
+
             Some(CliCommand::Download(target)) => download_cmd::run(target),
 
             Some(CliCommand::Extract(target)) => download_cmd::run_extract(target),
@@ -505,6 +526,7 @@ fn print_help() {
         ("clear", "Force close batch window, clear matching equations, and log data"),
         ("load <path> [path...]", "Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine"),
         ("simulate <path|btc|eth|sol|all> [interval_secs]", "Replay real .csv/.gz order-status data (a file/folder, 'btc'/'eth'/'sol' for data/order_statuses/<coin>/, or 'all' for all three in sequence) through BOTH engines, write time-series metrics to output/"),
+        ("scan <path|btc|eth|sol|all>", "Count records/orders across real order-status data without running either engine (new live orders / cancellations / other events) — fast: no book-depth computation, no metrics, no output/ files"),
         ("download <btc|eth|sol|all>", "Fetch that coin's order-status archive from Zenodo and extract it into data/order_statuses/<coin>/, ready for 'simulate <coin>'"),
         ("extract <btc|eth|sol|all>", "(Re-)extract an already-downloaded archive without re-fetching it — for when 'download's extraction step failed but the archive is already local"),
         ("log", "Audit chronological ledger (combined FBA + CDA executed trades)"),
