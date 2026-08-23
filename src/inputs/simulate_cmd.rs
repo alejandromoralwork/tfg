@@ -70,6 +70,18 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let mut fba_batch_open_ts: Option<u64> = None;
     let mut last_seen_ts: Option<u64> = None;
 
+    // Cache of the CDA book's depth-derived figures, updated only when a
+    // record could actually have changed the book (see `is_actionable`
+    // below) — recomputing these from scratch every record turns the whole
+    // replay into O(records x book size), the dominant cost once the book
+    // grows over a trading day. When a record is a no-op (rejection,
+    // cancellation of an already-gone order, fill, un-triggered conditional
+    // order), `cda.bids`/`cda.asks` are byte-for-byte unchanged from the
+    // previous record, so the previous values are still exactly correct.
+    let mut cached_bid_depth: u128 = 0;
+    let mut cached_ask_depth: u128 = 0;
+    let mut cached_depth_sched = [(0u128, 0u128); timeseries::DEPTH_BPS_THRESHOLDS.len()];
+
     let stream_result = simulator::stream_records(&files, |order: Order| {
         last_seen_ts = Some(order.ts);
 
@@ -100,11 +112,21 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
             next_fba_boundary = Some(close_ts + interval_width_ns);
         }
 
-        fba.submit(order.clone());
+        // Rejections, cancellations of already-gone orders, fills, and
+        // un-triggered conditional orders are guaranteed no-ops in both
+        // `FbaOrderBook::submit` and `CdaOrderBook::submit` (see their own
+        // `is_new_live_order`/`is_cancellation` gating) — skip the clone +
+        // call entirely for those rather than paying for a call that's
+        // known in advance to do nothing.
+        let is_actionable = order.is_new_live_order() || order.is_cancellation();
+
+        if is_actionable {
+            fba.submit(order.clone());
+        }
 
         let reference_price = midpoint(cda.best_bid(), cda.best_ask());
         let cda_start = Instant::now();
-        let trades = cda.submit(order.clone());
+        let trades = if is_actionable { cda.submit(order.clone()) } else { Vec::new() };
         let compute_time = cda_start.elapsed();
 
         for trade in &trades {
@@ -123,27 +145,34 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         // the whole book.
         let best_bid_qty: u128 = cda.bids.first().map(|o| o.remaining).unwrap_or(0);
         let best_ask_qty: u128 = cda.asks.first().map(|o| o.remaining).unwrap_or(0);
-        let bid_depth: u128 = cda.bids.iter().map(|o| o.remaining).sum();
-        let ask_depth: u128 = cda.asks.iter().map(|o| o.remaining).sum();
-        let depth_sched = match midpoint(best_bid, best_ask) {
-            Some(mid) => timeseries::depth_schedule(
-                mid,
-                cda.bids
-                    .iter()
-                    .map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))
-                    .chain(cda.asks.iter().map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))),
-            ),
-            None => [(0, 0); timeseries::DEPTH_BPS_THRESHOLDS.len()],
-        };
+
+        // Only re-scan the whole book when this record could have changed
+        // it — otherwise `cda.bids`/`cda.asks` (and therefore best_bid/
+        // best_ask above) are identical to last time, so the cached values
+        // are still exactly right.
+        if is_actionable {
+            cached_bid_depth = cda.bids.iter().map(|o| o.remaining).sum();
+            cached_ask_depth = cda.asks.iter().map(|o| o.remaining).sum();
+            cached_depth_sched = match midpoint(best_bid, best_ask) {
+                Some(mid) => timeseries::depth_schedule(
+                    mid,
+                    cda.bids
+                        .iter()
+                        .map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))
+                        .chain(cda.asks.iter().map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))),
+                ),
+                None => [(0, 0); timeseries::DEPTH_BPS_THRESHOLDS.len()],
+            };
+        }
         cda_recorder.record_book_snapshot(timeseries::BookSnapshot {
             ts: order.ts,
             best_bid,
             best_ask,
             best_bid_qty,
             best_ask_qty,
-            bid_depth,
-            ask_depth,
-            depth_schedule: depth_sched,
+            bid_depth: cached_bid_depth,
+            ask_depth: cached_ask_depth,
+            depth_schedule: cached_depth_sched,
             compute_time,
         });
     });
