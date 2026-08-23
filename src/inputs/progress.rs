@@ -23,19 +23,22 @@ pub fn human_bytes(n: u64) -> String {
 }
 
 /// Redraws a progress line in place. With a known `total`, shows a
-/// filled/empty bar and a percentage; without one (e.g. the total couldn't
-/// be determined up front), falls back to just the running count and
-/// elapsed time so it's still obvious something is happening. `fmt` formats
-/// a raw count for display (`human_bytes` for byte counts, `|n| n.to_string()`
-/// for plain ones); `extra` is appended as-is for any additional context
-/// (e.g. "  file 3/48") — pass `""` for none.
+/// filled/empty bar, a percentage, and (once there's enough signal to
+/// estimate one — see `eta_suffix`) an ETA; without a `total` (e.g. it
+/// couldn't be determined up front), falls back to just the running count
+/// and elapsed time so it's still obvious something is happening — no ETA
+/// is possible without knowing the target. `fmt` formats a raw count for
+/// display (`human_bytes` for byte counts, `|n| n.to_string()` for plain
+/// ones); `extra` is appended as-is for any additional context (e.g.
+/// "  file 3/48") — pass `""` for none.
 pub fn print_bar(current: u64, total: Option<u64>, elapsed: Duration, fmt: impl Fn(u64) -> String, extra: &str) {
     const WIDTH: usize = 30;
     let line = match total.filter(|&t| t > 0) {
         Some(total) => {
             let ratio = (current as f64 / total as f64).min(1.0);
             let filled = (ratio * WIDTH as f64).round() as usize;
-            format!("[{}{}] {:>3}%  ({} / {}){extra}", "#".repeat(filled), "-".repeat(WIDTH - filled), (ratio * 100.0) as u32, fmt(current), fmt(total))
+            let eta = eta_suffix(current, total, elapsed);
+            format!("[{}{}] {:>3}%  ({} / {}){eta}{extra}", "#".repeat(filled), "-".repeat(WIDTH - filled), (ratio * 100.0) as u32, fmt(current), fmt(total))
         }
         None => format!("   ... {} so far (elapsed {}s){extra}", fmt(current), elapsed.as_secs()),
     };
@@ -44,6 +47,41 @@ pub fn print_bar(current: u64, total: Option<u64>, elapsed: Duration, fmt: impl 
     // not scrolled.
     print!("\r{line}                    ");
     std::io::stdout().flush().ok();
+}
+
+/// `"  ETA ~<duration>"` once there's been enough elapsed time to trust an
+/// average-rate estimate, else `""` (nothing done yet, already done, or
+/// still too early — a rate computed from a fraction of a second of data
+/// would be more misleading than useful, especially right at startup when
+/// the first file/chunk hasn't even finished yet).
+fn eta_suffix(current: u64, total: u64, elapsed: Duration) -> String {
+    let elapsed_secs = elapsed.as_secs_f64();
+    if current == 0 || current >= total || elapsed_secs < 2.0 {
+        return String::new();
+    }
+    let rate = current as f64 / elapsed_secs; // units/sec, averaged since start
+    let remaining_secs = (total - current) as f64 / rate;
+    format!("  ETA ~{}", format_duration(remaining_secs as u64))
+}
+
+/// `secs` formatted as the coarsest one or two units that convey it
+/// (`"2d 4h"`, `"1h 23m"`, `"5m 09s"`, `"45s"`) — a multi-day estimate
+/// doesn't need second-level precision, so lower units drop off once a
+/// larger one is present.
+pub fn format_duration(secs: u64) -> String {
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3600;
+    let minutes = (secs % 3600) / 60;
+    let seconds = secs % 60;
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {minutes:02}m")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds:02}s")
+    } else {
+        format!("{seconds}s")
+    }
 }
 
 /// Runs `work` on the calling thread while a background thread polls
@@ -91,5 +129,23 @@ mod tests {
         assert_eq!(human_bytes(512), "512.00 B");
         assert_eq!(human_bytes(1536), "1.50 KiB"); // 1.5 * 1024
         assert_eq!(human_bytes(6_615_982_080), "6.16 GiB"); // the real sol archive's uncompressed size
+    }
+
+    #[test]
+    fn format_duration_drops_lower_units_once_a_larger_one_is_present() {
+        assert_eq!(format_duration(0), "0s");
+        assert_eq!(format_duration(45), "45s");
+        assert_eq!(format_duration(69), "1m 09s");
+        assert_eq!(format_duration(3661), "1h 01m");
+        assert_eq!(format_duration(90_000), "1d 1h"); // 25h -> 1d 1h
+    }
+
+    #[test]
+    fn eta_suffix_withholds_the_estimate_until_theres_enough_signal() {
+        assert_eq!(eta_suffix(0, 100, Duration::from_secs(10)), "", "nothing done yet -> no rate to extrapolate from");
+        assert_eq!(eta_suffix(100, 100, Duration::from_secs(10)), "", "already done -> no ETA needed");
+        assert_eq!(eta_suffix(1, 100, Duration::from_millis(500)), "", "too little elapsed time to trust a rate yet");
+        // 50/100 in 10s -> 5 units/s -> 50 remaining -> 10s left.
+        assert_eq!(eta_suffix(50, 100, Duration::from_secs(10)), "  ETA ~10s");
     }
 }

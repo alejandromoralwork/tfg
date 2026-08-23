@@ -350,7 +350,7 @@ pub fn run() {
 
     let rule = "======================================================================".cyan();
     println!("{rule}");
-    println!("{}", "Cross-Paradigm Market Research Simulator Core".cyan().bold());
+    println!("{}", "TFG Simulator".cyan().bold());
     println!("{rule}");
     print_help();
 
@@ -509,7 +509,7 @@ fn print_help() {
         ("extract <btc|eth|sol|all>", "(Re-)extract an already-downloaded archive without re-fetching it — for when 'download's extraction step failed but the archive is already local"),
         ("log", "Audit chronological ledger (combined FBA + CDA executed trades)"),
         ("metrics", "Print core metrics computed so far, for both engines"),
-        ("orderbook (alias: ob)", "Print the active engine's orderbook state + its own core metrics, in one view"),
+        ("orderbook", "Print the active engine's orderbook state + its own core metrics, in one view"),
         ("test engine <continuous|batch>", "Run the built-in test checklist against a fresh, isolated instance of that engine"),
         ("help", "Review configuration tools"),
         ("exit", "Safely close terminal stream"),
