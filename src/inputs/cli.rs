@@ -521,7 +521,7 @@ fn print_help() {
     println!("\n{}", "Available Simulation Interaction Inputs:".bold());
     const ROWS: &[(&str, &str)] = &[
         ("engine <continuous|batch>", "Dynamically flip between matching engine paradigms"),
-        ("add <buy|sell> <price|market> <qty> <user>", "Submit a limit order (numeric price) or a market order ('market') to the active engine (SOL/USD)"),
+        ("add <buy|sell> <price|market> <qty> <user>", "Submit a limit order (numeric price) or a market order ('market') to the active engine"),
         ("batch", "Inspect active continuous book state or FBA buffer state"),
         ("clear", "Force close batch window, clear matching equations, and log data"),
         ("load <path> [path...]", "Replay order-status CSV file(s) (data/SCHEMA.md PREVIEW format) into the active engine"),

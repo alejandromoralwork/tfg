@@ -88,6 +88,13 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let mut cda = CdaOrderBook::new();
     let mut fba_recorder = MetricsRecorder::new(EngineKind::Fba, interval_width_ns);
     let mut cda_recorder = MetricsRecorder::new(EngineKind::Cda, interval_width_ns);
+    // Owned once, shared by reference into both recorders' `finalize()` at
+    // the end — used to be cloned into each recorder separately (one full
+    // second copy of the entire message stream, including a re-allocated
+    // `user_id: String` per message), which on a large multi-file replay
+    // (up to ~1.4B messages for a full coin) doubled an already enormous
+    // allocation for no reason: both recorders only ever read this data.
+    let mut messages: Vec<timeseries::OrderMessage> = Vec::new();
 
     // FBA has no continuous clock of its own — `simulate` triggers a
     // clear() whenever a record's own timestamp crosses the next
@@ -126,8 +133,10 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
 
                 // Both recorders see the raw message stream before any gating —
                 // same "sees rejections/cancellations too" principle the message
-                // log has always used, needed for order-to-trade ratio etc.
-                let msg = timeseries::OrderMessage {
+                // log has always used, needed for order-to-trade ratio etc. One
+                // shared log, read by both recorders' `finalize()` at the end,
+                // rather than each recorder holding its own cloned copy.
+                messages.push(timeseries::OrderMessage {
                     ts: order.ts,
                     oid: order.oid,
                     user_id: order.user_id.clone(),
@@ -135,9 +144,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
                     limit_price: order.limit_price(),
                     quantity: order.orig_sz,
                     accepted: order.is_new_live_order(),
-                };
-                fba_recorder.record_message(msg.clone());
-                cda_recorder.record_message(msg);
+                });
 
                 if next_fba_boundary.is_none() {
                     next_fba_boundary = Some(order.ts + interval_width_ns);
@@ -246,8 +253,8 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         .green()
     );
 
-    let fba_series = fba_recorder.finalize();
-    let cda_series = cda_recorder.finalize();
+    let fba_series = fba_recorder.finalize(&messages);
+    let cda_series = cda_recorder.finalize(&messages);
     println!("FBA: {} interval(s)  |  CDA: {} interval(s)", fba_series.len(), cda_series.len());
 
     match write_output(&resolved_path, &stats, elapsed, &fba_series, &cda_series) {

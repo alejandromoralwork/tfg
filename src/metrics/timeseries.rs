@@ -256,7 +256,6 @@ struct OrderState {
 pub struct MetricsRecorder {
     engine: EngineKind,
     interval_width: u64,
-    messages: Vec<OrderMessage>,
     trades: Vec<TradeEvent>,
     batches: Vec<BatchClearedEvent>,
     books: Vec<BookSnapshot>,
@@ -270,15 +269,10 @@ impl MetricsRecorder {
         Self {
             engine,
             interval_width: interval_width_ns,
-            messages: Vec::new(),
             trades: Vec::new(),
             batches: Vec::new(),
             books: Vec::new(),
         }
-    }
-
-    pub fn record_message(&mut self, msg: OrderMessage) {
-        self.messages.push(msg);
     }
 
     pub fn record_trade(&mut self, trade: TradeEvent) {
@@ -293,10 +287,10 @@ impl MetricsRecorder {
         self.books.push(snapshot);
     }
 
-    fn build_order_states(&self) -> HashMap<u64, OrderState> {
+    fn build_order_states(&self, messages: &[OrderMessage]) -> HashMap<u64, OrderState> {
         let mut states: HashMap<u64, OrderState> = HashMap::new();
 
-        for m in &self.messages {
+        for m in messages {
             if !m.accepted {
                 continue;
             }
@@ -328,14 +322,22 @@ impl MetricsRecorder {
 
     /// Produce the metric time series: one row per `interval_width`-wide
     /// bucket spanning the full range of recorded timestamps.
-    pub fn finalize(&self) -> Vec<IntervalMetrics> {
+    ///
+    /// `messages` is owned by the caller (`inputs::simulate_cmd::run`) and
+    /// shared by reference across the FBA and CDA recorders' `finalize()`
+    /// calls, rather than each recorder holding its own cloned copy — on a
+    /// large multi-file replay the raw message log can run into the
+    /// billions of entries, so a second full copy (plus a second
+    /// heap-allocated `user_id: String` per entry) was real, avoidable
+    /// memory pressure. Both recorders only ever read this data.
+    pub fn finalize(&self, messages: &[OrderMessage]) -> Vec<IntervalMetrics> {
         if self.interval_width == 0 {
             return Vec::new();
         }
 
         let mut min_ts = u64::MAX;
         let mut max_ts = 0u64;
-        for m in &self.messages {
+        for m in messages {
             min_ts = min_ts.min(m.ts);
             max_ts = max_ts.max(m.ts);
         }
@@ -367,7 +369,7 @@ impl MetricsRecorder {
             buckets.insert(start, IntervalMetrics::empty(self.engine.label(), start, self.interval_width));
         }
 
-        let order_states = self.build_order_states();
+        let order_states = self.build_order_states(messages);
 
         // Reference price series for realized-spread markout lookups: book
         // midpoints (CDA) and batch clearing prices (FBA), sorted by ts.
@@ -384,8 +386,20 @@ impl MetricsRecorder {
         }
         price_series.sort_by_key(|(ts, _)| *ts);
 
+        // `price_series` is sorted above, but NOT globally by call order:
+        // `self.trades` (and therefore the sequence of `target_ts` values
+        // fed in below) isn't guaranteed ts-monotonic either — see the
+        // `msg_ts` comment further down for why (accepted/rejected file
+        // interleaving). So this can't be a resumable cursor; it has to be
+        // a fresh lookup per call. `partition_point` finds the same "first
+        // entry with ts >= target_ts" that `.find` did (in O(log n) instead
+        // of restarting an O(n) scan from index 0 every time), and ties at
+        // ts == target_ts still resolve to whichever entry `sort_by_key`
+        // (stable) placed first — books before batches, since `price_series`
+        // is built books-then-batches above.
         let price_at_or_after = |target_ts: u64| -> Option<f64> {
-            price_series.iter().find(|(ts, _)| *ts >= target_ts).map(|(_, p)| *p)
+            let idx = price_series.partition_point(|(ts, _)| *ts < target_ts);
+            price_series.get(idx).map(|(_, p)| *p)
         };
 
         // ---- Trades: executed volume, dispersion inputs, trader surplus,
@@ -508,7 +522,7 @@ impl MetricsRecorder {
 
         // ---- Messages: order-to-trade ratio, throughput input ----
         let mut bucket_msg_count: HashMap<u64, u64> = HashMap::new();
-        for m in &self.messages {
+        for m in messages {
             *bucket_msg_count.entry(bucket_of(m.ts)).or_insert(0) += 1;
         }
         for (b, count) in &bucket_msg_count {
@@ -596,6 +610,21 @@ impl MetricsRecorder {
 
         // ---- FBA-only: quoted-spread analogue, depth, residual, boundary
         //      concentration, all from BatchClearedEvent ----
+        //
+        // `msg_ts`: every message timestamp, sorted once, so
+        // `boundary_concentration` below can binary-search each batch's
+        // window instead of rescanning the whole (potentially huge)
+        // `messages` log per batch. NOT the same as assuming `messages`
+        // itself is already ts-ordered — it isn't: input files are
+        // streamed accepted-then-rejected within the same hour (see
+        // `inputs::simulator::collect_input_files`), and their ts ranges
+        // overlap, so `messages` can go backwards in time at that file
+        // boundary. Sorting a plain `Vec<u64>` copy here avoids needing
+        // `messages` itself to be sorted for anything else that reads it
+        // in original stream order (e.g. `bucket_msg_count` above).
+        let mut msg_ts: Vec<u64> = messages.iter().map(|m| m.ts).collect();
+        msg_ts.sort_unstable();
+
         let mut bucket_batches: HashMap<u64, Vec<&BatchClearedEvent>> = HashMap::new();
         for bt in &self.batches {
             bucket_batches.entry(bucket_of(bt.ts)).or_default().push(bt);
@@ -640,10 +669,11 @@ impl MetricsRecorder {
 
             // Boundary concentration: share of order arrivals in the final
             // 10% of each batch's own window, across batches closing in
-            // this bucket. O(batches x messages) scan — fine at the scale
-            // this is meant for; would need a sorted-timestamp lookup to
-            // stay cheap on a much larger message log than a `simulate`
-            // run's own bucket typically holds.
+            // this bucket. Binary-searches the pre-sorted `msg_ts` instead
+            // of rescanning `messages` per batch — was O(batches x
+            // messages), which is why this used to be the dominant cost on
+            // a large multi-file `simulate` run; now O(batches log
+            // messages).
             let mut total_msgs = 0u64;
             let mut boundary_msgs = 0u64;
             for e in evs {
@@ -652,14 +682,21 @@ impl MetricsRecorder {
                     continue;
                 }
                 let boundary_start = e.ts.saturating_sub(window / 10);
-                for m in &self.messages {
-                    if m.ts >= e.batch_open_ts && m.ts <= e.ts {
-                        total_msgs += 1;
-                        if m.ts >= boundary_start {
-                            boundary_msgs += 1;
-                        }
-                    }
-                }
+
+                // [batch_open_ts, ts] inclusive on both ends, matching the
+                // original `m.ts >= e.batch_open_ts && m.ts <= e.ts`.
+                let lo = msg_ts.partition_point(|&t| t < e.batch_open_ts);
+                let hi = msg_ts.partition_point(|&t| t <= e.ts);
+                total_msgs += (hi - lo) as u64;
+
+                // `boundary_start >= e.batch_open_ts` always holds (it's
+                // `e.ts - window/10` and `window/10 <= window`), so the
+                // boundary sub-range sits inside `[lo, hi)` with no extra
+                // clamping needed — matching the original nested
+                // `m.ts >= boundary_start` check (itself already bounded
+                // above by `m.ts <= e.ts`).
+                let boundary_lo = msg_ts.partition_point(|&t| t < boundary_start);
+                boundary_msgs += (hi - boundary_lo) as u64;
             }
             if total_msgs > 0 {
                 entry.boundary_concentration = Some(boundary_msgs as f64 / total_msgs as f64);
@@ -874,4 +911,206 @@ pub fn to_csv(series: &[IntervalMetrics]) -> String {
         out.push('\n');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(ts: u64, oid: u64) -> OrderMessage {
+        OrderMessage { ts, oid, user_id: "u".to_string(), side: Side::Buy, limit_price: None, quantity: 1, accepted: true }
+    }
+
+    fn batch(batch_open_ts: u64, ts: u64) -> BatchClearedEvent {
+        BatchClearedEvent {
+            ts,
+            batch_open_ts,
+            clearing_price: None,
+            demand_at_price: 0,
+            supply_at_price: 0,
+            traded_quantity: 0,
+            unexecuted_quantity: 0,
+            best_unfilled_buy: None,
+            best_unfilled_sell: None,
+            depth_schedule: [(0, 0); DEPTH_BPS_THRESHOLDS.len()],
+            compute_time: Duration::ZERO,
+        }
+    }
+
+    fn book(ts: u64, best_bid: Option<u128>, best_ask: Option<u128>) -> BookSnapshot {
+        BookSnapshot {
+            ts,
+            best_bid,
+            best_ask,
+            best_bid_qty: 0,
+            best_ask_qty: 0,
+            bid_depth: 0,
+            ask_depth: 0,
+            depth_schedule: [(0, 0); DEPTH_BPS_THRESHOLDS.len()],
+            compute_time: Duration::ZERO,
+        }
+    }
+
+    // Small deterministic LCG (no `rand` dependency in this crate) — same
+    // constants as glibc's `rand()`, good enough for a reproducible fuzz
+    // test, not for anything security-sensitive.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 >> 33
+        }
+        fn range(&mut self, n: u64) -> u64 {
+            if n == 0 { 0 } else { self.next() % n }
+        }
+    }
+
+    // ---- boundary_concentration ----
+
+    #[test]
+    fn boundary_concentration_matches_hand_computed_value() {
+        let mut rec = MetricsRecorder::new(EngineKind::Fba, 1_000_000_000);
+        // window = [0, 100], boundary_start = 100 - 100/10 = 90.
+        let messages: Vec<OrderMessage> = [0u64, 50, 90, 99, 100, 101].into_iter().enumerate().map(|(i, ts)| msg(ts, i as u64)).collect();
+        rec.record_batch(batch(0, 100));
+
+        let series = rec.finalize(&messages);
+        assert_eq!(series.len(), 1);
+        // total: ts in [0,100] -> {0,50,90,99,100} = 5 msgs (101 excluded).
+        // boundary: ts >= 90 among those -> {90,99,100} = 3 msgs.
+        assert_eq!(series[0].boundary_concentration, Some(3.0 / 5.0));
+    }
+
+    #[test]
+    fn boundary_concentration_respects_inclusive_window_boundaries() {
+        let mut rec = MetricsRecorder::new(EngineKind::Fba, 1_000_000_000);
+        // batch_open_ts=1000, ts=2000 -> window=1000, boundary_start=1900.
+        let messages = vec![
+            msg(999, 1),  // just before open -> excluded entirely
+            msg(1000, 2), // exactly at open -> in total, not boundary
+            msg(1899, 3), // just before boundary_start -> in total, not boundary
+            msg(1900, 4), // exactly at boundary_start -> in both
+            msg(2000, 5), // exactly at close -> in both
+            msg(2001, 6), // just after close -> excluded entirely
+        ];
+        rec.record_batch(batch(1000, 2000));
+
+        let series = rec.finalize(&messages);
+        assert_eq!(series.len(), 1);
+        // total = {1000,1899,1900,2000} = 4, boundary = {1900,2000} = 2.
+        assert_eq!(series[0].boundary_concentration, Some(2.0 / 4.0));
+    }
+
+    #[test]
+    fn boundary_concentration_is_none_for_a_zero_width_batch() {
+        let mut rec = MetricsRecorder::new(EngineKind::Fba, 1_000_000_000);
+        let messages = vec![msg(500, 1)];
+        rec.record_batch(batch(500, 500)); // window == 0 -> skipped entirely
+
+        let series = rec.finalize(&messages);
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].boundary_concentration, None);
+    }
+
+    /// Differential test: the fast `partition_point`-based computation in
+    /// `finalize()` must agree exactly (integer counts, no floats involved
+    /// until the final division) with a naive re-scan written directly here
+    /// — the same logic the production code used before it was rewritten to
+    /// avoid rescanning `messages` per batch.
+    #[test]
+    fn boundary_concentration_matches_naive_scan_across_random_batches() {
+        let mut rng = Lcg(0xC0FFEE);
+        for _ in 0..200 {
+            let batch_open_ts = rng.range(1000);
+            let extra = rng.range(1000) + 1; // ensure window > 0
+            let ts = batch_open_ts + extra;
+
+            let n_msgs = rng.range(30) as usize;
+            let msg_tss: Vec<u64> = (0..n_msgs).map(|_| rng.range(2500)).collect();
+
+            let mut rec = MetricsRecorder::new(EngineKind::Fba, 1_000_000_000);
+            let messages: Vec<OrderMessage> = msg_tss.iter().enumerate().map(|(i, &t)| msg(t, i as u64)).collect();
+            rec.record_batch(batch(batch_open_ts, ts));
+
+            // Naive reference: exactly the original nested-loop semantics.
+            let window = ts - batch_open_ts;
+            let boundary_start = ts.saturating_sub(window / 10);
+            let mut total = 0u64;
+            let mut boundary = 0u64;
+            for &t in &msg_tss {
+                if t >= batch_open_ts && t <= ts {
+                    total += 1;
+                    if t >= boundary_start {
+                        boundary += 1;
+                    }
+                }
+            }
+            let expected = if total > 0 { Some(boundary as f64 / total as f64) } else { None };
+
+            let series = rec.finalize(&messages);
+            assert_eq!(series.len(), 1);
+            assert_eq!(series[0].boundary_concentration, expected, "batch_open_ts={batch_open_ts} ts={ts} msgs={msg_tss:?}");
+        }
+    }
+
+    // ---- price_at_or_after (exercised indirectly via realized spread) ----
+
+    #[test]
+    fn price_at_or_after_ties_prefer_book_snapshot_over_batch_at_same_ts() {
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, 10_000_000_000);
+        let trade = Trade {
+            trade_id: 1,
+            price: 100,
+            quantity: 1,
+            buyer_id: "b".to_string(),
+            seller_id: "s".to_string(),
+            buy_order_id: 1,
+            sell_order_id: 2,
+            engine_type: EngineKind::Cda,
+            ts: 0,
+            trade_tx_hash: None,
+            chain_id: None,
+        };
+        rec.record_trade(TradeEvent { trade, reference_price: Some(100), aggressor_side: Some(Side::Buy) });
+
+        // Both land exactly at the 1s horizon target (0 + 1s), each with a
+        // DIFFERENT price (100.0 vs 300.0) so the test actually fails if
+        // the wrong one wins. The book snapshot must win the tie because
+        // `price_series` is built books-then-batches before a stable sort.
+        rec.record_book_snapshot(book(1_000_000_000, Some(90), Some(110))); // mid = 100.0
+        let mut tied_batch = batch(0, 1_000_000_000);
+        tied_batch.clearing_price = Some(300); // must lose the tie to the book's 100.0
+        rec.record_batch(tied_batch);
+
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 1);
+        // Deviation of the trade price (100) from the future price found
+        // (should be the book's mid, 100.0) is exactly 0.
+        assert_eq!(series[0].realized_spread_bps_1s, Some(0.0));
+    }
+
+    #[test]
+    fn price_at_or_after_returns_none_past_the_last_entry() {
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, 100_000_000_000);
+        let trade = Trade {
+            trade_id: 1,
+            price: 100,
+            quantity: 1,
+            buyer_id: "b".to_string(),
+            seller_id: "s".to_string(),
+            buy_order_id: 1,
+            sell_order_id: 2,
+            engine_type: EngineKind::Cda,
+            ts: 0,
+            trade_tx_hash: None,
+            chain_id: None,
+        };
+        rec.record_trade(TradeEvent { trade, reference_price: Some(100), aggressor_side: Some(Side::Buy) });
+        // Only price-series entry is well before the 30s horizon target.
+        rec.record_book_snapshot(book(2_000_000_000, Some(90), Some(110)));
+
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].realized_spread_bps_30s, None);
+    }
 }
