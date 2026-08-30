@@ -142,8 +142,8 @@ impl FbaOrderBook {
             return None;
         };
 
-        let mut buys = self.eligible_orders(&orders, Side::Buy, clearing_price);
-        let mut sells = self.eligible_orders(&orders, Side::Sell, clearing_price);
+        let buys = self.eligible_orders(&orders, Side::Buy, clearing_price);
+        let sells = self.eligible_orders(&orders, Side::Sell, clearing_price);
 
         let batch_ts = orders.iter().map(|o| o.ts).max().unwrap_or(0);
         let mut buy_index = 0usize;

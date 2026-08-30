@@ -33,10 +33,13 @@ src/                              Rust crate `market_sim` — both matching engi
     cda.rs                        Continuous engine: price-time priority limit order book
   inputs/
     cli.rs                        Interactive command prompt (parses + dispatches every command below)
-    simulator.rs                  CSV preview loader; real binary/gzip streaming reader; directory traversal
+    simulator.rs                  CSV preview loader; real binary/gzip streaming reader (sequential + parallel); directory traversal
     binary_format.rs              Decoder for the dataset's packed 54-byte order-status record
     simulate_cmd.rs                `simulate` command: replays real data through both engines, writes output/
-    download_cmd.rs                `download` command: fetches BTC/ETH/SOL data from Zenodo via curl + tar
+    scan_cmd.rs                    `scan` command: counts/classifies records across real data without running either engine (multi-threaded)
+    download_cmd.rs                `download`/`extract` commands: fetch BTC/ETH/SOL data from Zenodo via curl + tar
+    update_cmd.rs                  `update` command: pulls this repo's latest source (no git needed), rebuilds, relaunches
+    progress.rs                    Shared live progress-bar machinery for the long-running commands above
     test_suite.rs                  Built-in engine checklist (`test engine <continuous|batch>`)
   metrics/
     stats.rs                      On-demand metrics for the interactive `metrics`/`orderbook` commands
@@ -104,9 +107,18 @@ cargo run
 `Cargo.toml` lives directly in `src/` (not a level above), so build/run commands must
 be issued from there — see [`src/docs/init.md`](src/docs/init.md) for the full
 walkthrough (prerequisites, a first quick session, running the already-built binary
-directly). This project's only external dependency is `flate2` (gzip decoding for
-`simulate`'s real-data intake) — everything else, including all price/quantity
-arithmetic, is pure integer code with zero floating-point pricing.
+directly). This project's only two external Cargo dependencies are `flate2` (gzip
+decoding for `simulate`/`scan`'s real-data intake) and `colored` (terminal output) —
+everything else, including all price/quantity arithmetic, is pure integer code with
+zero floating-point pricing. `download`/`extract`/`update` additionally shell out to
+the system's `curl`/`tar` (and `update` also to `cargo`) rather than pulling in an
+HTTP client or archive-format crate — all ship by default on Windows 10 1803+ and
+virtually every Linux/macOS install.
+
+For a full multi-million-record replay, build with `cargo build --release` (or
+`cargo run --release`) — a debug build works but is meaningfully slower; `scan`/
+`simulate` are both I/O- and decompression-bound at real-data scale, where the
+optimizer matters.
 
 ## Commands
 
@@ -120,8 +132,11 @@ list):
 | `batch` | Show the active engine's pending/resting order state |
 | `clear` | Force-close the current FBA batch window |
 | `load <path> [path...]` | Replay CSV PREVIEW file(s) into the active engine |
-| `simulate <path\|btc\|eth\|sol> [interval_secs]` | Replay real `.csv`/`.gz` data (a file, folder, or downloaded coin) through **both** engines, writing time-series metrics to `output/` |
+| `simulate <path\|btc\|eth\|sol\|all> [interval_secs]` | Replay real `.csv`/`.gz` data (a file, folder, or downloaded coin) through **both** engines, writing time-series metrics to `output/` |
+| `scan <path\|btc\|eth\|sol\|all>` | Count/classify records across real data without running either engine — no book-depth computation, no metrics, no `output/` files; spreads multiple files across worker threads |
 | `download <btc\|eth\|sol\|all>` | Fetch that coin's order-status archive from Zenodo into `data/order_statuses/<coin>/` |
+| `extract <btc\|eth\|sol\|all>` | (Re-)extract an already-downloaded archive without re-fetching it |
+| `update [branch]` | Pull this repo's latest source from GitHub (no `git` install needed — a plain HTTPS tarball via `curl`), rebuild it, and relaunch — defaults to `main` |
 | `log` | Chronological ledger of every executed trade (both engines) |
 | `metrics` | Point-in-time metrics for both engines |
 | `orderbook` (alias `ob`) | Active engine's order book state + its own metrics, in one view |

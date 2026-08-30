@@ -14,6 +14,7 @@ use crate::inputs::scan_cmd;
 use crate::inputs::simulate_cmd;
 use crate::inputs::simulator;
 use crate::inputs::test_suite;
+use crate::inputs::update_cmd;
 use crate::metrics::stats;
 use crate::types::{EngineKind, Order, Side, Trade, PRICE_SCALE};
 
@@ -42,6 +43,7 @@ enum CliCommand {
     Scan { path: String },
     Download(DownloadTarget),
     Extract(DownloadTarget),
+    Update { branch: Option<String> },
     Help,
     Exit,
 }
@@ -167,6 +169,7 @@ impl CliCommand {
                 }
                 parse_download_target(parts[1]).map(CliCommand::Extract)
             }
+            "update" => Some(CliCommand::Update { branch: parts.get(1).map(|s| s.to_string()) }),
             "help" => Some(CliCommand::Help),
             "exit" | "quit" => Some(CliCommand::Exit),
             _ => None,
@@ -331,6 +334,12 @@ mod tests {
     }
 
     #[test]
+    fn parses_update_command_with_and_without_a_branch() {
+        assert_eq!(CliCommand::parse("update"), Some(CliCommand::Update { branch: None }));
+        assert_eq!(CliCommand::parse("update dev"), Some(CliCommand::Update { branch: Some("dev".to_string()) }));
+    }
+
+    #[test]
     fn parses_test_engine_command_and_its_aliases() {
         assert_eq!(CliCommand::parse("test engine continuous"), Some(CliCommand::TestEngine(EngineMode::Continuous)));
         assert_eq!(CliCommand::parse("test engine cda"), Some(CliCommand::TestEngine(EngineMode::Continuous)));
@@ -383,8 +392,18 @@ pub fn run() {
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            break;
+        // `Ok(0)` is EOF (stdin closed — e.g. a piped/redirected input that
+        // ran dry, or a relaunched child process inheriting a pipe handle
+        // the parent already drained into its own internal buffer before
+        // handing off — see `update_cmd::relaunch`), not an error, but it
+        // must end the loop the same way: read_line leaves `input` empty
+        // every time in that state, so without this check `CliCommand::
+        // parse` just fails forever on an empty string, spinning as fast
+        // as the loop can go and printing the "unrecognized command" error
+        // without bound.
+        match io::stdin().read_line(&mut input) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
         }
 
         match CliCommand::parse(&input) {
@@ -498,6 +517,8 @@ pub fn run() {
 
             Some(CliCommand::Extract(target)) => download_cmd::run_extract(target),
 
+            Some(CliCommand::Update { branch }) => update_cmd::run(branch.as_deref()),
+
             Some(CliCommand::Help) => print_help(),
 
             Some(CliCommand::Exit) => {
@@ -529,6 +550,7 @@ fn print_help() {
         ("scan <path|btc|eth|sol|all>", "Count records/orders across real order-status data without running either engine (new live orders / cancellations / other events) — fast: no book-depth computation, no metrics, no output/ files"),
         ("download <btc|eth|sol|all>", "Fetch that coin's order-status archive from Zenodo and extract it into data/order_statuses/<coin>/, ready for 'simulate <coin>'"),
         ("extract <btc|eth|sol|all>", "(Re-)extract an already-downloaded archive without re-fetching it — for when 'download's extraction step failed but the archive is already local"),
+        ("update [branch]", "Fetch the latest source from github.com/alejandromoralwork/tfg (no git needed), build it in a scratch directory, and relaunch — defaults to 'main'"),
         ("log", "Audit chronological ledger (combined FBA + CDA executed trades)"),
         ("metrics", "Print core metrics computed so far, for both engines"),
         ("orderbook", "Print the active engine's orderbook state + its own core metrics, in one view"),

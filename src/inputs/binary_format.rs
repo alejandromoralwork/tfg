@@ -134,6 +134,43 @@ pub(crate) fn parse_record(bytes: &[u8; RECORD_SIZE]) -> Option<Order> {
     })
 }
 
+/// Cheap plausibility check on a single decoded record's key fields —
+/// lets `inputs::simulator::stream_binary` drop a whole file with ONE
+/// clear warning, before processing any of its records, if it isn't
+/// actually in this 54-byte packed order-status format (e.g. a wrong or
+/// foreign `.gz` file that got swept in by `collect_input_files`). Without
+/// this, such a file would silently decode into a stream of nonsense
+/// `Order`s and get fed straight into the engines — worse than the CSV
+/// path's per-row `[WARN] Skipping malformed CSV row` (see `parse_row`),
+/// since there'd be no warning at all: `parse_record`'s own doc comment
+/// notes every 54-byte chunk decodes into "something" by construction,
+/// with no format-level rejection of its own.
+///
+/// This is a heuristic, not a real format signature: it checks the
+/// timestamp falls in a plausible nanosecond-epoch range and that
+/// `status_id`/`order_type_id`/`tif_id` fall within the small ranges the
+/// real dataset's own lookup tables document (`data/*/mapdir/statuses.csv`
+/// has ids 0-17, `order_types.csv` 0-6, `tifs.csv` 0-5 — see
+/// `data/SCHEMA.md`). Random garbage bytes have roughly a 1-in-a-million
+/// chance of passing all four checks at once (each bounds a full byte or
+/// a narrow slice of a u64 down to a small fraction of its range) — good
+/// enough to catch an accidentally-included wrong file, not a defense
+/// against adversarially crafted input.
+pub(crate) fn looks_like_order_status_record(bytes: &[u8; RECORD_SIZE]) -> bool {
+    const MIN_PLAUSIBLE_TS_NS: u64 = 1_577_836_800_000_000_000; // 2020-01-01T00:00:00Z
+    const MAX_PLAUSIBLE_TS_NS: u64 = 2_051_222_400_000_000_000; // 2035-01-01T00:00:00Z
+    const MAX_KNOWN_STATUS_ID: u8 = 17; // data/*/mapdir/statuses.csv's highest documented id
+    const MAX_KNOWN_ORDER_TYPE_ID: u8 = 6; // order_types.csv's highest documented id
+    const MAX_KNOWN_TIF_ID: u8 = 5; // tifs.csv's highest documented id
+
+    let ts = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+    let status_id = bytes[13];
+    let order_type_id = bytes[44];
+    let tif_id = bytes[45];
+
+    (MIN_PLAUSIBLE_TS_NS..MAX_PLAUSIBLE_TS_NS).contains(&ts) && status_id <= MAX_KNOWN_STATUS_ID && order_type_id <= MAX_KNOWN_ORDER_TYPE_ID && tif_id <= MAX_KNOWN_TIF_ID
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +294,56 @@ mod tests {
         // origSz encoded as 0.2 (decimals=1, value=2) -> rounds down to 0.
         bytes[50..54].copy_from_slice(&((1u32 << 29) | 2).to_le_bytes());
         assert!(parse_record(&bytes).is_none());
+    }
+
+    /// A hand-assembled, structurally plausible record (same shape as
+    /// `parse_record_decodes_a_realistic_record`) — the baseline every
+    /// rejection test below tweaks exactly one field away from.
+    fn plausible_record_bytes() -> [u8; RECORD_SIZE] {
+        let mut bytes = [0u8; RECORD_SIZE];
+        bytes[0..8].copy_from_slice(&1_764_590_399_897_401_610u64.to_le_bytes()); // 2025-12-01, well within range
+        bytes[13] = 1; // statusId = open
+        bytes[44] = 0; // orderTypeId = Limit
+        bytes[45] = 0; // tifId = Alo
+        bytes
+    }
+
+    #[test]
+    fn looks_like_order_status_record_accepts_a_plausible_record() {
+        assert!(looks_like_order_status_record(&plausible_record_bytes()));
+    }
+
+    #[test]
+    fn looks_like_order_status_record_rejects_all_zero_bytes() {
+        // ts=0 is 1970-01-01 — nowhere near the plausible 2020-2035 window.
+        // This is exactly what a foreign/wrong-format file (or a run of
+        // padding bytes) would look like.
+        assert!(!looks_like_order_status_record(&[0u8; RECORD_SIZE]));
+    }
+
+    #[test]
+    fn looks_like_order_status_record_rejects_ts_outside_the_plausible_window() {
+        let mut too_old = plausible_record_bytes();
+        too_old[0..8].copy_from_slice(&1_000_000_000_000_000_000u64.to_le_bytes()); // ~2001
+        assert!(!looks_like_order_status_record(&too_old));
+
+        let mut too_new = plausible_record_bytes();
+        too_new[0..8].copy_from_slice(&3_000_000_000_000_000_000u64.to_le_bytes()); // ~2065
+        assert!(!looks_like_order_status_record(&too_new));
+    }
+
+    #[test]
+    fn looks_like_order_status_record_rejects_out_of_range_lookup_ids() {
+        let mut bad_status = plausible_record_bytes();
+        bad_status[13] = 18; // one past statuses.csv's highest documented id (17)
+        assert!(!looks_like_order_status_record(&bad_status));
+
+        let mut bad_order_type = plausible_record_bytes();
+        bad_order_type[44] = 7; // one past order_types.csv's highest (6)
+        assert!(!looks_like_order_status_record(&bad_order_type));
+
+        let mut bad_tif = plausible_record_bytes();
+        bad_tif[45] = 6; // one past tifs.csv's highest (5)
+        assert!(!looks_like_order_status_record(&bad_tif));
     }
 }

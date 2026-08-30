@@ -262,6 +262,16 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         )
         .green()
     );
+    if stats.files_skipped > 0 {
+        println!(
+            "{}",
+            format!(
+                "[WARN] {} of those file(s) didn't look like order-status data and were skipped entirely (not counted above) — see the per-file warnings.",
+                stats.files_skipped
+            )
+            .yellow()
+        );
+    }
 
     let fba_series = fba_recorder.finalize(&messages);
     let cda_series = cda_recorder.finalize(&messages);
@@ -372,6 +382,7 @@ fn write_output(
          Generated:               {ts} (UTC)\n\
          Source:                  {source}\n\
          Files processed:         {}\n\
+         Files skipped (not order-status data): {}\n\
          Records seen:            {}\n\
          Records skipped:         {}\n\
          Wall-clock duration:     {:.1}s\n\
@@ -396,6 +407,7 @@ fn write_output(
          a silent zero, so intervals with no value for a given metric are\n\
          excluded from its average rather than pulling it toward zero).\n",
         stats.files_processed,
+        stats.files_skipped,
         stats.records_seen,
         stats.records_skipped,
         elapsed.as_secs_f64(),

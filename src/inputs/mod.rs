@@ -6,3 +6,4 @@ pub mod scan_cmd;
 pub mod simulate_cmd;
 pub mod simulator;
 pub mod test_suite;
+pub mod update_cmd;

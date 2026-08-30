@@ -101,7 +101,13 @@ pub fn run(path_str: &str) {
         progress::human_bytes,
         || String::new(),
         || {
-            simulator::stream_records(&files, &bytes_read, |order: Order| match classify(&order) {
+            // Unlike `simulate`, `scan` only tallies independent per-record
+            // counts into these `Atomic*`s — nothing here depends on the
+            // order records arrive in relative to each other, so this is
+            // free to run across multiple files concurrently instead of
+            // one at a time (see `stream_records_parallel`'s doc comment
+            // for why `simulate` itself can't do the same).
+            simulator::stream_records_parallel(&files, &bytes_read, |order: Order| match classify(&order) {
                 Category::NewLiveOrder => {
                     new_live_orders.fetch_add(1, Ordering::Relaxed);
                 }
@@ -125,6 +131,12 @@ pub fn run(path_str: &str) {
 
     let elapsed = wall_clock_start.elapsed();
     println!("{}", format!("[OK] Scanned {} file(s) in {:.1}s.", stats.files_processed, elapsed.as_secs_f64()).green());
+    if stats.files_skipped > 0 {
+        println!(
+            "{}",
+            format!("  {} file(s) didn't look like order-status data and were skipped entirely (not counted below).", stats.files_skipped).yellow()
+        );
+    }
     println!("  Total records:       {}", stats.records_seen);
     println!("  New live orders:     {}  (would rest on the book — is_new_live_order)", new_live_orders.load(Ordering::Relaxed));
     println!("  Cancellations:       {}  (would remove a resting order — is_cancellation)", cancellations.load(Ordering::Relaxed));

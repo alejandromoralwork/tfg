@@ -44,11 +44,24 @@ const MIN_COLUMNS: usize = 22;
 pub fn load_order_status_csv(path: &str) -> io::Result<Vec<Order>> {
     let contents = fs::read_to_string(path)?;
     let mut orders = Vec::new();
+    let mut lines = contents.lines();
 
-    for (line_no, line) in contents.lines().enumerate() {
-        if line_no == 0 {
-            continue; // header row
-        }
+    let Some(header) = lines.next() else {
+        return Ok(orders); // empty file
+    };
+    // Same structural pre-check `simulator::stream_csv` uses — drop the
+    // whole file with one clear warning rather than failing every single
+    // row (and printing a warning for each) if it isn't actually
+    // order-status data to begin with.
+    if !looks_like_order_status_header(header) {
+        eprintln!(
+            "{}",
+            format!("[WARN] Skipping file: header doesn't look like order-status data ({} column(s), expected at least {MIN_COLUMNS}): {header} ({path})", header.split(',').count()).yellow()
+        );
+        return Ok(orders);
+    }
+
+    for (line_no, line) in lines.enumerate() {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -58,11 +71,27 @@ pub fn load_order_status_csv(path: &str) -> io::Result<Vec<Order>> {
             // Valid row, but its size rounds to nothing worth trading —
             // not an error, just not worth constructing an order for.
             Ok(None) => {}
-            Err(()) => eprintln!("{}", format!("[WARN] Skipping malformed row {} in {path}", line_no + 1).yellow()),
+            // +2: `lines` here starts counting from the first row AFTER
+            // the header already consumed above (0-based), and this
+            // message uses 1-based file line numbers.
+            Err(()) => eprintln!("{}", format!("[WARN] Skipping malformed row {} in {path}", line_no + 2).yellow()),
         }
     }
 
     Ok(orders)
+}
+
+/// Cheap structural check applied to a CSV file's header line before any
+/// row gets parsed — lets a wrong-schema file (e.g. one of the lookup
+/// tables under `data/*/mapdir/`, which can run into hundreds of
+/// thousands of rows — `users.csv` alone had 328,456) get dropped as ONE
+/// clear warning instead of one `[WARN] Skipping malformed ... row N` per
+/// row. Not a full schema check, just the same column-count bar every row
+/// already has to clear (`MIN_COLUMNS`) — cheap, and already enough to
+/// reject every known non-order-status CSV in this dataset (the lookup
+/// tables all have 2-3 columns).
+fn looks_like_order_status_header(header: &str) -> bool {
+    header.trim().split(',').count() >= MIN_COLUMNS
 }
 
 /// `Err(())` = the row genuinely couldn't be parsed (bad/missing fields).
@@ -250,6 +279,14 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
 #[derive(Default, Debug, Clone, Copy)]
 pub struct RunStats {
     pub files_processed: usize,
+    /// Of `files_processed`, how many were dropped ENTIRELY by the
+    /// structural pre-check (`looks_like_order_status_header`/
+    /// `binary_format::looks_like_order_status_record`) before any of
+    /// their records were read — a wrong-schema file that got swept in by
+    /// `collect_input_files` (e.g. a lookup table under `mapdir/`, or a
+    /// foreign `.gz`), not counted toward `records_seen`/`records_skipped`
+    /// at all since none of its rows/records were even looked at.
+    pub files_skipped: usize,
     pub records_seen: usize,
     pub records_skipped: usize,
 }
@@ -336,8 +373,11 @@ pub fn stream_records(files: &[PathBuf], bytes_read: &Arc<AtomicU64>, mut on_rec
         // appears until the process exits, making a multi-minute run look
         // hung even though it's working.
         io::stdout().flush().ok();
-        let (seen, skipped) = stream_file(path, bytes_read, &mut on_record)?;
+        let (seen, skipped, dropped) = stream_file(path, bytes_read, &mut on_record)?;
         stats.files_processed += 1;
+        if dropped {
+            stats.files_skipped += 1;
+        }
         stats.records_seen += seen;
         stats.records_skipped += skipped;
     }
@@ -345,7 +385,86 @@ pub fn stream_records(files: &[PathBuf], bytes_read: &Arc<AtomicU64>, mut on_rec
     Ok(stats)
 }
 
-fn stream_file(path: &Path, bytes_read: &Arc<AtomicU64>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize)> {
+/// Same job as `stream_records`, but spreads `files` across worker threads
+/// instead of streaming them one at a time — for a caller like `scan` that
+/// only tallies independent per-record counts and doesn't care what order
+/// records arrive in relative to EACH OTHER (unlike `simulate`, which feeds
+/// a single stateful `FbaOrderBook`/`CdaOrderBook` where price-time
+/// priority and batch-window ordering depend on strict sequential replay —
+/// that path must keep using `stream_records`, never this one).
+///
+/// `on_record` is called concurrently from multiple threads (hence `Fn` +
+/// `Sync`, not `FnMut`) — it must be safe to invoke from more than one
+/// thread at once, e.g. tallying into `Atomic*` counters the way `scan_cmd`
+/// already does (those were `Sync`-safe for exactly this reason before this
+/// function existed). `bytes_read` is unaffected by the parallelism: it's
+/// already an `Arc<AtomicU64>`, so concurrent increments from multiple
+/// threads are exactly as safe as the single-threaded case.
+///
+/// Each worker takes every `n`th file (round-robin, `n` = thread count) —
+/// a simple split that balances reasonably well even when files vary
+/// somewhat in size, without needing a real work-stealing scheduler for
+/// what's typically at most a few dozen files per coin per day.
+pub fn stream_records_parallel(files: &[PathBuf], bytes_read: &Arc<AtomicU64>, on_record: impl Fn(Order) + Sync) -> io::Result<RunStats> {
+    if files.is_empty() {
+        return Ok(RunStats::default());
+    }
+
+    let n_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(files.len());
+    // Guards the per-file "-> path" announcement only — real progress comes
+    // from the shared `bytes_read` counter (already safe under concurrent
+    // increments), this is just to stop several threads' println!s from
+    // interleaving mid-line into garbled output.
+    let print_lock = std::sync::Mutex::new(());
+
+    let per_thread_results: Vec<io::Result<RunStats>> = std::thread::scope(|scope| {
+        let on_record = &on_record;
+        let print_lock = &print_lock;
+        let handles: Vec<_> = (0..n_threads)
+            .map(|worker| {
+                scope.spawn(move || {
+                    let mut stats = RunStats::default();
+                    let mut idx = worker;
+                    while idx < files.len() {
+                        let path = &files[idx];
+                        {
+                            let _guard = print_lock.lock().unwrap();
+                            println!("{}", format!("-> {}", path.display()).dimmed());
+                            io::stdout().flush().ok();
+                        }
+                        let (seen, skipped, dropped) = stream_file(path, bytes_read, &mut |order| on_record(order))?;
+                        stats.files_processed += 1;
+                        if dropped {
+                            stats.files_skipped += 1;
+                        }
+                        stats.records_seen += seen;
+                        stats.records_skipped += skipped;
+                        idx += n_threads;
+                    }
+                    Ok(stats)
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("worker thread panicked")).collect()
+    });
+
+    let mut total = RunStats::default();
+    for result in per_thread_results {
+        let stats = result?; // surfaces the first error found, after every worker has finished its own share
+        total.files_processed += stats.files_processed;
+        total.files_skipped += stats.files_skipped;
+        total.records_seen += stats.records_seen;
+        total.records_skipped += stats.records_skipped;
+    }
+    Ok(total)
+}
+
+/// Returns `(records_seen, records_skipped, file_dropped)` — `file_dropped`
+/// is true when the file failed its structural pre-check (see
+/// `looks_like_order_status_header`/`binary_format::looks_like_order_status_record`)
+/// and was skipped in its entirety, in which case `records_seen`/
+/// `records_skipped` are both 0 (nothing in it was even looked at).
+fn stream_file(path: &Path, bytes_read: &Arc<AtomicU64>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize, bool)> {
     let is_csv = path.extension().and_then(|e| e.to_str()) == Some("csv");
     let reader = open_reader(path, bytes_read)?;
 
@@ -356,15 +475,37 @@ fn stream_file(path: &Path, bytes_read: &Arc<AtomicU64>, on_record: &mut impl Fn
     }
 }
 
-fn stream_csv(reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize)> {
+fn stream_csv(reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize, bool)> {
     let mut seen = 0usize;
     let mut skipped = 0usize;
+    let mut lines = BufReader::new(reader).lines();
 
-    for (line_no, line) in BufReader::new(reader).lines().enumerate() {
+    let Some(header) = lines.next() else {
+        return Ok((0, 0, false)); // empty file — nothing to check or process
+    };
+    let header = header?;
+
+    // Structural pre-check, before any row gets parsed: a wrong-schema
+    // file (e.g. one of the lookup tables under `data/*/mapdir/` — some,
+    // like `users.csv`, run into hundreds of thousands of rows) would
+    // otherwise fail every single row and print its own
+    // `[WARN] Skipping malformed CSV row N` line per row. One clear
+    // warning and dropping the whole file is both cheaper and far more
+    // useful than that flood.
+    if !looks_like_order_status_header(&header) {
+        eprintln!(
+            "{}",
+            format!(
+                "[WARN] Skipping file: header doesn't look like order-status data ({} column(s), expected at least {MIN_COLUMNS}): {header}",
+                header.split(',').count()
+            )
+            .yellow()
+        );
+        return Ok((0, 0, true));
+    }
+
+    for (line_no, line) in lines.enumerate() {
         let line = line?;
-        if line_no == 0 {
-            continue; // header row
-        }
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -377,31 +518,63 @@ fn stream_csv(reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::R
             Ok(None) => seen += 1, // parsed fine, size rounded to nothing
             Err(()) => {
                 skipped += 1;
-                eprintln!("{}", format!("[WARN] Skipping malformed CSV row {}", line_no + 1).yellow());
+                // +2: `lines` here starts counting from the first row AFTER
+                // the header already consumed above (0-based), and this
+                // message uses 1-based file line numbers.
+                eprintln!("{}", format!("[WARN] Skipping malformed CSV row {}", line_no + 2).yellow());
             }
         }
     }
 
-    Ok((seen, skipped))
+    Ok((seen, skipped, false))
 }
 
-fn stream_binary(mut reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize)> {
+fn stream_binary(reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize, bool)> {
+    // `reader` (the gzip decoder, for every real file — `open_reader`
+    // returns a raw unbuffered `MultiGzDecoder` for `.gz`) gets read
+    // `RECORD_SIZE` (54) bytes at a time by `read_one_record`, once per
+    // record — millions of times on a real multi-million-record file.
+    // Without this, each of those small reads can turn into its own
+    // decompression call with no read-ahead of its own; wrapping it in a
+    // `BufReader` here means the decoder is asked for a big chunk at a
+    // time (256 KiB) and every record after the first in that chunk is
+    // just a cheap memory copy out of it. `stream_csv` already gets this
+    // for free via `BufReader::lines()` — this was the one binary-path gap.
+    let mut reader = BufReader::with_capacity(256 * 1024, reader);
     let mut seen = 0usize;
     let mut skipped = 0usize;
     let mut buf = [0u8; RECORD_SIZE];
 
+    if !read_one_record(&mut reader, &mut buf)? {
+        return Ok((0, 0, false)); // empty file — nothing to check or process
+    }
+
+    // Structural pre-check on just the first record, before committing to
+    // stream the rest of the file — cheap (54 bytes), and lets a wrong
+    // file (e.g. a foreign `.gz` that got swept in by `collect_input_files`)
+    // get dropped with one clear warning instead of silently decoding
+    // garbage bytes into a stream of nonsense `Order`s with no signal at
+    // all that anything's wrong (see `looks_like_order_status_record`'s
+    // doc comment for why the binary format has no other way to detect
+    // this on its own).
+    if !binary_format::looks_like_order_status_record(&buf) {
+        eprintln!("{}", "[WARN] Skipping file: doesn't look like order-status binary data (failed first-record sanity check)".yellow());
+        return Ok((0, 0, true));
+    }
+
     loop {
-        if !read_one_record(reader.as_mut(), &mut buf)? {
-            break; // clean EOF
-        }
         seen += 1;
         match binary_format::parse_record(&buf) {
             Some(order) => on_record(order),
             None => skipped += 1,
         }
+
+        if !read_one_record(&mut reader, &mut buf)? {
+            break; // clean EOF
+        }
     }
 
-    Ok((seen, skipped))
+    Ok((seen, skipped, false))
 }
 
 /// Fills `buf` with exactly `RECORD_SIZE` bytes. Returns `Ok(true)` on a
