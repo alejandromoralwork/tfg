@@ -602,12 +602,12 @@ fn render_book(cda: &CdaOrderBook) {
     // each heading below IS the best bid / best ask from the summary line.
     // Bids get green (the buy side), asks get red (the sell side) — same
     // convention render_pending uses for FBA's buy/sell orders.
-    println!("{}", format!("Bids ({}):", cda.bids.len()).green().bold());
-    for o in &cda.bids {
+    println!("{}", format!("Bids ({}):", cda.bid_count()).green().bold());
+    for o in cda.bids_iter() {
         println!("{}", format!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Price: {}", o.oid, o.user_id, o.remaining, format_price(o.limit_px)).green());
     }
-    println!("{}", format!("Asks ({}):", cda.asks.len()).red().bold());
-    for o in &cda.asks {
+    println!("{}", format!("Asks ({}):", cda.ask_count()).red().bold());
+    for o in cda.asks_iter() {
         println!("{}", format!("  ID: {:<3} | User: {:<8} | Qty: {:<4} | Price: {}", o.oid, o.user_id, o.remaining, format_price(o.limit_px)).red());
     }
 }

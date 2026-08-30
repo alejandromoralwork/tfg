@@ -3,7 +3,7 @@
 //! volume.  See ENGINE_DESIGN.md for a good description of the FBA algorithm and its
 //! implementation details.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use crate::types::{Amount, EngineKind, Order, OrderKind, Price, Side, Trade, PRICE_SCALE};
 
@@ -89,7 +89,7 @@ impl FbaOrderBook {
     /// price-time priority, and roll any unfilled residual straight back
     /// into `pending_orders` for the next batch. Fully self-contained.
     pub fn clear(&mut self) -> Option<ClearingResult> {
-        let orders = std::mem::take(&mut self.pending_orders);
+        let mut orders = std::mem::take(&mut self.pending_orders);
 
         ///self.pending contains the pointer, len and capacity of the vector
         ///If Rust allowed you to move self.pending_orders into orders, 
@@ -144,47 +144,54 @@ impl FbaOrderBook {
 
         let mut buys = self.eligible_orders(&orders, Side::Buy, clearing_price);
         let mut sells = self.eligible_orders(&orders, Side::Sell, clearing_price);
-        let mut trades = Vec::new();
 
         let batch_ts = orders.iter().map(|o| o.ts).max().unwrap_or(0);
         let mut buy_index = 0usize;
         let mut sell_index = 0usize;
 
+        // Trades are pushed straight into `self.executed_trades` as they
+        // happen (see the `trades_start..` slice below) instead of built up
+        // in a separate local `Vec<Trade>` that then gets `.clone()`d
+        // wholesale into `executed_trades` — that used to double-allocate
+        // (and double-copy each `Trade`'s owned `buyer_id`/`seller_id`
+        // Strings) every single clear().
+        let trades_start = self.executed_trades.len();
 
         //while there is orders on buy and sell loop through the orders and match them
         while buy_index < buys.len() && sell_index < sells.len() {
+            let buy_idx = buys[buy_index];
+            let sell_idx = sells[sell_index];
 
             // the min between quantity of best buy and best sell
-            let fill = buys[buy_index].remaining.min(sells[sell_index].remaining);
-            // note that the orders we have here are already eligible for the clearing price; 
-            // if mkt orders or buy price is equal or less than clearing price; 
+            let fill = orders[buy_idx].remaining.min(orders[sell_idx].remaining);
+            // note that the orders we have here are already eligible for the clearing price;
+            // if mkt orders or buy price is equal or less than clearing price;
             // at this stage we only match quantities untils there is some residuals that cant be matched
             // given the quantities in the batch; note that orders are sorted by price-time priority,
             // so we always match the best buy with the best sell first
-           
+
             if fill == 0 {
                 // If the fill is 0, it means one of the orders is fully filled, remaining is zero.
                 // We need to move to the next order in that side.
-                if buys[buy_index].remaining == 0 { buy_index += 1; }//skip to the next best buy
-                if sells[sell_index].remaining == 0 { sell_index += 1; } //skip to the next best sell
+                if orders[buy_idx].remaining == 0 { buy_index += 1; }//skip to the next best buy
+                if orders[sell_idx].remaining == 0 { sell_index += 1; } //skip to the next best sell
                 continue;
             }
 
-            let mut buy_order = buys[buy_index].clone();
-            let mut sell_order = sells[sell_index].clone();
-            buy_order.reduce(fill);
-            sell_order.reduce(fill);
-            buys[buy_index] = buy_order.clone();
-            sells[sell_index] = sell_order.clone();
+            // Mutate the matched orders in place, through their indices
+            // into the original batch — no clone needed (`buys`/`sells`
+            // hold indices, not separate copies; see `eligible_orders`).
+            orders[buy_idx].reduce(fill);
+            orders[sell_idx].reduce(fill);
 
-            trades.push(Trade {
+            self.executed_trades.push(Trade {
                 trade_id: self.next_trade_id,
                 price: clearing_price,
                 quantity: fill,
-                buyer_id: buy_order.user_id.clone(),
-                seller_id: sell_order.user_id.clone(),
-                buy_order_id: buy_order.oid,
-                sell_order_id: sell_order.oid,
+                buyer_id: orders[buy_idx].user_id.clone(),
+                seller_id: orders[sell_idx].user_id.clone(),
+                buy_order_id: orders[buy_idx].oid,
+                sell_order_id: orders[sell_idx].oid,
                 engine_type: EngineKind::Fba,
                 ts: batch_ts,
                 trade_tx_hash: None,
@@ -192,33 +199,28 @@ impl FbaOrderBook {
             });
             self.next_trade_id += 1;
 
-            if buys[buy_index].remaining == 0 { buy_index += 1; }
-            if sells[sell_index].remaining == 0 { sell_index += 1; }
+            if orders[buy_idx].remaining == 0 { buy_index += 1; }
+            if orders[sell_idx].remaining == 0 { sell_index += 1; }
         }
 
+        let trades: Vec<Trade> = self.executed_trades[trades_start..].to_vec();
         let traded_quantity: Amount = trades.iter().map(|t| t.quantity).sum();
         if traded_quantity > 0 {
             self.last_clearing_price = Some(clearing_price);
         }
 
-        // Residual: whatever's left unfilled on the heavier side, computed
-        // against the ORIGINAL batch (not the eligible-only clones above),
-        // so orders that weren't even eligible at this price stay fully
-        // intact instead of silently vanishing.
-        let mut fills: HashMap<u64, Amount> = HashMap::new();
-        for trade in &trades {
-            *fills.entry(trade.buy_order_id).or_insert(0) += trade.quantity;
-            *fills.entry(trade.sell_order_id).or_insert(0) += trade.quantity;
-        }
+        // Residual: whatever's left unfilled on the heavier side. Since
+        // matching above mutated `orders[..].remaining` IN PLACE (through
+        // `buys`/`sells`' indices), each order's own `remaining` is already
+        // authoritative post-match — no separate fills-tracking/subtract
+        // pass needed (that was only required when matching operated on
+        // cloned `buys`/`sells` copies instead of `orders` itself; doing
+        // both now would double-subtract and corrupt residual quantities).
+        // Orders that weren't even eligible at this price were never
+        // touched by the loop above, so they stay fully intact here too —
+        // same "nothing silently vanishes" guarantee as before.
+        let residual_orders: Vec<Order> = orders.into_iter().filter(|o| o.remaining > 0).collect();
 
-        let mut residual_orders = Vec::new();
-        for mut order in orders {
-            let filled = fills.get(&order.oid).copied().unwrap_or(0);
-            order.remaining = order.remaining.saturating_sub(filled);
-            if order.remaining > 0 {
-                residual_orders.push(order);
-            }
-        }
         self.last_demand_at_price = demand_at_price;
         self.last_supply_at_price = supply_at_price;
         // Deliberately NOT `residual_orders`' total remaining: that sum
@@ -231,7 +233,6 @@ impl FbaOrderBook {
         // so `unexecuted_residual_share` stays a genuine share.
         self.last_unexecuted_quantity = demand_at_price.abs_diff(supply_at_price);
         self.pending_orders = residual_orders;
-        self.executed_trades.extend(trades.clone());
 
         Some(ClearingResult {
             clearing_price,
@@ -410,25 +411,34 @@ impl FbaOrderBook {
         (demand_at, supply_at)
     }
 
-    /// Orders eligible to trade at `price`, sorted by price-time priority:
-    /// most aggressive price first (market orders ahead of all limit
-    /// orders), and among orders at the same price, earliest submission
-    /// time first.
-    fn eligible_orders(&self, orders: &[Order], side: Side, price: Price) -> Vec<Order> {
-        let mut eligible: Vec<Order> = orders
+    /// INDICES into `orders` of the orders eligible to trade at `price`,
+    /// sorted by price-time priority: most aggressive price first (market
+    /// orders ahead of all limit orders), and among orders at the same
+    /// price, earliest submission time first.
+    ///
+    /// Returns indices rather than cloned `Order`s — the caller (`clear()`)
+    /// mutates the matched orders' `remaining` in place through these
+    /// indices, directly in the original `orders` batch, instead of
+    /// matching against separate cloned copies and having to reconcile
+    /// them back afterward. Each clone used to copy up to 4 owned
+    /// `String`s per order, for the whole batch, on every single clear().
+    fn eligible_orders(&self, orders: &[Order], side: Side, price: Price) -> Vec<usize> {
+        let mut eligible: Vec<usize> = orders
             .iter()
-            .filter(|order| order.side() == side)
-            .filter(|order| match order.kind() {
+            .enumerate()
+            .filter(|(_, order)| order.side() == side)
+            .filter(|(_, order)| match order.kind() {
                 OrderKind::Market => true,
                 OrderKind::Limit { price: limit_price } => match side {
                     Side::Buy => limit_price >= price,
                     Side::Sell => limit_price <= price,
                 },
             })
-            .cloned()
+            .map(|(i, _)| i)
             .collect();
 
-        eligible.sort_by_key(|order| {
+        eligible.sort_by_key(|&i| {
+            let order = &orders[i];
             let aggressiveness = self.order_priority(order);
             (aggressiveness, order.ts, order.oid)
         });

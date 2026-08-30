@@ -120,11 +120,11 @@ fn cda_resting_order_no_cross() -> TestCase {
     let mut book = CdaOrderBook::new();
     let trades = book.submit(limit(1, "Alice", Side::Buy, 100, 10, 1));
 
-    let ok = trades.is_empty() && book.bids.len() == 1 && book.asks.is_empty() && book.bids[0].remaining == 10;
+    let ok = trades.is_empty() && book.bid_count() == 1 && book.asks_is_empty() && book.best_bid_order().unwrap().remaining == 10;
     check(
         "cda_resting_order_no_cross",
         ok,
-        format!("trades={} bids={} asks={}", trades.len(), book.bids.len(), book.asks.len()),
+        format!("trades={} bids={} asks={}", trades.len(), book.bid_count(), book.ask_count()),
     )
 }
 
@@ -137,12 +137,12 @@ fn cda_simple_cross_exact_qty() -> TestCase {
         && trades[0].quantity == 10
         && trades[0].price == 100
         && trades[0].engine_type == EngineKind::Cda
-        && book.bids.is_empty()
-        && book.asks.is_empty();
+        && book.bids_is_empty()
+        && book.asks_is_empty();
     check(
         "cda_simple_cross_exact_qty",
         ok,
-        format!("trades={trades:?} bids_left={} asks_left={}", book.bids.len(), book.asks.len()),
+        format!("trades={trades:?} bids_left={} asks_left={}", book.bid_count(), book.ask_count()),
     )
 }
 
@@ -153,13 +153,13 @@ fn cda_partial_fill_resting_larger() -> TestCase {
 
     let ok = trades.len() == 1
         && trades[0].quantity == 4
-        && book.bids.is_empty() // taker fully filled, nothing rests
-        && book.asks.len() == 1
-        && book.asks[0].remaining == 6; // maker partially filled, stays resting
+        && book.bids_is_empty() // taker fully filled, nothing rests
+        && book.ask_count() == 1
+        && book.best_ask_order().unwrap().remaining == 6; // maker partially filled, stays resting
     check(
         "cda_partial_fill_resting_larger",
         ok,
-        format!("trades={trades:?} ask_remaining={:?}", book.asks.first().map(|o| o.remaining)),
+        format!("trades={trades:?} ask_remaining={:?}", book.best_ask_order().map(|o| o.remaining)),
     )
 }
 
@@ -172,14 +172,14 @@ fn cda_multi_fill_walks_book() -> TestCase {
     let ok = trades.len() == 2
         && trades[0].seller_id == "S1" && trades[0].quantity == 3
         && trades[1].seller_id == "S2" && trades[1].quantity == 4
-        && book.asks.is_empty()
-        && book.bids.len() == 1
-        && book.bids[0].remaining == 3 // 10 - 3 - 4
-        && book.bids[0].limit_px == 101;
+        && book.asks_is_empty()
+        && book.bid_count() == 1
+        && book.best_bid_order().unwrap().remaining == 3 // 10 - 3 - 4
+        && book.best_bid_order().unwrap().limit_px == 101;
     check(
         "cda_multi_fill_walks_book",
         ok,
-        format!("trades={trades:?} bids={:?}", book.bids.iter().map(|o| (o.user_id.clone(), o.remaining)).collect::<Vec<_>>()),
+        format!("trades={trades:?} bids={:?}", book.bids_iter().map(|o| (o.user_id.clone(), o.remaining)).collect::<Vec<_>>()),
     )
 }
 
@@ -193,12 +193,12 @@ fn cda_price_priority_over_time() -> TestCase {
     let ok = trades.len() == 1
         && trades[0].seller_id == "S_better"
         && trades[0].price == 100
-        && book.asks.len() == 1
-        && book.asks[0].user_id == "S_worse";
+        && book.ask_count() == 1
+        && book.best_ask_order().unwrap().user_id == "S_worse";
     check(
         "cda_price_priority_over_time",
         ok,
-        format!("trades={trades:?} remaining_asks={:?}", book.asks.iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
+        format!("trades={trades:?} remaining_asks={:?}", book.asks_iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
     )
 }
 
@@ -208,11 +208,11 @@ fn cda_time_priority_same_price() -> TestCase {
     book.submit(limit(2, "B_late", Side::Buy, 100, 5, 2));
     let trades = book.submit(limit(3, "Seller", Side::Sell, 100, 5, 3));
 
-    let ok = trades.len() == 1 && trades[0].buyer_id == "B_early" && book.bids.len() == 1 && book.bids[0].user_id == "B_late";
+    let ok = trades.len() == 1 && trades[0].buyer_id == "B_early" && book.bid_count() == 1 && book.best_bid_order().unwrap().user_id == "B_late";
     check(
         "cda_time_priority_same_price",
         ok,
-        format!("trades={trades:?} remaining_bids={:?}", book.bids.iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
+        format!("trades={trades:?} remaining_bids={:?}", book.bids_iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
     )
 }
 
@@ -221,7 +221,7 @@ fn cda_market_crosses_at_maker_price() -> TestCase {
     book.submit(limit(1, "Seller", Side::Sell, 100, 10, 1)); // resting limit
     let trades = book.submit(market(2, "Buyer", Side::Buy, 10, 2)); // market order, no price of its own
 
-    let ok = trades.len() == 1 && trades[0].price == 100 && trades[0].quantity == 10 && book.asks.is_empty() && book.bids.is_empty();
+    let ok = trades.len() == 1 && trades[0].price == 100 && trades[0].quantity == 10 && book.asks_is_empty() && book.bids_is_empty();
     check("cda_market_crosses_at_maker_price", ok, format!("trades={trades:?}"))
 }
 
@@ -234,11 +234,11 @@ fn cda_market_no_liquidity_no_rest() -> TestCase {
     // the accounting the way an inferred "submitted - still resting"
     // formula would (a market order that never rests would otherwise
     // vanish from both sides of that subtraction).
-    let ok = trades.is_empty() && book.bids.is_empty() && book.asks.is_empty() && book.fill_rate() == Some(0.0);
+    let ok = trades.is_empty() && book.bids_is_empty() && book.asks_is_empty() && book.fill_rate() == Some(0.0);
     check(
         "cda_market_no_liquidity_no_rest",
         ok,
-        format!("trades={} bids={} asks={} fill_rate={:?}", trades.len(), book.bids.len(), book.asks.len(), book.fill_rate()),
+        format!("trades={} bids={} asks={} fill_rate={:?}", trades.len(), book.bid_count(), book.ask_count(), book.fill_rate()),
     )
 }
 
@@ -271,8 +271,8 @@ fn cda_non_live_order_filtered() -> TestCase {
     let mut book = CdaOrderBook::new();
     let trades = book.submit(non_live(1, "X", Side::Buy, 100, 10, 1));
 
-    let ok = trades.is_empty() && book.bids.is_empty() && book.asks.is_empty();
-    check("cda_non_live_order_filtered", ok, format!("trades={} bids={} asks={}", trades.len(), book.bids.len(), book.asks.len()))
+    let ok = trades.is_empty() && book.bids_is_empty() && book.asks_is_empty();
+    check("cda_non_live_order_filtered", ok, format!("trades={} bids={} asks={}", trades.len(), book.bid_count(), book.ask_count()))
 }
 
 /// Regression check for a real matching-direction bug found while writing
@@ -291,13 +291,13 @@ fn cda_sell_crosses_bid_only_at_or_below_bid_price() -> TestCase {
     let aggressive_ok = aggressive_trades.len() == 1 && aggressive_trades[0].quantity == 4 && aggressive_trades[0].price == 100;
 
     let passive_trades = book.submit(limit(3, "PassiveSeller", Side::Sell, 105, 3, 3)); // 105 > 100 -> must NOT cross, must rest
-    let passive_ok = passive_trades.is_empty() && book.asks.len() == 1 && book.asks[0].user_id == "PassiveSeller";
+    let passive_ok = passive_trades.is_empty() && book.ask_count() == 1 && book.best_ask_order().unwrap().user_id == "PassiveSeller";
 
     let ok = aggressive_ok && passive_ok;
     check(
         "cda_sell_crosses_bid_only_at_or_below_bid_price",
         ok,
-        format!("aggressive_trades={aggressive_trades:?} passive_trades={passive_trades:?} asks={:?}", book.asks.iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
+        format!("aggressive_trades={aggressive_trades:?} passive_trades={passive_trades:?} asks={:?}", book.asks_iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
     )
 }
 
@@ -307,11 +307,11 @@ fn cda_cancellation_removes_resting_order() -> TestCase {
     book.submit(limit(2, "Bob", Side::Sell, 105, 5, 2)); // rests too, doesn't cross
     book.submit(cancel_event(1, 3)); // cancel Alice's resting bid by oid
 
-    let ok = book.bids.is_empty() && book.asks.len() == 1 && book.asks[0].user_id == "Bob";
+    let ok = book.bids_is_empty() && book.ask_count() == 1 && book.best_ask_order().unwrap().user_id == "Bob";
     check(
         "cda_cancellation_removes_resting_order",
         ok,
-        format!("bids={} asks={:?}", book.bids.len(), book.asks.iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
+        format!("bids={} asks={:?}", book.bid_count(), book.asks_iter().map(|o| o.user_id.clone()).collect::<Vec<_>>()),
     )
 }
 
@@ -322,8 +322,8 @@ fn cda_cancellation_of_unknown_oid_is_harmless() -> TestCase {
     // Cancel an oid that was never submitted as live.
     let removed = book.cancel(999);
 
-    let ok = !removed && book.bids.len() == 1 && book.bids[0].oid == 1;
-    check("cda_cancellation_of_unknown_oid_is_harmless", ok, format!("removed={removed} bids={}", book.bids.len()))
+    let ok = !removed && book.bid_count() == 1 && book.best_bid_order().unwrap().oid == 1;
+    check("cda_cancellation_of_unknown_oid_is_harmless", ok, format!("removed={removed} bids={}", book.bid_count()))
 }
 
 fn cda_filled_status_does_not_touch_resting_order() -> TestCase {
@@ -333,11 +333,11 @@ fn cda_filled_status_does_not_touch_resting_order() -> TestCase {
 
     // Per the design decision, fills are NOT replayed — Alice's order must
     // still be sitting there completely untouched.
-    let ok = book.bids.len() == 1 && book.bids[0].oid == 1 && book.bids[0].remaining == 10;
+    let ok = book.bid_count() == 1 && book.best_bid_order().unwrap().oid == 1 && book.best_bid_order().unwrap().remaining == 10;
     check(
         "cda_filled_status_does_not_touch_resting_order",
         ok,
-        format!("bids={:?}", book.bids.iter().map(|o| (o.oid, o.remaining)).collect::<Vec<_>>()),
+        format!("bids={:?}", book.bids_iter().map(|o| (o.oid, o.remaining)).collect::<Vec<_>>()),
     )
 }
 
