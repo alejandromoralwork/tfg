@@ -1,0 +1,18 @@
+# Keep the build context to just the crate. `docker build` only needs src/.
+*
+!src
+
+# ...minus the parts of src/ the build must not carry (build artifacts, the
+# multi-GB downloaded dataset, prior run output).
+src/target
+src/data
+src/output
+src/.dist
+
+# docs aren't needed to compile
+src/docs
+
+# editor / OS cruft that could sneak in
+**/.DS_Store
+**/Thumbs.db
+**/*.swp

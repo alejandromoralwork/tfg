@@ -39,6 +39,17 @@ already-built binary directly:
 .\target\debug\market_sim.exe
 ```
 
+## Non-interactive / containerised
+
+With arguments, the binary runs one command and exits with its status
+(`0` ok, `1` run-time failure, `2` bad request):
+
+```
+.\target\release\market_sim.exe simulate data\sample\order_statuses\20251201 1
+```
+
+For Docker + Google Cloud Batch, see [`DEPLOY.md`](DEPLOY.md).
+
 ## Quick usage
 
 ```

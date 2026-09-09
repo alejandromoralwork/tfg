@@ -18,12 +18,14 @@
 //! interrupted. So the replay is processed one input file at a time, and
 //! after each file:
 //!
-//! - `MetricsRecorder::emit` flushes every interval bucket that has settled
-//!   — i.e. whose end is more than `SETTLE_SECS` behind the latest
-//!   event-time — and those rows are *appended* to
-//!   `output/<slug>/{fba,cda}_timeseries.csv`. The recorder then drops the
-//!   events for those buckets, so memory stays bounded to roughly the last
-//!   `SETTLE_SECS` of activity instead of the whole run.
+//! - `MetricsRecorder::emit` flushes every interval bucket that neither this
+//!   file's own tail nor the *next* file's first timestamp
+//!   (`simulator::peek_first_ts`) can still be within `MARKOUT_GUARD_SECS`
+//!   of — so no later file can add to it and its markout forward-mids
+//!   already exist. Those rows are *appended* to
+//!   `output/<slug>/{fba,cda}_timeseries.csv` and their events dropped, so
+//!   the CSV grows once per input file and memory stays bounded to ~one
+//!   file's span of recent activity.
 //! - `output/<slug>/checkpoint.txt` is rewritten (atomically) with how many
 //!   files are done, the cumulative counters, the bucket-grid cursor, and
 //!   the running summary accumulators.
@@ -32,9 +34,10 @@
 //! finished files are skipped and the CSVs are appended to (trimmed first
 //! back to the checkpoint's row counts, in case a crash left them ahead).
 //! Resume is approximate — the in-flight event window and the engine books
-//! are not persisted, so a resumed run leaves a gap of empty interval rows
-//! roughly `SETTLE_SECS` wide at the seam; everything after it is exact.
-//! `summary.txt` is written once, at completion.
+//! are not persisted, so a resumed run leaves a short gap of empty interval
+//! rows (~one file's span, or `MARKOUT_GUARD_SECS` for the very last flush)
+//! at the seam; everything after it is exact. `summary.txt` is written once,
+//! at completion.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -50,44 +53,43 @@ use crate::engines::fba::FbaOrderBook;
 use crate::inputs::progress;
 use crate::inputs::replay_checkpoint::{self, Checkpoint};
 use crate::inputs::simulator;
-use crate::metrics::timeseries::{self, IntervalMetrics, MetricsRecorder};
+use crate::metrics::timeseries::{self, Carry, IntervalMetrics, MetricsRecorder};
 use crate::types::{EngineKind, Order, Side, PRICE_SCALE};
 
 const DEFAULT_INTERVAL_SECS: u64 = 1;
 const NS_PER_SEC: u64 = 1_000_000_000;
 
-/// How far event-time must move past a bucket's end before that bucket is
-/// considered settled and flushed to CSV. It bounds in-run memory (only
-/// this much recent activity is retained) and the size of the empty-row gap
-/// a resumed run leaves behind.
-///
-/// ~1h 1min, chosen so it exceeds two things at once: the widest
-/// realized-spread markout horizon (30s — a bucket must not flush before
-/// its forward prices exist), and the backwards jump in event-time when the
-/// stream moves from an hour's *accepted* file to that same hour's
-/// *rejected* file (`inputs::simulator::collect_input_files` orders them
-/// accepted-then-rejected, so `ts` can drop by nearly a full hour there).
-/// Raising it trades more retained memory for fewer boundary
-/// approximations; lowering it makes CSV rows appear sooner but risks
-/// dropping late rejected-order records (counted as `late_events_dropped`).
-const SETTLE_SECS: u64 = 3_660;
+/// How far event-time must move past a metric bucket's end before that
+/// bucket is flushed to CSV — just enough that its own forward-looking
+/// markout mids are already observed. It only has to exceed the widest
+/// forward horizon any metric uses: the 30s realized-spread markout and the
+/// 5s `kyle_lambda` markout. It is NOT the flush cadence — a file boundary
+/// is (see `flush_hi` and `simulator::peek_first_ts`): after each input file
+/// `simulate` flushes every bucket that neither this file's own tail nor the
+/// *next* file's start can still be within `MARKOUT_GUARD_SECS` of, so the
+/// CSV grows once per file instead of once per ~hour.
+const MARKOUT_GUARD_SECS: u64 = 35;
 
-pub fn run(path_str: &str, interval_secs: Option<u64>) {
+/// Exit codes: 0 ok, 1 a run-time failure (streaming / IO), 2 a bad request
+/// (no data found, incompatible checkpoint). Returned so a non-interactive
+/// caller (`cli::run_once`, GCP Batch) can retry or fail the task.
+pub fn run(path_str: &str, interval_secs: Option<u64>) -> i32 {
     // `simulate all` is shorthand for running `btc`, `eth`, then `sol` back
     // to back — same idea as `download all`/`extract all`, and just as
     // simple to implement: each coin gets its own complete, independent
     // run (files, engines, progress bar, output) rather than trying to
     // merge three unrelated datasets into one combined replay.
     if path_str.eq_ignore_ascii_case("all") {
+        let mut code = 0;
         for coin in ["btc", "eth", "sol"] {
-            run(coin, interval_secs);
+            code = code.max(run(coin, interval_secs));
         }
-        return;
+        return code;
     }
 
     let interval_secs = interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS);
     let interval_width_ns = interval_secs * NS_PER_SEC;
-    let settle_ns = SETTLE_SECS.saturating_mul(NS_PER_SEC);
+    let markout_guard_ns = MARKOUT_GUARD_SECS.saturating_mul(NS_PER_SEC);
 
     // `simulate btc|eth|sol` is shorthand for the directory `download
     // <coin>` populates — resolved here rather than in the CLI parser so
@@ -102,15 +104,15 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         Ok(files) if !files.is_empty() => files,
         Ok(_) if coin_shorthand => {
             println!("{}", format!("[ERROR] No .csv/.gz files found under '{resolved_path}'. Run 'download {path_str}' first?").red());
-            return;
+            return 2;
         }
         Ok(_) => {
             println!("{}", format!("[ERROR] No .csv/.gz files found under '{resolved_path}'.").red());
-            return;
+            return 2;
         }
         Err(err) => {
             println!("{}", format!("[ERROR] Failed to read '{resolved_path}': {err}").red());
-            return;
+            return 2;
         }
     };
 
@@ -123,7 +125,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         Ok(p) => p,
         Err(err) => {
             println!("{}", format!("[ERROR] Couldn't read existing checkpoint in {}: {err}", out_dir.display()).red());
-            return;
+            return 2;
         }
     };
     let (mut ckpt, resuming) = match prior {
@@ -137,32 +139,32 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
                     )
                     .red()
                 );
-                return;
+                return 2;
             }
             if c.complete {
                 println!("{}", format!("[OK] '{resolved_path}' is already fully processed — see {}. Delete that directory to re-run.", out_dir.display()).green());
-                return;
+                return 0;
             }
             (c, true)
         }
         None => {
             if let Err(err) = fs::create_dir_all(&out_dir) {
                 println!("{}", format!("[ERROR] Couldn't create {}: {err}", out_dir.display()).red());
-                return;
+                return 1;
             }
-            (Checkpoint::fresh(resolved_path.clone(), interval_width_ns, settle_ns, files.len()), false)
+            (Checkpoint::fresh(resolved_path.clone(), interval_width_ns, markout_guard_ns, files.len()), false)
         }
     };
 
     // A checkpoint with nothing flushed yet means the previous run was
-    // interrupted inside the first settle window — none of its events were
+    // interrupted before its first per-file flush — none of its events were
     // persisted, so there's nothing to resume onto. Restart the replay from
     // the top (no CSV rows exist to duplicate); only the cumulative
     // wall-clock carries over.
     let restart_from_scratch = resuming && ckpt.fba_rows_written == 0 && ckpt.cda_rows_written == 0;
     if restart_from_scratch {
         let kept_elapsed = ckpt.elapsed_secs;
-        ckpt = Checkpoint::fresh(resolved_path.clone(), interval_width_ns, settle_ns, files.len());
+        ckpt = Checkpoint::fresh(resolved_path.clone(), interval_width_ns, markout_guard_ns, files.len());
         ckpt.elapsed_secs = kept_elapsed;
     }
     let appending = resuming && !restart_from_scratch;
@@ -174,7 +176,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         // resume exactly where the checkpoint says.
         if let Err(err) = replay_checkpoint::truncate_data_rows(&fba_csv, ckpt.fba_rows_written).and_then(|_| replay_checkpoint::truncate_data_rows(&cda_csv, ckpt.cda_rows_written)) {
             println!("{}", format!("[ERROR] Couldn't reconcile existing CSVs against the checkpoint: {err}").red());
-            return;
+            return 1;
         }
         for p in [&fba_csv, &cda_csv] {
             if !p.exists() {
@@ -195,7 +197,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     } else {
         if let Err(err) = fs::write(&fba_csv, &header_line).and_then(|_| fs::write(&cda_csv, &header_line)) {
             println!("{}", format!("[ERROR] Couldn't create output CSVs in {}: {err}", out_dir.display()).red());
-            return;
+            return 1;
         }
         let lead = if restart_from_scratch { "Restarting (prior run stopped before its first flush)" } else { "Simulating" };
         println!("{}", format!("==> {lead} {} file(s) from '{resolved_path}', interval={interval_secs}s -> {} ...", files.len(), out_dir.display()).cyan());
@@ -210,8 +212,22 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let mut cda = CdaOrderBook::new();
     let (mut fba_recorder, mut cda_recorder) = match ckpt.anchor {
         Some(a) => (
-            MetricsRecorder::resume(EngineKind::Fba, interval_width_ns, a, ckpt.emitted_upto, ckpt.fba_prev_close, ckpt.fba_prev_clearing, ckpt.fba_late_dropped),
-            MetricsRecorder::resume(EngineKind::Cda, interval_width_ns, a, ckpt.emitted_upto, ckpt.cda_prev_close, ckpt.cda_prev_clearing, ckpt.cda_late_dropped),
+            MetricsRecorder::resume(
+                EngineKind::Fba,
+                interval_width_ns,
+                a,
+                ckpt.emitted_upto,
+                Carry { prev_close: ckpt.fba_prev_close, prev_clearing: ckpt.fba_prev_clearing },
+                ckpt.fba_late_dropped,
+            ),
+            MetricsRecorder::resume(
+                EngineKind::Cda,
+                interval_width_ns,
+                a,
+                ckpt.emitted_upto,
+                Carry { prev_close: ckpt.cda_prev_close, prev_clearing: ckpt.cda_prev_clearing },
+                ckpt.cda_late_dropped,
+            ),
         ),
         None => (MetricsRecorder::new(EngineKind::Fba, interval_width_ns), MetricsRecorder::new(EngineKind::Cda, interval_width_ns)),
     };
@@ -381,7 +397,13 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
                 let (fba_rows, cda_rows) = if is_last {
                     (fba_recorder.finish(&messages, max_seen_ts), cda_recorder.finish(&messages, max_seen_ts))
                 } else {
-                    let hi = flush_hi(anchor, false, max_seen_ts, settle_ns, interval_width_ns);
+                    // Flush every bucket that neither this file's tail nor the
+                    // NEXT file's start is within `MARKOUT_GUARD_SECS` of — so
+                    // the CSV grows once per input file. Peeking the next
+                    // file's first timestamp is one small read.
+                    let next_first_ts = files.get(file_index + 1).and_then(|p| simulator::peek_first_ts(p).ok().flatten());
+                    let file_last_ts = last_seen_ts.unwrap_or(0);
+                    let hi = flush_hi(anchor, next_first_ts, file_last_ts, markout_guard_ns, interval_width_ns);
                     (fba_recorder.emit(&messages, hi), cda_recorder.emit(&messages, hi))
                 };
                 debug_assert_eq!(fba_recorder.anchor(), cda_recorder.anchor(), "both recorders share the grid origin");
@@ -406,10 +428,12 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
 
                 ckpt.anchor = anchor;
                 ckpt.emitted_upto = fba_recorder.emitted_upto();
-                ckpt.fba_prev_close = fba_recorder.prev_close();
-                ckpt.cda_prev_close = cda_recorder.prev_close();
-                ckpt.fba_prev_clearing = fba_recorder.prev_clearing();
-                ckpt.cda_prev_clearing = cda_recorder.prev_clearing(); // always None
+                let fc = fba_recorder.carry();
+                let cc = cda_recorder.carry();
+                ckpt.fba_prev_close = fc.prev_close;
+                ckpt.cda_prev_close = cc.prev_close;
+                ckpt.fba_prev_clearing = fc.prev_clearing;
+                ckpt.cda_prev_clearing = cc.prev_clearing; // always None
                 ckpt.fba_late_dropped = fba_recorder.late_events_dropped();
                 ckpt.cda_late_dropped = cda_recorder.late_events_dropped();
                 ckpt.elapsed_secs = base_elapsed_secs + wall_clock_start.elapsed().as_secs_f64();
@@ -425,7 +449,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     if let Err(err) = stream_result {
         println!("{}", format!("[ERROR] Streaming failed: {err}").red());
         println!("{}", format!("        Progress up to file {}/{} is checkpointed in {} — re-run the same command to resume.", ckpt.files_done, files.len(), out_dir.display()).yellow());
-        return;
+        return 1;
     }
 
     // Resume-after-a-crash-at-the-very-end: every file was already done, so
@@ -458,7 +482,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         println!(
             "{}",
             format!(
-                "[WARN] {} FBA / {} CDA event(s) arrived after their interval had already been flushed and were dropped (event-time went backwards further than the settle window). See summary.txt.",
+                "[WARN] {} FBA / {} CDA event(s) arrived for an interval that had already been flushed and were dropped (event-time went backwards past a file boundary). See summary.txt.",
                 ckpt.fba_late_dropped, ckpt.cda_late_dropped
             )
             .yellow()
@@ -467,24 +491,31 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     println!("FBA: {} interval(s)  |  CDA: {} interval(s)", ckpt.fba_summary.intervals_total(), ckpt.cda_summary.intervals_total());
 
     match write_summary(&out_dir, &resolved_path, &ckpt) {
-        Ok(()) => println!("{}", format!("[OK] Time series + summary in {}", out_dir.display()).green()),
-        Err(err) => println!("{}", format!("[ERROR] Failed to write summary: {err}").red()),
+        Ok(()) => {
+            println!("{}", format!("[OK] Time series + summary in {}", out_dir.display()).green());
+            0
+        }
+        Err(err) => {
+            println!("{}", format!("[ERROR] Failed to write summary: {err}").red());
+            1
+        }
     }
 }
 
-/// Exclusive upper bucket boundary to flush up to after a file. On the last
-/// file: everything through the bucket holding `max_seen_ts`. Otherwise:
-/// only buckets that have settled (`SETTLE_SECS` behind event-time), rounded
-/// down to a grid boundary; returns `anchor` (a no-op for `emit`) when
-/// nothing has settled yet.
-fn flush_hi(anchor: Option<u64>, is_last: bool, max_seen_ts: u64, settle_ns: u64, width: u64) -> u64 {
+/// Exclusive upper bucket boundary to flush up to after a NON-last file.
+/// Every bucket that starts before this is safe to emit: it is more than
+/// `guard_ns` behind BOTH this file's own tail (`file_last_ts` — so its
+/// markout forward-mids exist) and the next file's first record
+/// (`next_first_ts` — so no later file, in `collect_input_files`'s sorted
+/// order, can still add records to it). Returns `anchor` (a no-op for
+/// `emit`) when nothing is safe yet; `0` before the grid has an origin.
+/// The last file goes through `MetricsRecorder::finish` instead.
+fn flush_hi(anchor: Option<u64>, next_first_ts: Option<u64>, file_last_ts: u64, guard_ns: u64, width: u64) -> u64 {
     let Some(a) = anchor else {
         return 0;
     };
-    if is_last {
-        return max_seen_ts.saturating_add(1);
-    }
-    let safe = max_seen_ts.saturating_sub(settle_ns);
+    let cap = next_first_ts.map_or(file_last_ts, |nf| nf.min(file_last_ts));
+    let safe = cap.saturating_sub(guard_ns);
     if safe > a {
         a + ((safe - a) / width) * width
     } else {
@@ -520,6 +551,16 @@ fn clear_fba_batch(fba: &mut FbaOrderBook, recorder: &mut MetricsRecorder, batch
     let snapshot: Vec<(Option<u128>, Side, u128)> = fba.pending_orders.iter().map(|o| (o.limit_price(), o.side(), o.remaining)).collect();
     let reference_before = fba.last_clearing_price;
 
+    // Net signed order flow into this batch, BEFORE price selection — the
+    // regressor for FBA `kyle_lambda` (see `BatchClearedEvent::net_order_flow`).
+    let net_order_flow: f64 = snapshot
+        .iter()
+        .map(|&(_, side, qty)| match side {
+            Side::Buy => qty as f64,
+            Side::Sell => -(qty as f64),
+        })
+        .sum();
+
     let clear_start = Instant::now();
     let result = fba.clear();
     let compute_time = clear_start.elapsed();
@@ -531,6 +572,7 @@ fn clear_fba_batch(fba: &mut FbaOrderBook, recorder: &mut MetricsRecorder, batch
             clearing_price: None,
             demand_at_price: 0,
             supply_at_price: 0,
+            net_order_flow,
             traded_quantity: 0,
             unexecuted_quantity: 0,
             best_unfilled_buy: fba.best_unfilled_buy(),
@@ -557,6 +599,7 @@ fn clear_fba_batch(fba: &mut FbaOrderBook, recorder: &mut MetricsRecorder, batch
         clearing_price: Some(clearing.clearing_price),
         demand_at_price: clearing.demand_at_price,
         supply_at_price: clearing.supply_at_price,
+        net_order_flow,
         traded_quantity: clearing.traded_quantity,
         // The heavier ELIGIBLE side's leftover (`|demand - supply|`), not a
         // full-residual-orders sum — see `FbaOrderBook::unexecuted_residual_share`'s
@@ -593,7 +636,7 @@ fn write_summary(out_dir: &Path, source: &str, ckpt: &Checkpoint) -> io::Result<
          Records seen:            {}\n\
          Records skipped:         {}\n\
          Wall-clock duration:     {:.1}s (cumulative across runs)\n\
-         Settle window:           {SETTLE_SECS}s (bucket flush lag; also the resumed-run gap width)\n\
+         Markout guard:           {MARKOUT_GUARD_SECS}s (forward-mid lag before a bucket is flushed; flush cadence is per input file)\n\
          Late events dropped:     {} (FBA) / {} (CDA)\n\
          \n\
          FBA intervals:           {}\n\
@@ -691,21 +734,29 @@ mod tests {
     }
 
     #[test]
-    fn flush_hi_withholds_unsettled_buckets_but_releases_everything_on_the_last_file() {
+    fn flush_hi_releases_up_to_the_next_files_start_minus_the_markout_guard() {
         let w = 1_000_000_000u64;
-        let settle = 10 * w;
+        let guard = 10 * w;
         let anchor = Some(1_000u64);
 
-        // Nothing has settled yet -> returns the anchor (a no-op for `emit`).
-        assert_eq!(flush_hi(anchor, false, 1_000 + 5 * w, settle, w), 1_000);
-        // 25s of event-time in, 10s settle -> buckets up to ~15s past anchor,
-        // grid-aligned.
-        let hi = flush_hi(anchor, false, 1_000 + 25 * w, settle, w);
+        // No anchor -> nothing to emit.
+        assert_eq!(flush_hi(None, Some(999_999), 999_999, guard, w), 0);
+
+        // Next file starts only just past the anchor -> frontier below the
+        // anchor -> returns the anchor (a no-op for `emit`).
+        assert_eq!(flush_hi(anchor, Some(1_000 + 5 * w), 1_000 + 5 * w, guard, w), 1_000);
+
+        // Next file is the binding cap: it starts at anchor+25s, this file's
+        // tail is further out -> flush up to (25s - 10s) past anchor, grid-aligned.
+        let hi = flush_hi(anchor, Some(1_000 + 25 * w), 1_000 + 40 * w, guard, w);
         assert_eq!(hi, 1_000 + 15 * w);
         assert_eq!((hi - 1_000) % w, 0, "grid-aligned");
-        // Last file: everything through the bucket holding max_seen_ts.
-        assert_eq!(flush_hi(anchor, true, 1_000 + 25 * w + 7, settle, w), 1_000 + 25 * w + 8);
-        // No anchor -> nothing to emit.
-        assert_eq!(flush_hi(None, false, 999_999, settle, w), 0);
+
+        // This file's own tail is the binding cap (next file starts even later).
+        let hi = flush_hi(anchor, Some(1_000 + 40 * w), 1_000 + 25 * w, guard, w);
+        assert_eq!(hi, 1_000 + 15 * w);
+
+        // No next file peeked -> fall back to this file's tail alone.
+        assert_eq!(flush_hi(anchor, None, 1_000 + 25 * w, guard, w), 1_000 + 15 * w);
     }
 }

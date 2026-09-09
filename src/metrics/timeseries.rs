@@ -76,6 +76,14 @@ pub struct BatchClearedEvent {
     pub clearing_price: Option<u128>,
     pub demand_at_price: u128,
     pub supply_at_price: u128,
+    /// Net signed order flow submitted into this batch, BEFORE price
+    /// selection: `Σ(buy remaining) − Σ(sell remaining)` over every order in
+    /// the batch (market orders included, rolled-over residual included),
+    /// signed SOL. This is the auction-round analogue of Kyle's order-flow
+    /// regressor `x` — a strong directional signal, unlike the
+    /// `demand_at_price − supply_at_price` residual which `select_price`
+    /// deliberately minimizes.
+    pub net_order_flow: f64,
     pub traded_quantity: u128,
     pub unexecuted_quantity: u128,
     pub best_unfilled_buy: Option<u128>,
@@ -283,16 +291,18 @@ pub(crate) fn bucket_of(ts: u64, anchor: u64, interval_width: u64) -> u64 {
 
 /// Cross-flush "prior value + delta" state threaded through `compute_range`:
 /// metrics whose per-bucket value depends on an earlier, already-emitted
-/// bucket. Bundled so `compute_range`'s return stays a 3-tuple as more such
-/// metrics are added.
-#[derive(Clone, Copy, Default)]
-struct Carry {
+/// bucket. `pub(crate)` so `inputs::simulate_cmd` can build one from the
+/// checkpoint and read it back after a flush.
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct Carry {
     /// `amihud_illiquidity`: the last non-empty in-range bucket's
     /// reference-price close.
-    prev_close: Option<f64>,
-    /// FBA `kyle_lambda`: the last in-range batch's clearing price
-    /// (PRICE_SCALE fixed-point, as `f64`). Always `None` for a CDA recorder.
-    prev_clearing: Option<f64>,
+    pub prev_close: Option<f64>,
+    /// FBA `kyle_lambda`: the previous priced batch's clearing price
+    /// (PRICE_SCALE fixed-point, as `f64`) — the `p_{k-1}` the current
+    /// batch's price move is measured against. Always `None` for a CDA
+    /// recorder.
+    pub prev_clearing: Option<f64>,
 }
 
 pub struct MetricsRecorder {
@@ -306,14 +316,10 @@ pub struct MetricsRecorder {
     /// Exclusive upper bucket boundary already emitted to CSV — the next
     /// `emit`/`finish` picks up here. Equals `anchor` until the first flush.
     emitted_upto: u64,
-    /// `amihud_illiquidity` carry: the last in-bucket reference-price
-    /// "close" from an already-emitted bucket, so that metric spans flush
-    /// boundaries exactly as it did in the old one-shot `finalize`.
-    prev_close: Option<f64>,
-    /// FBA `kyle_lambda` carry: the last in-range batch clearing price seen
-    /// by an already-emitted flush, so that metric spans flush boundaries
-    /// like `prev_close`. Always `None` for a CDA recorder.
-    prev_clearing: Option<f64>,
+    /// Cross-flush carries (`amihud_illiquidity`, FBA `kyle_lambda`) so those
+    /// "prior value + delta" metrics span flush boundaries exactly as they
+    /// did in the old one-shot `finalize`.
+    carry: Carry,
     trades: Vec<TradeEvent>,
     batches: Vec<BatchClearedEvent>,
     books: Vec<BookSnapshot>,
@@ -334,8 +340,7 @@ impl MetricsRecorder {
             interval_width: interval_width_ns,
             anchor: None,
             emitted_upto: 0,
-            prev_close: None,
-            prev_clearing: None,
+            carry: Carry::default(),
             trades: Vec::new(),
             batches: Vec::new(),
             books: Vec::new(),
@@ -349,14 +354,13 @@ impl MetricsRecorder {
     /// grid, the emit cursor, and the cross-flush `amihud` and Kyle's-lambda
     /// carries, so rows appended after resume line up with the ones already
     /// on disk.
-    pub fn resume(engine: EngineKind, interval_width_ns: u64, anchor: u64, emitted_upto: u64, prev_close: Option<f64>, prev_clearing: Option<f64>, late_events_dropped: u64) -> Self {
+    pub fn resume(engine: EngineKind, interval_width_ns: u64, anchor: u64, emitted_upto: u64, carry: Carry, late_events_dropped: u64) -> Self {
         Self {
             engine,
             interval_width: interval_width_ns,
             anchor: Some(anchor),
             emitted_upto,
-            prev_close,
-            prev_clearing,
+            carry,
             trades: Vec::new(),
             batches: Vec::new(),
             books: Vec::new(),
@@ -370,11 +374,9 @@ impl MetricsRecorder {
     pub fn emitted_upto(&self) -> u64 {
         self.emitted_upto
     }
-    pub fn prev_close(&self) -> Option<f64> {
-        self.prev_close
-    }
-    pub fn prev_clearing(&self) -> Option<f64> {
-        self.prev_clearing
+    /// The cross-flush carry state, to persist in the checkpoint after a flush.
+    pub(crate) fn carry(&self) -> Carry {
+        self.carry
     }
     pub fn late_events_dropped(&self) -> u64 {
         self.late_events_dropped
@@ -470,10 +472,8 @@ impl MetricsRecorder {
             return Vec::new();
         }
         let lo = self.emitted_upto;
-        let carry_in = Carry { prev_close: self.prev_close, prev_clearing: self.prev_clearing };
-        let (rows, carry_out, next_upto) = self.compute_range(messages, lo, hi, anchor, carry_in);
-        self.prev_close = carry_out.prev_close;
-        self.prev_clearing = carry_out.prev_clearing;
+        let (rows, carry_out, next_upto) = self.compute_range(messages, lo, hi, anchor, self.carry);
+        self.carry = carry_out;
         self.emitted_upto = next_upto;
         rows
     }
@@ -779,42 +779,53 @@ impl MetricsRecorder {
         }
         let prev_close_out = prev_close;
 
-        // ---- FBA Kyle's lambda: OLS slope through the origin of the
-        //      one-batch relative clearing-price move (bps) on signed excess
-        //      demand at the clearing price (SOL), one observation per batch ----
+        // ---- FBA Kyle's lambda: OLS slope through the origin of a priced
+        //      batch's relative clearing-price move (bps) on its own net
+        //      order-flow imbalance (SOL), one observation per priced batch:
+        //          x = net_order_flow_k                     (SOL, signed, pre-price-selection)
+        //          y = (cp_k - cp_{k-1}) / cp_{k-1} * 1e4    (bps)
+        //
+        // Contemporaneous — a call auction sets one price as a function of
+        // that round's net demand, exactly Kyle's model. The regressor is the
+        // batch's TOTAL submitted buy-minus-sell quantity (`net_order_flow`),
+        // NOT the `demand_at_price − supply_at_price` residual, which
+        // `select_price` minimizes and which therefore carries almost no
+        // directional signal.
         //
         // Own ascending walk over `self.batches` (not the unordered
-        // `bucket_batches` map below — a carry needs order). `self.batches` is
-        // recorded strictly ascending in `ts` by `clear_fba_batch` and
-        // `prune` only drops a prefix, so a plain `Vec` walk is both
-        // ts-ordered and deterministic. `prev_clearing` carries in/out exactly
-        // like `prev_close` above: only a real clearing price advances it, a
-        // batch owned by a later flush (`bof(ts) >= hi`) never touches it.
+        // `bucket_batches` map below — the `prev_clearing` carry needs order).
+        // `self.batches` is recorded strictly ascending in `ts` by
+        // `clear_fba_batch` and `prune` only drops a prefix, so a plain `Vec`
+        // walk is ts-ordered and deterministic. A `clearing_price = None`
+        // batch is skipped and does not advance the carry; a batch a later
+        // flush owns (`bof(ts) >= hi`) is left for the next `emit`.
         let mut bucket_kyle_fba: HashMap<u64, (f64, f64)> = HashMap::new(); // bucket -> (Σxx, Σxy)
-        let mut prev_clearing: Option<f64> = carry_in.prev_clearing;
+        let mut prev_cp: Option<f64> = carry_in.prev_clearing;
         let mut last_batch_ts = 0u64;
         for bt in &self.batches {
             debug_assert!(bt.ts >= last_batch_ts, "self.batches must stay ascending by ts");
             last_batch_ts = bt.ts;
             let b = bof(bt.ts);
-            if b >= hi || b < lo {
-                continue; // a later flush owns it, or it was already emitted
+            if b >= hi {
+                continue; // a later flush owns it — leave the carry for the next `emit`
             }
-            if let Some(cp) = bt.clearing_price {
-                let cp = cp as f64;
-                if let Some(pcp) = prev_clearing {
+            let Some(cp) = bt.clearing_price else { continue };
+            let cp = cp as f64;
+            if b >= lo {
+                if let Some(pcp) = prev_cp {
                     if pcp > 0.0 {
-                        let x = bt.demand_at_price as f64 - bt.supply_at_price as f64;
+                        let x = bt.net_order_flow;
                         let y = (cp - pcp) / pcp * 10_000.0;
                         let e = bucket_kyle_fba.entry(b).or_insert((0.0, 0.0));
                         e.0 += x * x;
                         e.1 += x * y;
                     }
                 }
-                prev_clearing = Some(cp);
             }
+            // Advance the carry even for a `b < lo` batch (defensive — those
+            // are normally pruned) so the first in-range batch has a predecessor.
+            prev_cp = Some(cp);
         }
-        let prev_clearing_out = prev_clearing;
         for (b, (sxx, sxy)) in &bucket_kyle_fba {
             if *sxx > 0.0 {
                 buckets.get_mut(b).unwrap().kyle_lambda = Some(sxy / sxx);
@@ -1108,7 +1119,7 @@ impl MetricsRecorder {
         // external reference price feed (Hyperliquid's own oracle/mark
         // price) this dataset doesn't include — see the field's doc comment.
 
-        (buckets.into_values().collect(), Carry { prev_close: prev_close_out, prev_clearing: prev_clearing_out }, next_upto)
+        (buckets.into_values().collect(), Carry { prev_close: prev_close_out, prev_clearing: prev_cp }, next_upto)
     }
 }
 
@@ -1252,6 +1263,7 @@ mod tests {
             clearing_price: None,
             demand_at_price: 0,
             supply_at_price: 0,
+            net_order_flow: 0.0,
             traded_quantity: 0,
             unexecuted_quantity: 0,
             best_unfilled_buy: None,
@@ -1619,13 +1631,14 @@ mod tests {
     }
 
     /// A fully-specified FBA `BatchClearedEvent` for lambda tests.
-    fn fba_clear(ts: u64, batch_open_ts: u64, clearing_price: Option<u128>, demand: u128, supply: u128) -> BatchClearedEvent {
+    fn fba_clear(ts: u64, batch_open_ts: u64, clearing_price: Option<u128>, net_flow: f64, demand: u128, supply: u128) -> BatchClearedEvent {
         BatchClearedEvent {
             ts,
             batch_open_ts,
             clearing_price,
             demand_at_price: demand,
             supply_at_price: supply,
+            net_order_flow: net_flow,
             traded_quantity: demand.min(supply),
             unexecuted_quantity: demand.abs_diff(supply),
             best_unfilled_buy: None,
@@ -1680,20 +1693,22 @@ mod tests {
     }
 
     #[test]
-    fn kyle_lambda_fba_from_batch_imbalance() {
+    fn kyle_lambda_fba_from_net_order_flow() {
+        // Contemporaneous: batch k's clearing-price move (vs batch k-1)
+        // regressed on batch k's own net order flow.
         let big = 100 * W;
         let lambda = 125.0;
         let mut rec = MetricsRecorder::new(EngineKind::Fba, big);
-        // Priming batch: sets the carry, produces no observation (no prior price).
-        rec.record_batch(fba_clear(1_000_000, 0, Some(1_000_000), 0, 0));
-        // x = +8 vs 1_000_000 -> y = 1000 bps -> cp = 1_100_000.
-        rec.record_batch(fba_clear(2_000_000, 1_000_000, Some(1_100_000), 8, 0));
-        // x = -4 vs 1_100_000 -> y = -500 bps -> cp = 1_045_000.
-        rec.record_batch(fba_clear(3_000_000, 2_000_000, Some(1_045_000), 0, 4));
-        // A no-price clear: must NOT disturb the carry.
-        rec.record_batch(fba_clear(4_000_000, 3_000_000, None, 7, 7));
-        // x = +2 vs 1_045_000 (carry unchanged by the None clear) -> y = 250 bps -> cp = 1_071_125.
-        rec.record_batch(fba_clear(5_000_000, 4_000_000, Some(1_071_125), 3, 1));
+        // batch0: seeds prev_clearing = 1_000_000. Its own flow is irrelevant.
+        rec.record_batch(fba_clear(1_000_000, 0, Some(1_000_000), 0.0, 0, 0));
+        // batch1: x = 8, y = (1_100_000-1_000_000)/1_000_000*1e4 = 1000 = 125*8.
+        rec.record_batch(fba_clear(2_000_000, 1_000_000, Some(1_100_000), 8.0, 0, 0));
+        // batch2: x = -4, y = (1_045_000-1_100_000)/1_100_000*1e4 = -500 = 125*-4.
+        rec.record_batch(fba_clear(3_000_000, 2_000_000, Some(1_045_000), -4.0, 0, 0));
+        // batch3: no price -> inert, prev_clearing unchanged at 1_045_000.
+        rec.record_batch(fba_clear(4_000_000, 3_000_000, None, 99.0, 0, 0));
+        // batch4: x = 2, y = (1_071_125-1_045_000)/1_045_000*1e4 = 250 = 125*2.
+        rec.record_batch(fba_clear(5_000_000, 4_000_000, Some(1_071_125), 2.0, 0, 0));
 
         let series = rec.finalize(&[]);
         assert_eq!(series.len(), 1);
@@ -1705,19 +1720,19 @@ mod tests {
     #[test]
     fn kyle_lambda_fba_carries_prev_clearing_across_a_flush() {
         let mut rec = MetricsRecorder::new(EngineKind::Fba, W);
-        rec.record_batch(fba_clear(1, 0, Some(1_000_000), 0, 0)); // bucket 0: seeds the carry
-        rec.record_batch(fba_clear(W + 1, W, Some(1_100_000), 8, 0)); // bucket 1
+        rec.record_batch(fba_clear(1, 0, Some(1_000_000), 0.0, 0, 0)); // bucket 0: seeds prev_clearing
+        rec.record_batch(fba_clear(W + 1, W, Some(1_100_000), 8.0, 0, 0)); // bucket 1: x = 8
 
-        // Flush bucket 0 alone: first batch, no prior price -> no lambda.
+        // Flush bucket 0 alone: first batch, no predecessor -> no lambda.
         let r0 = rec.emit(&[], W);
         assert_eq!(r0.len(), 1);
         assert_eq!(r0[0].kyle_lambda, None);
         rec.prune();
 
-        // Bucket 1's lambda must use the clearing price carried out of bucket 0's emit.
+        // Bucket 1's lambda uses the clearing price carried out of bucket 0's emit:
+        // x = 8, y = (1_100_000 - 1_000_000)/1_000_000 * 1e4 = 1000 ; lambda = 8000/64 = 125.
         let r1 = rec.finish(&[], W + 1);
         assert_eq!(r1.len(), 1);
-        // x = 8, y = (1_100_000 - 1_000_000)/1_000_000 * 1e4 = 1000 ; lambda = 8000/64 = 125.
         let got = r1[0].kyle_lambda.expect("lambda computable after the flush boundary");
         assert!((got - 125.0).abs() < 1e-6, "carried lambda {got}, expected 125");
     }
@@ -1737,7 +1752,8 @@ mod tests {
             let ts = s * W + 1;
             all_msgs.push(msg(ts, s));
             let cp = if s % 11 == 5 { None } else { Some(1_000_000 + rng.range(4000) as u128) };
-            batches.push(fba_clear(ts, s * W, cp, rng.range(50) as u128, rng.range(50) as u128));
+            let net_flow = rng.range(400) as f64 - 200.0; // wanders -200..+199
+            batches.push(fba_clear(ts, s * W, cp, net_flow, rng.range(50) as u128, rng.range(50) as u128));
         }
         let final_max_ts = seconds * W;
 

@@ -479,6 +479,59 @@ pub(crate) fn stream_file(path: &Path, bytes_read: &Arc<AtomicU64>, on_record: &
     }
 }
 
+/// Decode just the first order-status record of `path` and return its `ts`
+/// (ns since the Unix epoch). `Ok(None)` for an empty file, one that fails
+/// the structural pre-check, or one whose leading rows all fail to parse.
+/// Cheap — one small read plus one record decode, never the whole stream.
+///
+/// `simulate` calls this on the *next* input file after finishing one, so it
+/// knows the earliest timestamp still to come and can flush every metric
+/// bucket that no later file can touch.
+pub(crate) fn peek_first_ts(path: &Path) -> io::Result<Option<u64>> {
+    let sink = Arc::new(AtomicU64::new(0)); // open_reader needs a counter; we don't use it
+    let reader = open_reader(path, &sink)?;
+    let is_csv = path.extension().and_then(|e| e.to_str()) == Some("csv");
+
+    if is_csv {
+        let mut lines = BufReader::new(reader).lines();
+        let Some(header) = lines.next() else {
+            return Ok(None); // empty file
+        };
+        if !looks_like_order_status_header(&header?) {
+            return Ok(None);
+        }
+        for (i, line) in lines.enumerate() {
+            if i >= 256 {
+                break; // give up rather than scan a whole file for a peek
+            }
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Ok(Some(order)) = parse_row(line) {
+                return Ok(Some(order.ts));
+            }
+        }
+        Ok(None)
+    } else {
+        let mut reader = BufReader::with_capacity(64 * 1024, reader);
+        let mut buf = [0u8; RECORD_SIZE];
+        for _ in 0..256 {
+            if !read_one_record(&mut reader, &mut buf)? {
+                return Ok(None); // EOF before any parseable record
+            }
+            if !binary_format::looks_like_order_status_record(&buf) {
+                return Ok(None);
+            }
+            if let Some(order) = binary_format::parse_record(&buf) {
+                return Ok(Some(order.ts));
+            }
+        }
+        Ok(None)
+    }
+}
+
 fn stream_csv(reader: Box<dyn Read>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize, bool)> {
     let mut seen = 0usize;
     let mut skipped = 0usize;
@@ -701,6 +754,38 @@ mod tests {
         assert_eq!(order.limit_px, 126_670_000);
         assert_eq!(order.remaining, 5175);
         assert!(order.is_new_live_order());
+    }
+
+    #[test]
+    fn peek_first_ts_reads_only_the_first_row() {
+        let path = std::env::temp_dir().join(format!("market_sim_peek_test_{}.csv", std::process::id()));
+        // Header (>= MIN_COLUMNS) + two data rows with different timestamps.
+        let body = "\
+ts,userId,isBuilder,statusId,isAsk,limitPx,sz,oid,timestampDiff,triggerCondition,triggered,isTrigger,hasChildren,isPositionTpsl,reduceOnly,orderTypeId,tifId,triggerPx,origSz,status,orderType,tif\n\
+2025-12-01 11:59:59.897401610,237,False,1,False,126.67,5175.0,254384947819,0,0.0,False,False,False,False,False,0,0,0.0,5175.0,open,Limit,Alo\n\
+2025-12-01 12:00:01.000000000,238,False,1,True,127.00,10.0,254384947820,0,0.0,False,False,False,False,False,0,0,0.0,10.0,open,Limit,Alo\n";
+        fs::write(&path, body).unwrap();
+
+        assert_eq!(peek_first_ts(&path).unwrap(), Some(1_764_590_399_897_401_610));
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn peek_first_ts_returns_none_for_a_wrong_schema_file() {
+        let path = std::env::temp_dir().join(format!("market_sim_peek_bad_{}.csv", std::process::id()));
+        fs::write(&path, "a,b,c\n1,2,3\n").unwrap(); // fewer than MIN_COLUMNS
+        assert_eq!(peek_first_ts(&path).unwrap(), None);
+        fs::remove_file(&path).ok();
+    }
+
+    /// Peeking the first timestamp of the real sample `.gz` must match the
+    /// full-stream first-record ts. `#[ignore]`d — needs `data/sample/`.
+    #[test]
+    #[ignore]
+    fn peek_first_ts_matches_the_full_stream_on_the_real_sample() {
+        let path = Path::new("../data/sample/order_statuses/20251201/sol_12.data.gz");
+        assert_eq!(peek_first_ts(path).unwrap(), Some(1_764_590_399_897_401_610));
     }
 
     /// End-to-end integration check against the real sample archive:

@@ -31,11 +31,13 @@ pub const FBA_CSV: &str = "fba_timeseries.csv";
 pub const CDA_CSV: &str = "cda_timeseries.csv";
 pub const SUMMARY_FILE: &str = "summary.txt";
 
-// v2: added the `kyle_lambda` metric column to the time-series CSVs and the
-// `{fba,cda}_prev_clearing` carry lines. A v1 checkpoint's on-disk CSV header
-// has no `kyle_lambda` column, so appending v2 rows to it on resume would
-// misalign the file — reject v1 and make the user delete + restart.
-const VERSION: u32 = 2;
+// v2: added the `kyle_lambda` metric column + `{fba,cda}_prev_clearing` carry.
+// v3: the flush cadence became per-input-file (`SETTLE_SECS` blanket window ->
+// per-file look-ahead; `settle_ns` key -> `markout_guard_ns`). A v2 resume
+// under v3 wouldn't be *wrong* (the already-written rows are a subset of what
+// v3 flushes) but a clean break avoids reasoning about the mix.
+// Each bump: reject the older checkpoint, tell the user to delete + restart.
+const VERSION: u32 = 3;
 
 /// Directory name for a given `simulate` source: its last path component,
 /// with anything outside `[A-Za-z0-9._-]` replaced by `_`. `sol` stays
@@ -62,7 +64,9 @@ pub struct Checkpoint {
     /// mismatch on resume means the directory is for a different run.
     pub source: String,
     pub interval_ns: u64,
-    pub settle_ns: u64,
+    /// Informational only (not validated on resume): the forward-mid lag a
+    /// bucket must clear before it can be flushed — `MARKOUT_GUARD_SECS`.
+    pub markout_guard_ns: u64,
     pub files_total: usize,
     pub files_done: usize,
     pub last_file: String,
@@ -79,8 +83,8 @@ pub struct Checkpoint {
     pub cda_rows_written: u64,
     pub fba_prev_close: Option<f64>,
     pub cda_prev_close: Option<f64>,
-    /// FBA `kyle_lambda` cross-flush carry (last in-range batch clearing
-    /// price). `cda_prev_clearing` is always `None` — kept for symmetry.
+    /// FBA `kyle_lambda` cross-flush carry: the previous priced batch's
+    /// clearing price. `cda_prev_clearing` is always `None` — kept for symmetry.
     pub fba_prev_clearing: Option<f64>,
     pub cda_prev_clearing: Option<f64>,
     pub fba_late_dropped: u64,
@@ -94,12 +98,12 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
-    pub fn fresh(source: String, interval_ns: u64, settle_ns: u64, files_total: usize) -> Self {
+    pub fn fresh(source: String, interval_ns: u64, markout_guard_ns: u64, files_total: usize) -> Self {
         Self {
             version: VERSION,
             source,
             interval_ns,
-            settle_ns,
+            markout_guard_ns,
             files_total,
             files_done: 0,
             last_file: String::new(),
@@ -180,7 +184,7 @@ fn render(c: &Checkpoint) -> String {
     line("version", &c.version.to_string());
     line("source", &c.source);
     line("interval_ns", &c.interval_ns.to_string());
-    line("settle_ns", &c.settle_ns.to_string());
+    line("markout_guard_ns", &c.markout_guard_ns.to_string());
     line("files_total", &c.files_total.to_string());
     line("files_done", &c.files_done.to_string());
     line("last_file", &c.last_file);
@@ -225,7 +229,7 @@ fn parse(text: &str) -> Result<Checkpoint, String> {
             }
             "source" => c.source = val.to_string(),
             "interval_ns" => c.interval_ns = val.parse().map_err(|_| "bad interval_ns")?,
-            "settle_ns" => c.settle_ns = val.parse().map_err(|_| "bad settle_ns")?,
+            "markout_guard_ns" => c.markout_guard_ns = val.parse().map_err(|_| "bad markout_guard_ns")?,
             "files_total" => c.files_total = val.parse().map_err(|_| "bad files_total")?,
             "files_done" => c.files_done = val.parse().map_err(|_| "bad files_done")?,
             "last_file" => c.last_file = val.to_string(),
@@ -519,7 +523,7 @@ mod tests {
 
     #[test]
     fn checkpoint_round_trips_through_text() {
-        let mut c = Checkpoint::fresh("data/order_statuses/sol".to_string(), 1_000_000_000, 3_660_000_000_000, 744);
+        let mut c = Checkpoint::fresh("data/order_statuses/sol".to_string(), 1_000_000_000, 35_000_000_000, 744);
         c.files_done = 12;
         c.last_file = "data/order_statuses/sol/20251201/sol_11.data.gz".to_string();
         c.anchor = Some(1_764_590_400_000_000_000);
@@ -547,6 +551,7 @@ mod tests {
 
         assert_eq!(back.source, c.source);
         assert_eq!(back.interval_ns, c.interval_ns);
+        assert_eq!(back.markout_guard_ns, 35_000_000_000);
         assert_eq!(back.files_done, 12);
         assert_eq!(back.anchor, c.anchor);
         assert_eq!(back.emitted_upto, c.emitted_upto);

@@ -531,6 +531,76 @@ pub fn run() {
     }
 }
 
+/// Non-interactive entry: run a single command taken from `args` (the process
+/// command line, minus argv[0]) and return a process exit code. `main` uses
+/// this whenever argv is non-empty — e.g. `market_sim simulate sol 1` in a
+/// GCP Batch job. Dispatches straight from the argv slice (each element is
+/// one token, so a path with spaces is fine); only the batch-shaped commands
+/// are wired up — the interactive ones need the REPL's live order books.
+pub fn run_once(args: &[String]) -> i32 {
+    const USAGE: &str = "Non-interactive usage: market_sim <simulate <path|coin> [interval_secs] | scan <path|coin|all> | download <coin|all> | extract <coin|all> | update [branch] | help>";
+    let rest: Vec<&str> = args[1..].iter().map(String::as_str).collect();
+    match args[0].to_lowercase().as_str() {
+        "simulate" => {
+            let Some(path) = rest.first() else {
+                eprintln!("simulate needs a path or coin. {USAGE}");
+                return 2;
+            };
+            let interval_secs = match rest.get(1) {
+                Some(s) => match s.parse::<u64>() {
+                    Ok(v) => Some(v),
+                    Err(_) => {
+                        eprintln!("simulate: interval_secs must be a whole number, got {s:?}");
+                        return 2;
+                    }
+                },
+                None => None,
+            };
+            simulate_cmd::run(path, interval_secs)
+        }
+        "scan" => match rest.first() {
+            Some(path) => {
+                scan_cmd::run(path);
+                0
+            }
+            None => {
+                eprintln!("scan needs a path or coin. {USAGE}");
+                2
+            }
+        },
+        "download" | "extract" => match rest.first().and_then(|a| parse_download_target(a)) {
+            Some(target) => {
+                if args[0].eq_ignore_ascii_case("download") {
+                    download_cmd::run(target);
+                } else {
+                    download_cmd::run_extract(target);
+                }
+                0
+            }
+            None => {
+                eprintln!("{} needs one of btc|eth|sol|all. {USAGE}", args[0]);
+                2
+            }
+        },
+        "update" => {
+            update_cmd::run(rest.first().copied());
+            0
+        }
+        "help" | "--help" | "-h" => {
+            print_help();
+            0
+        }
+        "add" | "engine" | "batch" | "clear" | "log" | "metrics" | "stats" | "orderbook" | "ob" | "load" | "test" => {
+            eprintln!("'{}' is interactive-only — run `market_sim` with no arguments for the prompt.", args[0]);
+            2
+        }
+        other => {
+            eprintln!("Unknown command {other:?}. {USAGE}");
+            2
+        }
+    }
+}
+
 fn now_ns() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

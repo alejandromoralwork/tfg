@@ -1,10 +1,12 @@
 //! Shared live progress-bar machinery for this crate's long-running
 //! commands — `download`/`extract`'s decompress-then-extract steps, and
-//! `simulate`'s multi-GB replay. A single in-place-redrawn (`\r`, no
-//! scrolling) line, so a multi-minute operation never looks hung, with a
-//! real percentage whenever a total is known.
+//! `simulate`'s multi-GB replay. On a real terminal it's a single
+//! in-place-redrawn (`\r`, no scrolling) line; piped/redirected (containers,
+//! Cloud Logging) it emits one line per ~1s update instead. Either way a
+//! multi-minute operation never looks hung, with a real percentage whenever
+//! a total is known.
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -31,6 +33,7 @@ pub fn human_bytes(n: u64) -> String {
 /// display (`human_bytes` for byte counts, `|n| n.to_string()` for plain
 /// ones); `extra` is appended as-is for any additional context (e.g.
 /// "  file 3/48") — pass `""` for none.
+
 pub fn print_bar(current: u64, total: Option<u64>, elapsed: Duration, fmt: impl Fn(u64) -> String, extra: &str) {
     const WIDTH: usize = 30;
     let line = match total.filter(|&t| t > 0) {
@@ -42,10 +45,17 @@ pub fn print_bar(current: u64, total: Option<u64>, elapsed: Duration, fmt: impl 
         }
         None => format!("   ... {} so far (elapsed {}s){extra}", fmt(current), elapsed.as_secs()),
     };
-    // \r (no newline) + trailing spaces to blank out any leftover tail from
-    // a longer previous line, then flush — this line is redrawn in place,
-    // not scrolled.
-    print!("\r{line}                    ");
+    if std::io::stdout().is_terminal() {
+        // \r (no newline) + trailing spaces to blank out any leftover tail
+        // from a longer previous line, then flush — redrawn in place.
+        print!("\r{line}                    ");
+    } else {
+        // Piped / redirected (a `simulate` run's normal mode, and every
+        // container / Cloud Logging run): `\r`-redraw would collapse the
+        // whole run into one garbled line, so emit each update on its own
+        // line instead. The poll loop already rate-limits this to ~1/s.
+        println!("{line}");
+    }
     std::io::stdout().flush().ok();
 }
 
@@ -115,7 +125,9 @@ pub fn run_with_progress<T>(total: Option<u64>, measure: impl Fn() -> u64 + Sync
     // frame can be a beat behind `work` actually finishing) so the bar
     // visibly reaches its end state rather than stopping short.
     print_bar(measure(), total, Duration::ZERO, &fmt, &extra());
-    println!(); // leave the redrawn line in place instead of overwriting it next
+    if std::io::stdout().is_terminal() {
+        println!(); // leave the redrawn line in place instead of overwriting it next
+    }
     result
 }
 

@@ -1,5 +1,10 @@
 # Engine Design Notes
 
+> For the whole-project map — what every file does, the order lifecycle, and
+> the full `simulate` time-series pipeline + metric catalogue — see
+> [`ARCHITECTURE.md`](ARCHITECTURE.md). This file is the deep dive on the
+> matching engines specifically.
+
 Reference documentation for how the matching engines actually work. It covers two parts:
 
 1. [How the FBA auction price is calculated](#1-how-the-fba-auction-price-is-calculated)
@@ -349,26 +354,37 @@ and buckets them into a per-`interval_secs` time series
 (`docs/expose.tex`'s RQ2.1/2.2/2.3 catalogue). It never fits the whole
 run in memory:
 
-- **Streaming.** `inputs/simulate_cmd.rs` drives the input files one at a
-  time (`simulator::stream_file`). After each file, `MetricsRecorder::emit`
-  flushes every interval bucket that has settled — end more than
-  `SETTLE_SECS` (~1h) behind the latest event-time — and drops its events;
-  `MetricsRecorder::finish` flushes the tail on the last file. So RSS stays
-  bounded to ~`SETTLE_SECS` of activity. The per-bucket metric formulas are
-  unchanged from the old one-shot `finalize` (verified by
-  `streaming_emit_in_pieces_matches_one_shot_finish`).
+- **Streaming, flushed once per input file.** `inputs/simulate_cmd.rs` drives
+  the input files one at a time (`simulator::stream_file`). After each file,
+  `MetricsRecorder::emit` flushes every interval bucket that ends more than
+  `MARKOUT_GUARD_SECS` (35s — the widest metric markout) before **both** that
+  file's own last timestamp and the *next* file's first timestamp
+  (`simulator::peek_first_ts` — one cheap read), then drops its events;
+  `MetricsRecorder::finish` flushes the tail on the last file. So the CSV
+  grows once per file and RSS stays bounded to ~one file's span. The
+  per-bucket metric formulas are unchanged from the old one-shot `finalize`
+  (verified by `streaming_emit_in_pieces_matches_one_shot_finish` and
+  `streaming_fba_batches_emit_in_pieces_matches_one_shot`).
+- **Cross-flush state.** Two metrics whose value depends on an earlier,
+  already-emitted bucket are threaded through a `Carry` struct in and out of
+  each `emit`: `prev_close` (the previous non-empty bucket's reference-price
+  close, for `amihud_illiquidity`) and `prev_clearing` (the previous priced
+  FBA batch's clearing price, for the FBA `kyle_lambda` regression). Both are
+  persisted in `checkpoint.txt` so they survive a resume.
 - **Incremental output.** Flushed rows are *appended* to
   `output/<slug>/{fba,cda}_timeseries.csv` (header written once). `<slug>`
   is the source path's last component. `summary.txt` is written once, at
   completion, from running accumulators (`replay_checkpoint::SummaryAccumulator`).
 - **Resumable.** `output/<slug>/checkpoint.txt` is rewritten atomically
   after every file (file count, cumulative counters, bucket-grid cursor,
-  serialized summary accumulators). Re-running the same source skips
-  finished files and appends (CSVs trimmed back to the checkpoint's row
-  counts first, in case a crash left them ahead). Resume is approximate:
-  engine books and the in-flight event window aren't persisted, so a
-  resumed run leaves ~`SETTLE_SECS` of empty interval rows at the seam
-  (unless nothing had been flushed yet, in which case it restarts from the
-  top and is exact). `SETTLE_SECS` also exceeds the ~1h backwards jump in
-  event-time at each hour's accepted→rejected file boundary; anything later
-  than that is counted as `late_events_dropped` and reported.
+  cross-flush carries, serialized summary accumulators). Re-running the same
+  source skips finished files and appends (CSVs trimmed back to the
+  checkpoint's row counts first, in case a crash left them ahead). Resume is
+  approximate: engine books and the in-flight event window aren't persisted,
+  so a resumed run leaves a short gap of empty interval rows (~one file's
+  span) at the seam, unless nothing had been flushed yet, in which case it
+  restarts from the top and is exact. A record that arrives for an
+  already-flushed bucket (only possible on a non-ts-sorted custom input dir)
+  is counted as `late_events_dropped` and reported. Deploying this on Google
+  Cloud Batch — where retry-on-preemption relies on the checkpoint — is
+  covered in [`DEPLOY.md`](DEPLOY.md).
