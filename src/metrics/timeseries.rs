@@ -28,6 +28,12 @@ pub const DEPTH_BPS_THRESHOLDS: [u32; 3] = [10, 50, 100];
 const NS_PER_SEC: u64 = 1_000_000_000;
 const REALIZED_SPREAD_HORIZONS_SECS: [u64; 3] = [1, 5, 30];
 
+/// Forward markout horizon for the CDA `kyle_lambda` regression's post-trade
+/// mid. Independent of `REALIZED_SPREAD_HORIZONS_SECS` — changing it changes
+/// the metric. Must stay well under `simulate`'s settle window so a bucket
+/// never flushes before its post-trade mids have been observed.
+const KYLE_LAMBDA_HORIZON_SECS: u64 = 5;
+
 // ============================================================================
 // Events — plain data `simulate` constructs from an engine's public output
 // ============================================================================
@@ -165,6 +171,17 @@ pub struct IntervalMetrics {
     pub price_impact_bps_5s: Option<f64>,
     pub price_impact_bps_30s: Option<f64>,
     pub amihud_illiquidity: Option<f64>,
+    /// Kyle's lambda: OLS slope through the origin of relative mid-price
+    /// change (basis points) on signed order flow (whole SOL) within the
+    /// bucket — `Σ(x·y) / Σ(x·x)`. A price-impact coefficient in
+    /// **bps per SOL**, NOT a PRICE_SCALE (1e6) fixed-point quantity — do
+    /// not divide it by 1e6 when reading the CSV. `None` when the bucket has
+    /// no usable observation (`Σ(x·x) == 0`). Built differently per engine
+    /// (CDA: one observation per taker sweep, mid measured
+    /// `KYLE_LAMBDA_HORIZON_SECS` later; FBA: one per batch, signed excess
+    /// demand vs the one-batch clearing-price move), so the two are NOT
+    /// directly comparable across engines — same as `quoted_spread_bps`.
+    pub kyle_lambda: Option<f64>,
 
     // ---- Price discovery and market quality ----
     pub realized_volatility: Option<f64>,
@@ -217,6 +234,7 @@ impl IntervalMetrics {
             price_impact_bps_5s: None,
             price_impact_bps_30s: None,
             amihud_illiquidity: None,
+            kyle_lambda: None,
             realized_volatility: None,
             intra_interval_price_dispersion: None,
             pricing_error_bps: None,
@@ -253,12 +271,57 @@ struct OrderState {
     first_fill_ts: Option<u64>,
 }
 
+/// Where `bucket_of` places `ts` on the metric grid: the start of the
+/// `interval_width`-wide bucket it falls in, all anchored at `anchor` (the
+/// first timestamp a recorder ever saw). A free function rather than a
+/// closure so `MetricsRecorder`'s streaming methods — and `simulate_cmd`,
+/// which prunes its shared `messages` slice on the same grid — can share it.
+pub(crate) fn bucket_of(ts: u64, anchor: u64, interval_width: u64) -> u64 {
+    let offset = ts.saturating_sub(anchor);
+    anchor + (offset / interval_width) * interval_width
+}
+
+/// Cross-flush "prior value + delta" state threaded through `compute_range`:
+/// metrics whose per-bucket value depends on an earlier, already-emitted
+/// bucket. Bundled so `compute_range`'s return stays a 3-tuple as more such
+/// metrics are added.
+#[derive(Clone, Copy, Default)]
+struct Carry {
+    /// `amihud_illiquidity`: the last non-empty in-range bucket's
+    /// reference-price close.
+    prev_close: Option<f64>,
+    /// FBA `kyle_lambda`: the last in-range batch's clearing price
+    /// (PRICE_SCALE fixed-point, as `f64`). Always `None` for a CDA recorder.
+    prev_clearing: Option<f64>,
+}
+
 pub struct MetricsRecorder {
     engine: EngineKind,
     interval_width: u64,
+    /// Bucket-grid origin: the first timestamp this recorder ever saw. Every
+    /// bucket boundary is `anchor + k * interval_width`. Set once and then
+    /// frozen (and restored verbatim on a resumed run) so the grid is
+    /// stable for the whole replay. `None` until the first event/message.
+    anchor: Option<u64>,
+    /// Exclusive upper bucket boundary already emitted to CSV — the next
+    /// `emit`/`finish` picks up here. Equals `anchor` until the first flush.
+    emitted_upto: u64,
+    /// `amihud_illiquidity` carry: the last in-bucket reference-price
+    /// "close" from an already-emitted bucket, so that metric spans flush
+    /// boundaries exactly as it did in the old one-shot `finalize`.
+    prev_close: Option<f64>,
+    /// FBA `kyle_lambda` carry: the last in-range batch clearing price seen
+    /// by an already-emitted flush, so that metric spans flush boundaries
+    /// like `prev_close`. Always `None` for a CDA recorder.
+    prev_clearing: Option<f64>,
     trades: Vec<TradeEvent>,
     batches: Vec<BatchClearedEvent>,
     books: Vec<BookSnapshot>,
+    /// Events whose bucket had already been emitted when they arrived —
+    /// only possible if event-time jumps backwards by more than `simulate`'s
+    /// settle window. Counted (and surfaced in the summary) rather than
+    /// stored; normally 0.
+    late_events_dropped: u64,
 }
 
 impl MetricsRecorder {
@@ -269,22 +332,189 @@ impl MetricsRecorder {
         Self {
             engine,
             interval_width: interval_width_ns,
+            anchor: None,
+            emitted_upto: 0,
+            prev_close: None,
+            prev_clearing: None,
             trades: Vec::new(),
             batches: Vec::new(),
             books: Vec::new(),
+            late_events_dropped: 0,
+        }
+    }
+
+    /// Rebuild a recorder mid-replay from a checkpoint. Engine books and the
+    /// in-flight event window are deliberately NOT restored (see the
+    /// `simulate` resume notes in `inputs::simulate_cmd`) — only the bucket
+    /// grid, the emit cursor, and the cross-flush `amihud` and Kyle's-lambda
+    /// carries, so rows appended after resume line up with the ones already
+    /// on disk.
+    pub fn resume(engine: EngineKind, interval_width_ns: u64, anchor: u64, emitted_upto: u64, prev_close: Option<f64>, prev_clearing: Option<f64>, late_events_dropped: u64) -> Self {
+        Self {
+            engine,
+            interval_width: interval_width_ns,
+            anchor: Some(anchor),
+            emitted_upto,
+            prev_close,
+            prev_clearing,
+            trades: Vec::new(),
+            batches: Vec::new(),
+            books: Vec::new(),
+            late_events_dropped,
+        }
+    }
+
+    pub fn anchor(&self) -> Option<u64> {
+        self.anchor
+    }
+    pub fn emitted_upto(&self) -> u64 {
+        self.emitted_upto
+    }
+    pub fn prev_close(&self) -> Option<f64> {
+        self.prev_close
+    }
+    pub fn prev_clearing(&self) -> Option<f64> {
+        self.prev_clearing
+    }
+    pub fn late_events_dropped(&self) -> u64 {
+        self.late_events_dropped
+    }
+
+    fn observe_ts(&mut self, ts: u64) {
+        if self.anchor.is_none() {
+            self.anchor = Some(ts);
+            self.emitted_upto = ts;
+        }
+    }
+
+    /// Pin the bucket-grid origin explicitly, before any event is recorded.
+    /// `simulate` calls this with the first record's timestamp on BOTH the
+    /// FBA and CDA recorders so their series land on the exact same grid —
+    /// otherwise each would anchor on the first event it happens to see
+    /// (a book snapshot for CDA on record 1, but only the first batch
+    /// *clear* for FBA, ~one interval later). No-op once set.
+    pub fn set_anchor(&mut self, ts: u64) {
+        self.observe_ts(ts);
+    }
+
+    /// True once `ts`'s bucket has already been flushed — such an event can
+    /// no longer change any emitted row, so it's counted, not kept.
+    fn is_late(&self, ts: u64) -> bool {
+        match self.anchor {
+            Some(a) => bucket_of(ts, a, self.interval_width) < self.emitted_upto,
+            None => false,
         }
     }
 
     pub fn record_trade(&mut self, trade: TradeEvent) {
+        self.observe_ts(trade.trade.ts);
+        if self.is_late(trade.trade.ts) {
+            self.late_events_dropped += 1;
+            return;
+        }
         self.trades.push(trade);
     }
 
     pub fn record_batch(&mut self, batch: BatchClearedEvent) {
+        self.observe_ts(batch.ts);
+        if self.is_late(batch.ts) {
+            self.late_events_dropped += 1;
+            return;
+        }
         self.batches.push(batch);
     }
 
     pub fn record_book_snapshot(&mut self, snapshot: BookSnapshot) {
+        self.observe_ts(snapshot.ts);
+        if self.is_late(snapshot.ts) {
+            self.late_events_dropped += 1;
+            return;
+        }
         self.books.push(snapshot);
+    }
+
+    /// Emit every bucket-grid row with start in `[emitted_upto, hi)`, in
+    /// ascending order, from the events and `messages` currently retained;
+    /// buckets with no activity are emitted as empty rows so the grid stays
+    /// contiguous. Advances `emitted_upto` and the `amihud` carry. Forward
+    /// look-ups (realized-spread markouts) read past `hi` into still-retained
+    /// events — the caller guarantees data out to `hi + markout horizon`
+    /// before calling with a given `hi`.
+    pub fn emit(&mut self, messages: &[OrderMessage], hi: u64) -> Vec<IntervalMetrics> {
+        if self.anchor.is_none() {
+            // No event was recorded directly (some unit-test paths, and any
+            // recorder that only ever saw messages) — anchor off the
+            // earliest timestamp visible, matching the old `finalize`'s
+            // global `min_ts`.
+            let mut min_ts = u64::MAX;
+            for m in messages {
+                min_ts = min_ts.min(m.ts);
+            }
+            for t in &self.trades {
+                min_ts = min_ts.min(t.trade.ts);
+            }
+            for b in &self.batches {
+                min_ts = min_ts.min(b.ts);
+            }
+            for s in &self.books {
+                min_ts = min_ts.min(s.ts);
+            }
+            if min_ts == u64::MAX {
+                return Vec::new();
+            }
+            self.anchor = Some(min_ts);
+            self.emitted_upto = min_ts;
+        }
+        let anchor = self.anchor.expect("set above");
+        if self.interval_width == 0 || hi <= self.emitted_upto {
+            return Vec::new();
+        }
+        let lo = self.emitted_upto;
+        let carry_in = Carry { prev_close: self.prev_close, prev_clearing: self.prev_clearing };
+        let (rows, carry_out, next_upto) = self.compute_range(messages, lo, hi, anchor, carry_in);
+        self.prev_close = carry_out.prev_close;
+        self.prev_clearing = carry_out.prev_clearing;
+        self.emitted_upto = next_upto;
+        rows
+    }
+
+    /// Flush everything still buffered: the tail buckets up to and including
+    /// the one holding `max_seen_ts`. Call once at end of replay.
+    pub fn finish(&mut self, messages: &[OrderMessage], max_seen_ts: u64) -> Vec<IntervalMetrics> {
+        self.emit(messages, max_seen_ts.saturating_add(1))
+    }
+
+    /// Convenience one-shot flush over the whole retained set — computes the
+    /// end timestamp itself. Test-only: the `simulate` path streams
+    /// file-by-file through `emit`/`finish`.
+    #[cfg(test)]
+    pub fn finalize(&mut self, messages: &[OrderMessage]) -> Vec<IntervalMetrics> {
+        let mut max_ts = 0u64;
+        for m in messages {
+            max_ts = max_ts.max(m.ts);
+        }
+        for t in &self.trades {
+            max_ts = max_ts.max(t.trade.ts);
+        }
+        for b in &self.batches {
+            max_ts = max_ts.max(b.ts);
+        }
+        for s in &self.books {
+            max_ts = max_ts.max(s.ts);
+        }
+        self.finish(messages, max_ts)
+    }
+
+    /// Drop events whose bucket has now been emitted. The caller prunes its
+    /// own shared `messages` slice to the same `emitted_upto` boundary.
+    pub fn prune(&mut self) {
+        let (Some(anchor), w) = (self.anchor, self.interval_width) else {
+            return;
+        };
+        let cutoff = self.emitted_upto;
+        self.trades.retain(|t| bucket_of(t.trade.ts, anchor, w) >= cutoff);
+        self.batches.retain(|b| bucket_of(b.ts, anchor, w) >= cutoff);
+        self.books.retain(|s| bucket_of(s.ts, anchor, w) >= cutoff);
     }
 
     fn build_order_states(&self, messages: &[OrderMessage]) -> HashMap<u64, OrderState> {
@@ -320,53 +550,23 @@ impl MetricsRecorder {
         states
     }
 
-    /// Produce the metric time series: one row per `interval_width`-wide
-    /// bucket spanning the full range of recorded timestamps.
-    ///
-    /// `messages` is owned by the caller (`inputs::simulate_cmd::run`) and
-    /// shared by reference across the FBA and CDA recorders' `finalize()`
-    /// calls, rather than each recorder holding its own cloned copy — on a
-    /// large multi-file replay the raw message log can run into the
-    /// billions of entries, so a second full copy (plus a second
-    /// heap-allocated `user_id: String` per entry) was real, avoidable
-    /// memory pressure. Both recorders only ever read this data.
-    pub fn finalize(&self, messages: &[OrderMessage]) -> Vec<IntervalMetrics> {
-        if self.interval_width == 0 {
-            return Vec::new();
-        }
+    /// Compute the metric rows for every bucket with start in `[lo, hi)`,
+    /// anchored at `anchor`, from the currently-retained events plus
+    /// `messages`. Forward look-ups (realized-spread markouts, Kyle's-lambda
+    /// post-trade mids) still read events past `hi`, which is why the
+    /// streaming caller keeps a settle window before advancing `hi`. Returns
+    /// the rows, the updated cross-flush `Carry`, and the next exclusive
+    /// bucket boundary (`>= hi`) to resume emitting from.
+    fn compute_range(&self, messages: &[OrderMessage], lo: u64, hi: u64, anchor: u64, carry_in: Carry) -> (Vec<IntervalMetrics>, Carry, u64) {
+        let w = self.interval_width;
+        let bof = |ts: u64| bucket_of(ts, anchor, w);
+        let in_range = |b: u64| b >= lo && b < hi;
 
-        let mut min_ts = u64::MAX;
-        let mut max_ts = 0u64;
-        for m in messages {
-            min_ts = min_ts.min(m.ts);
-            max_ts = max_ts.max(m.ts);
-        }
-        for t in &self.trades {
-            min_ts = min_ts.min(t.trade.ts);
-            max_ts = max_ts.max(t.trade.ts);
-        }
-        for b in &self.batches {
-            min_ts = min_ts.min(b.ts);
-            max_ts = max_ts.max(b.ts);
-        }
-        for s in &self.books {
-            min_ts = min_ts.min(s.ts);
-            max_ts = max_ts.max(s.ts);
-        }
-        if min_ts == u64::MAX {
-            return Vec::new(); // nothing recorded
-        }
-
-        let bucket_of = |ts: u64| -> u64 {
-            let offset = ts.saturating_sub(min_ts);
-            min_ts + (offset / self.interval_width) * self.interval_width
-        };
-
-        let n_buckets = (max_ts.saturating_sub(min_ts)) / self.interval_width + 1;
         let mut buckets: BTreeMap<u64, IntervalMetrics> = BTreeMap::new();
-        for i in 0..n_buckets {
-            let start = min_ts + i * self.interval_width;
-            buckets.insert(start, IntervalMetrics::empty(self.engine.label(), start, self.interval_width));
+        let mut next_upto = lo;
+        while next_upto < hi {
+            buckets.insert(next_upto, IntervalMetrics::empty(self.engine.label(), next_upto, w));
+            next_upto = next_upto.saturating_add(w);
         }
 
         let order_states = self.build_order_states(messages);
@@ -410,11 +610,14 @@ impl MetricsRecorder {
 
         for t in &self.trades {
             let trade = &t.trade;
-            let b = bucket_of(trade.ts);
+            let b = bof(trade.ts);
+            if !in_range(b) {
+                continue;
+            }
             let qty = trade.quantity as f64;
             let price = trade.price as f64;
 
-            let entry = buckets.get_mut(&b).expect("bucket exists for every recorded ts");
+            let entry = buckets.get_mut(&b).expect("bucket exists for every in-range ts");
             entry.executed_volume += qty;
             entry.executed_notional += qty * price;
             entry.trade_count += 1;
@@ -483,11 +686,62 @@ impl MetricsRecorder {
             entry.intra_interval_price_dispersion = Some(stddev(prices));
         }
 
+        // ---- CDA Kyle's lambda: OLS slope through the origin of the
+        //      relative post-trade mid move (bps) on signed order flow (SOL),
+        //      one regression observation per taker sweep ----
+        //
+        // A marketable order that sweeps several price levels produces several
+        // `Trade`s that all share `ts`, aggressor side and pre-trade
+        // `reference_price` — that's ONE observation, whose `x` is the net
+        // signed fill. Pass A groups fills by ts; it MUST be a `BTreeMap` so
+        // Pass B folds `Σxx`/`Σxy` in ascending-ts order — identical between a
+        // streaming and a one-shot pass (a `HashMap` here would randomize the
+        // f64 summation order and break `streaming_emit_in_pieces_matches_one_shot_finish`).
+        let mut sweep: BTreeMap<u64, (f64, f64)> = BTreeMap::new(); // ts -> (net signed qty, pre-trade mid)
+        for t in &self.trades {
+            if !in_range(bof(t.trade.ts)) {
+                continue;
+            }
+            let Some(reference) = t.reference_price else { continue };
+            if reference == 0 {
+                continue;
+            }
+            let signed = match t.aggressor_side {
+                Some(Side::Buy) => t.trade.quantity as f64,
+                Some(Side::Sell) => -(t.trade.quantity as f64),
+                // No taker/maker distinction (FBA batch trades) — the sign is
+                // the whole regressor, so an unsigned observation is useless.
+                None => continue,
+            };
+            let e = sweep.entry(t.trade.ts).or_insert((0.0, reference as f64));
+            e.0 += signed;
+        }
+        let mut bucket_kyle: HashMap<u64, (f64, f64)> = HashMap::new(); // bucket -> (Σxx, Σxy)
+        for (ts, (signed_qty, pre_mid)) in &sweep {
+            let Some(post_mid) = price_at_or_after(ts + KYLE_LAMBDA_HORIZON_SECS * NS_PER_SEC) else {
+                continue;
+            };
+            let x = *signed_qty;
+            let y = (post_mid - pre_mid) / pre_mid * 10_000.0;
+            let e = bucket_kyle.entry(bof(*ts)).or_insert((0.0, 0.0));
+            e.0 += x * x;
+            e.1 += x * y;
+        }
+        for (b, (sxx, sxy)) in &bucket_kyle {
+            if *sxx > 0.0 {
+                buckets.get_mut(b).unwrap().kyle_lambda = Some(sxy / sxx);
+            }
+        }
+
         // ---- Realized volatility & Amihud illiquidity: from the reference
         //      price series, grouped into the same buckets ----
         let mut bucket_price_points: HashMap<u64, Vec<f64>> = HashMap::new();
         for (ts, p) in &price_series {
-            bucket_price_points.entry(bucket_of(*ts)).or_default().push(*p);
+            let b = bof(*ts);
+            if !in_range(b) {
+                continue;
+            }
+            bucket_price_points.entry(b).or_default().push(*p);
         }
         for (b, points) in &bucket_price_points {
             if points.len() >= 2 {
@@ -504,7 +758,11 @@ impl MetricsRecorder {
                 bucket_close.insert(*b, last);
             }
         }
-        let mut prev_close: Option<f64> = None;
+        // `prev_close` carries in from the previous emit (an earlier,
+        // already-written bucket) and back out to the recorder, so
+        // `amihud_illiquidity` spans flush boundaries exactly as it did when
+        // `finalize` saw the whole run at once. Empty buckets don't reset it.
+        let mut prev_close: Option<f64> = carry_in.prev_close;
         for start in buckets.keys().cloned().collect::<Vec<_>>() {
             if let Some(&close) = bucket_close.get(&start) {
                 if let Some(prev) = prev_close {
@@ -519,11 +777,58 @@ impl MetricsRecorder {
                 prev_close = Some(close);
             }
         }
+        let prev_close_out = prev_close;
+
+        // ---- FBA Kyle's lambda: OLS slope through the origin of the
+        //      one-batch relative clearing-price move (bps) on signed excess
+        //      demand at the clearing price (SOL), one observation per batch ----
+        //
+        // Own ascending walk over `self.batches` (not the unordered
+        // `bucket_batches` map below — a carry needs order). `self.batches` is
+        // recorded strictly ascending in `ts` by `clear_fba_batch` and
+        // `prune` only drops a prefix, so a plain `Vec` walk is both
+        // ts-ordered and deterministic. `prev_clearing` carries in/out exactly
+        // like `prev_close` above: only a real clearing price advances it, a
+        // batch owned by a later flush (`bof(ts) >= hi`) never touches it.
+        let mut bucket_kyle_fba: HashMap<u64, (f64, f64)> = HashMap::new(); // bucket -> (Σxx, Σxy)
+        let mut prev_clearing: Option<f64> = carry_in.prev_clearing;
+        let mut last_batch_ts = 0u64;
+        for bt in &self.batches {
+            debug_assert!(bt.ts >= last_batch_ts, "self.batches must stay ascending by ts");
+            last_batch_ts = bt.ts;
+            let b = bof(bt.ts);
+            if b >= hi || b < lo {
+                continue; // a later flush owns it, or it was already emitted
+            }
+            if let Some(cp) = bt.clearing_price {
+                let cp = cp as f64;
+                if let Some(pcp) = prev_clearing {
+                    if pcp > 0.0 {
+                        let x = bt.demand_at_price as f64 - bt.supply_at_price as f64;
+                        let y = (cp - pcp) / pcp * 10_000.0;
+                        let e = bucket_kyle_fba.entry(b).or_insert((0.0, 0.0));
+                        e.0 += x * x;
+                        e.1 += x * y;
+                    }
+                }
+                prev_clearing = Some(cp);
+            }
+        }
+        let prev_clearing_out = prev_clearing;
+        for (b, (sxx, sxy)) in &bucket_kyle_fba {
+            if *sxx > 0.0 {
+                buckets.get_mut(b).unwrap().kyle_lambda = Some(sxy / sxx);
+            }
+        }
 
         // ---- Messages: order-to-trade ratio, throughput input ----
         let mut bucket_msg_count: HashMap<u64, u64> = HashMap::new();
         for m in messages {
-            *bucket_msg_count.entry(bucket_of(m.ts)).or_insert(0) += 1;
+            let b = bof(m.ts);
+            if !in_range(b) {
+                continue;
+            }
+            *bucket_msg_count.entry(b).or_insert(0) += 1;
         }
         for (b, count) in &bucket_msg_count {
             let entry = buckets.get_mut(b).unwrap();
@@ -540,7 +845,10 @@ impl MetricsRecorder {
         let mut bucket_user_totals: HashMap<u64, HashMap<String, (f64, f64)>> = HashMap::new();
 
         for state in order_states.values() {
-            let b = bucket_of(state.first_seen_ts);
+            let b = bof(state.first_seen_ts);
+            if !in_range(b) {
+                continue;
+            }
             *bucket_orig.entry(b).or_insert(0.0) += state.orig_qty as f64;
             *bucket_filled.entry(b).or_insert(0.0) += state.filled_qty as f64;
 
@@ -585,12 +893,18 @@ impl MetricsRecorder {
         let mut bucket_compute_time: HashMap<u64, Duration> = HashMap::new();
         let mut bucket_compute_count: HashMap<u64, u64> = HashMap::new();
         for s in &self.books {
-            let b = bucket_of(s.ts);
+            let b = bof(s.ts);
+            if !in_range(b) {
+                continue;
+            }
             *bucket_compute_time.entry(b).or_insert(Duration::ZERO) += s.compute_time;
             *bucket_compute_count.entry(b).or_insert(0) += 1;
         }
         for bt in &self.batches {
-            let b = bucket_of(bt.ts);
+            let b = bof(bt.ts);
+            if !in_range(b) {
+                continue;
+            }
             *bucket_compute_time.entry(b).or_insert(Duration::ZERO) += bt.compute_time;
             *bucket_compute_count.entry(b).or_insert(0) += 1;
         }
@@ -627,7 +941,11 @@ impl MetricsRecorder {
 
         let mut bucket_batches: HashMap<u64, Vec<&BatchClearedEvent>> = HashMap::new();
         for bt in &self.batches {
-            bucket_batches.entry(bucket_of(bt.ts)).or_default().push(bt);
+            let b = bof(bt.ts);
+            if !in_range(b) {
+                continue;
+            }
+            bucket_batches.entry(b).or_default().push(bt);
         }
         for (b, evs) in &bucket_batches {
             let entry = buckets.get_mut(b).unwrap();
@@ -685,9 +1003,9 @@ impl MetricsRecorder {
 
                 // [batch_open_ts, ts] inclusive on both ends, matching the
                 // original `m.ts >= e.batch_open_ts && m.ts <= e.ts`.
-                let lo = msg_ts.partition_point(|&t| t < e.batch_open_ts);
-                let hi = msg_ts.partition_point(|&t| t <= e.ts);
-                total_msgs += (hi - lo) as u64;
+                let m_lo = msg_ts.partition_point(|&t| t < e.batch_open_ts);
+                let m_hi = msg_ts.partition_point(|&t| t <= e.ts);
+                total_msgs += (m_hi - m_lo) as u64;
 
                 // `boundary_start >= e.batch_open_ts` always holds (it's
                 // `e.ts - window/10` and `window/10 <= window`), so the
@@ -696,7 +1014,7 @@ impl MetricsRecorder {
                 // `m.ts >= boundary_start` check (itself already bounded
                 // above by `m.ts <= e.ts`).
                 let boundary_lo = msg_ts.partition_point(|&t| t < boundary_start);
-                boundary_msgs += (hi - boundary_lo) as u64;
+                boundary_msgs += (m_hi - boundary_lo) as u64;
             }
             if total_msgs > 0 {
                 entry.boundary_concentration = Some(boundary_msgs as f64 / total_msgs as f64);
@@ -706,7 +1024,11 @@ impl MetricsRecorder {
         // ---- CDA-only: quoted spread, depth, book imbalance, from BookSnapshot ----
         let mut bucket_books: HashMap<u64, Vec<&BookSnapshot>> = HashMap::new();
         for s in &self.books {
-            bucket_books.entry(bucket_of(s.ts)).or_default().push(s);
+            let b = bof(s.ts);
+            if !in_range(b) {
+                continue;
+            }
+            bucket_books.entry(b).or_default().push(s);
         }
         for (b, snaps) in &bucket_books {
             let entry = buckets.get_mut(b).unwrap();
@@ -786,7 +1108,7 @@ impl MetricsRecorder {
         // external reference price feed (Hyperliquid's own oracle/mark
         // price) this dataset doesn't include — see the field's doc comment.
 
-        buckets.into_values().collect()
+        (buckets.into_values().collect(), Carry { prev_close: prev_close_out, prev_clearing: prev_clearing_out }, next_upto)
     }
 }
 
@@ -845,6 +1167,7 @@ pub fn csv_header() -> String {
         "price_impact_bps_5s",
         "price_impact_bps_30s",
         "amihud_illiquidity",
+        "kyle_lambda",
         "realized_volatility",
         "intra_interval_price_dispersion",
         "pricing_error_bps",
@@ -881,6 +1204,7 @@ pub fn csv_row(m: &IntervalMetrics) -> String {
         fmt_opt(m.price_impact_bps_5s),
         fmt_opt(m.price_impact_bps_30s),
         fmt_opt(m.amihud_illiquidity),
+        fmt_opt(m.kyle_lambda),
         fmt_opt(m.realized_volatility),
         fmt_opt(m.intra_interval_price_dispersion),
         fmt_opt(m.pricing_error_bps),
@@ -901,11 +1225,11 @@ pub fn csv_row(m: &IntervalMetrics) -> String {
     fields.join(",")
 }
 
-/// Render a full time series as CSV text (header + one row per interval).
-pub fn to_csv(series: &[IntervalMetrics]) -> String {
+/// Just the data rows (each newline-terminated), no header — for appending
+/// an incrementally-flushed batch of intervals to a CSV that already has
+/// its header line (see `inputs::simulate_cmd`).
+pub fn csv_rows(series: &[IntervalMetrics]) -> String {
     let mut out = String::new();
-    out.push_str(&csv_header());
-    out.push('\n');
     for row in series {
         out.push_str(&csv_row(row));
         out.push('\n');
@@ -1112,5 +1436,348 @@ mod tests {
         let series = rec.finalize(&[]);
         assert_eq!(series.len(), 1);
         assert_eq!(series[0].realized_spread_bps_30s, None);
+    }
+
+    // ---- streaming: emit/flush/prune ----
+
+    const W: u64 = 1_000_000_000; // 1s buckets, as `simulate`'s default
+
+    fn cda_trade(ts: u64, oid: u64, price: u128) -> TradeEvent {
+        TradeEvent {
+            trade: Trade {
+                trade_id: oid,
+                price,
+                quantity: 1,
+                buyer_id: "b".to_string(),
+                seller_id: "s".to_string(),
+                buy_order_id: oid,
+                sell_order_id: oid + 1_000_000,
+                engine_type: EngineKind::Cda,
+                ts,
+                trade_tx_hash: None,
+                chain_id: None,
+            },
+            reference_price: Some(price),
+            aggressor_side: Some(Side::Buy),
+        }
+    }
+
+    /// Feed the same synthetic CDA stream two ways — one recorder that sees
+    /// everything then `finish()`es once, and one that `emit()`s settled
+    /// buckets file-by-file, prunes, and `finish()`es the tail — and require
+    /// the concatenated CSV rows to be byte-identical. This is the core
+    /// guarantee of the streaming refactor: flushing in pieces changes
+    /// nothing about the numbers.
+    #[test]
+    fn streaming_emit_in_pieces_matches_one_shot_finish() {
+        // Settle window comfortably past the widest markout horizon (30s),
+        // so a bucket is only ever emitted once all its forward prices exist.
+        let settle = 35 * W;
+        let seconds = 140u64;
+
+        let mut all_msgs: Vec<OrderMessage> = Vec::new();
+        let mut events: Vec<(u64, EventKind)> = Vec::new();
+        enum EventKind {
+            Book(BookSnapshot),
+            Trade(TradeEvent),
+        }
+        let mut rng = Lcg(0x5EED);
+        for s in 0..seconds {
+            let base = s * W + 1;
+            let mid = 100 + (rng.range(7) as u128); // wanders 100..=106
+            all_msgs.push(msg(base, s));
+            events.push((base, EventKind::Book(book(base, Some(mid.saturating_sub(1)), Some(mid + 1)))));
+            if s % 3 == 0 {
+                // Trade a hair after its own order's message, well inside the
+                // settle window, so no metric that depends on the order's
+                // submission is affected by pruning.
+                events.push((base + 10, EventKind::Trade(cda_trade(base + 10, s, mid))));
+                // A second, opposite-side flow at a distinct sub-second ts so
+                // `kyle_lambda` gets MULTIPLE observations per bucket — this
+                // guards the cross-flush f64 summation order of `bucket_kyle`,
+                // not just the single-observation case.
+                let mut sell = cda_trade(base + 20, s + 100_000, mid + 2);
+                sell.aggressor_side = Some(Side::Sell);
+                events.push((base + 20, EventKind::Trade(sell)));
+            }
+        }
+        let final_max_ts = seconds * W;
+
+        // (a) one-shot
+        let mut one = MetricsRecorder::new(EngineKind::Cda, W);
+        for (_, ev) in &events {
+            match ev {
+                EventKind::Book(b) => one.record_book_snapshot(b.clone()),
+                EventKind::Trade(t) => one.record_trade(t.clone()),
+            }
+        }
+        let one_rows = one.finish(&all_msgs, final_max_ts);
+
+        // (b) streaming, one "file" per simulated second
+        let mut strm = MetricsRecorder::new(EngineKind::Cda, W);
+        let mut msgs_seen: Vec<OrderMessage> = Vec::new();
+        let mut strm_rows: Vec<IntervalMetrics> = Vec::new();
+        for s in 0..seconds {
+            let sec_lo = s * W;
+            let sec_hi = sec_lo + W;
+            for (ts, ev) in &events {
+                if *ts < sec_lo || *ts >= sec_hi {
+                    continue;
+                }
+                match ev {
+                    EventKind::Book(b) => strm.record_book_snapshot(b.clone()),
+                    EventKind::Trade(t) => strm.record_trade(t.clone()),
+                }
+            }
+            for m in all_msgs.iter().filter(|m| m.ts >= sec_lo && m.ts < sec_hi) {
+                msgs_seen.push(m.clone());
+            }
+            let watermark = sec_hi.saturating_sub(1);
+            if let Some(a) = strm.anchor() {
+                let safe = watermark.saturating_sub(settle);
+                if safe > a {
+                    let safe_bucket = a + ((safe - a) / W) * W;
+                    strm_rows.extend(strm.emit(&msgs_seen, safe_bucket));
+                    strm.prune();
+                    let cutoff = strm.emitted_upto();
+                    msgs_seen.retain(|m| bucket_of(m.ts, a, W) >= cutoff);
+                }
+            }
+        }
+        strm_rows.extend(strm.finish(&msgs_seen, final_max_ts));
+
+        assert_eq!(
+            csv_rows(&strm_rows),
+            csv_rows(&one_rows),
+            "streaming flush must reproduce the one-shot series exactly"
+        );
+        // Sanity: the stream actually exercised multiple partial flushes.
+        assert!(strm_rows.len() as u64 >= seconds, "expected one row per second, got {}", strm_rows.len());
+    }
+
+    #[test]
+    fn emit_fills_gaps_with_empty_rows_for_a_contiguous_grid() {
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, W);
+        rec.record_book_snapshot(book(0, Some(99), Some(101)));
+        rec.record_book_snapshot(book(10 * W + 1, Some(99), Some(101)));
+
+        let rows = rec.finish(&[], 10 * W + 1);
+        assert_eq!(rows.len(), 11, "buckets 0..=10 inclusive");
+        for (i, r) in rows.iter().enumerate() {
+            assert_eq!(r.interval_start, i as u64 * W, "row {i} sits on the grid");
+        }
+        // Only the two populated buckets carry a spread.
+        assert!(rows[0].quoted_spread_bps.is_some());
+        assert!(rows[10].quoted_spread_bps.is_some());
+        assert!(rows[5].quoted_spread_bps.is_none());
+    }
+
+    #[test]
+    fn events_for_an_already_emitted_bucket_are_counted_not_stored() {
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, W);
+        // Establish the anchor at ts=0 and stream a little past 5s.
+        for s in 0..6u64 {
+            rec.record_book_snapshot(book(s * W + 1, Some(99), Some(101)));
+        }
+        // Flush buckets 0..=3.
+        let flushed = rec.emit(&[], 4 * W);
+        assert_eq!(flushed.len(), 4);
+        rec.prune();
+        assert_eq!(rec.late_events_dropped(), 0);
+
+        // A late snapshot for bucket 1 (already emitted) must be rejected.
+        rec.record_book_snapshot(book(1 * W + 500, Some(1), Some(3)));
+        assert_eq!(rec.late_events_dropped(), 1);
+
+        // ...and it must not perturb bucket 1 on any later flush.
+        let rest = rec.finish(&[], 6 * W);
+        // rest covers buckets 4 and 5 only; bucket 1 was already emitted.
+        assert!(rest.iter().all(|r| r.interval_start >= 4 * W));
+    }
+
+    // ---- Kyle's lambda ----
+
+    /// A CDA `TradeEvent` with an explicit side / quantity / pre-trade mid.
+    fn cda_flow(ts: u64, side: Side, qty: u128, reference: u128) -> TradeEvent {
+        TradeEvent {
+            trade: Trade {
+                trade_id: 1,
+                price: reference,
+                quantity: qty,
+                buyer_id: "b".to_string(),
+                seller_id: "s".to_string(),
+                buy_order_id: 1,
+                sell_order_id: 2,
+                engine_type: EngineKind::Cda,
+                ts,
+                trade_tx_hash: None,
+                chain_id: None,
+            },
+            reference_price: Some(reference),
+            aggressor_side: Some(side),
+        }
+    }
+
+    /// A fully-specified FBA `BatchClearedEvent` for lambda tests.
+    fn fba_clear(ts: u64, batch_open_ts: u64, clearing_price: Option<u128>, demand: u128, supply: u128) -> BatchClearedEvent {
+        BatchClearedEvent {
+            ts,
+            batch_open_ts,
+            clearing_price,
+            demand_at_price: demand,
+            supply_at_price: supply,
+            traded_quantity: demand.min(supply),
+            unexecuted_quantity: demand.abs_diff(supply),
+            best_unfilled_buy: None,
+            best_unfilled_sell: None,
+            depth_schedule: [(0, 0); DEPTH_BPS_THRESHOLDS.len()],
+            compute_time: Duration::ZERO,
+        }
+    }
+
+    #[test]
+    fn kyle_lambda_cda_recovers_a_known_slope() {
+        // One 10s bucket so every event lands in bucket 0.
+        let big = 10 * W;
+        let pre = 1_000_000u128;
+        let lambda = 2.0; // bps of mid move per SOL of signed flow
+        // For signed flow x, place the +5s markout book mid at
+        // pre*(1 + lambda*x/1e4) so y == lambda*x exactly.
+        let post = |x: i128| -> u128 { (pre as f64 * (1.0 + lambda * x as f64 / 10_000.0)).round() as u128 };
+
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, big);
+        // Observation 1: net +5 (single Buy).
+        rec.record_trade(cda_flow(1_000_000, Side::Buy, 5, pre));
+        rec.record_book_snapshot(book(1_000_000 + 5 * W, Some(post(5)), Some(post(5))));
+        // Observation 2: net -3 (single Sell).
+        rec.record_trade(cda_flow(2_000_000, Side::Sell, 3, pre));
+        rec.record_book_snapshot(book(2_000_000 + 5 * W, Some(post(-3)), Some(post(-3))));
+        // Observation 3: a sweep — two Buys at the SAME ts, net +5.
+        rec.record_trade(cda_flow(3_000_000, Side::Buy, 2, pre));
+        rec.record_trade(cda_flow(3_000_000, Side::Buy, 3, pre));
+        rec.record_book_snapshot(book(3_000_000 + 5 * W, Some(post(5)), Some(post(5))));
+        // Observation 4: net-zero sweep (Buy 3 + Sell 3) — must be inert.
+        rec.record_trade(cda_flow(4_000_000, Side::Buy, 3, pre));
+        rec.record_trade(cda_flow(4_000_000, Side::Sell, 3, pre));
+
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 1);
+        // Sxx = 25 + 9 + 25 = 59 ; Sxy = 50 + 18 + 50 = 118 ; lambda = 2.0.
+        let got = series[0].kyle_lambda.expect("lambda computable");
+        assert!((got - lambda).abs() < 1e-9, "recovered lambda {got}, expected {lambda}");
+    }
+
+    #[test]
+    fn kyle_lambda_cda_is_none_when_the_markout_mid_is_missing() {
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, 10 * W);
+        rec.record_trade(cda_flow(1_000_000, Side::Buy, 5, 1_000_000));
+        // Only price point is well BEFORE the trade's +5s horizon target.
+        rec.record_book_snapshot(book(2_000_000, Some(1_000_000), Some(1_000_000)));
+
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].kyle_lambda, None);
+    }
+
+    #[test]
+    fn kyle_lambda_fba_from_batch_imbalance() {
+        let big = 100 * W;
+        let lambda = 125.0;
+        let mut rec = MetricsRecorder::new(EngineKind::Fba, big);
+        // Priming batch: sets the carry, produces no observation (no prior price).
+        rec.record_batch(fba_clear(1_000_000, 0, Some(1_000_000), 0, 0));
+        // x = +8 vs 1_000_000 -> y = 1000 bps -> cp = 1_100_000.
+        rec.record_batch(fba_clear(2_000_000, 1_000_000, Some(1_100_000), 8, 0));
+        // x = -4 vs 1_100_000 -> y = -500 bps -> cp = 1_045_000.
+        rec.record_batch(fba_clear(3_000_000, 2_000_000, Some(1_045_000), 0, 4));
+        // A no-price clear: must NOT disturb the carry.
+        rec.record_batch(fba_clear(4_000_000, 3_000_000, None, 7, 7));
+        // x = +2 vs 1_045_000 (carry unchanged by the None clear) -> y = 250 bps -> cp = 1_071_125.
+        rec.record_batch(fba_clear(5_000_000, 4_000_000, Some(1_071_125), 3, 1));
+
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 1);
+        // Sxx = 64 + 16 + 4 = 84 ; Sxy = 8000 + 2000 + 500 = 10500 ; lambda = 125.
+        let got = series[0].kyle_lambda.expect("lambda computable");
+        assert!((got - lambda).abs() < 1e-6, "recovered lambda {got}, expected {lambda}");
+    }
+
+    #[test]
+    fn kyle_lambda_fba_carries_prev_clearing_across_a_flush() {
+        let mut rec = MetricsRecorder::new(EngineKind::Fba, W);
+        rec.record_batch(fba_clear(1, 0, Some(1_000_000), 0, 0)); // bucket 0: seeds the carry
+        rec.record_batch(fba_clear(W + 1, W, Some(1_100_000), 8, 0)); // bucket 1
+
+        // Flush bucket 0 alone: first batch, no prior price -> no lambda.
+        let r0 = rec.emit(&[], W);
+        assert_eq!(r0.len(), 1);
+        assert_eq!(r0[0].kyle_lambda, None);
+        rec.prune();
+
+        // Bucket 1's lambda must use the clearing price carried out of bucket 0's emit.
+        let r1 = rec.finish(&[], W + 1);
+        assert_eq!(r1.len(), 1);
+        // x = 8, y = (1_100_000 - 1_000_000)/1_000_000 * 1e4 = 1000 ; lambda = 8000/64 = 125.
+        let got = r1[0].kyle_lambda.expect("lambda computable after the flush boundary");
+        assert!((got - 125.0).abs() < 1e-6, "carried lambda {got}, expected 125");
+    }
+
+    #[test]
+    fn streaming_fba_batches_emit_in_pieces_matches_one_shot() {
+        // Same differential guarantee as the CDA test, for the FBA path —
+        // exercises the `prev_clearing` (Kyle's lambda) AND `prev_close`
+        // (Amihud) carries across flush boundaries, which nothing else does.
+        let settle = 35 * W;
+        let seconds = 140u64;
+
+        let mut all_msgs: Vec<OrderMessage> = Vec::new();
+        let mut batches: Vec<BatchClearedEvent> = Vec::new();
+        let mut rng = Lcg(0xBA7C1A);
+        for s in 0..seconds {
+            let ts = s * W + 1;
+            all_msgs.push(msg(ts, s));
+            let cp = if s % 11 == 5 { None } else { Some(1_000_000 + rng.range(4000) as u128) };
+            batches.push(fba_clear(ts, s * W, cp, rng.range(50) as u128, rng.range(50) as u128));
+        }
+        let final_max_ts = seconds * W;
+
+        let mut one = MetricsRecorder::new(EngineKind::Fba, W);
+        for b in &batches {
+            one.record_batch(b.clone());
+        }
+        let one_rows = one.finish(&all_msgs, final_max_ts);
+
+        let mut strm = MetricsRecorder::new(EngineKind::Fba, W);
+        let mut msgs_seen: Vec<OrderMessage> = Vec::new();
+        let mut strm_rows: Vec<IntervalMetrics> = Vec::new();
+        for s in 0..seconds {
+            let sec_lo = s * W;
+            let sec_hi = sec_lo + W;
+            for b in batches.iter().filter(|b| b.ts >= sec_lo && b.ts < sec_hi) {
+                strm.record_batch(b.clone());
+            }
+            for m in all_msgs.iter().filter(|m| m.ts >= sec_lo && m.ts < sec_hi) {
+                msgs_seen.push(m.clone());
+            }
+            let watermark = sec_hi.saturating_sub(1);
+            if let Some(a) = strm.anchor() {
+                let safe = watermark.saturating_sub(settle);
+                if safe > a {
+                    let safe_bucket = a + ((safe - a) / W) * W;
+                    strm_rows.extend(strm.emit(&msgs_seen, safe_bucket));
+                    strm.prune();
+                    let cutoff = strm.emitted_upto();
+                    msgs_seen.retain(|m| bucket_of(m.ts, a, W) >= cutoff);
+                }
+            }
+        }
+        strm_rows.extend(strm.finish(&msgs_seen, final_max_ts));
+
+        assert_eq!(
+            csv_rows(&strm_rows),
+            csv_rows(&one_rows),
+            "FBA streaming flush must reproduce the one-shot series exactly"
+        );
+        assert!(strm_rows.len() as u64 >= seconds, "expected at least one row per second, got {}", strm_rows.len());
     }
 }

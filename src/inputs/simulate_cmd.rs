@@ -1,18 +1,44 @@
-//! The `simulate` command: streams a real order-status archive (CSV or
-//! the binary/gzip files under `data/order_statuses/`, see
-//! `inputs::simulator::collect_input_files`/`stream_records`) through
-//! fresh, isolated `FbaOrderBook`/`CdaOrderBook` instances, recording the
-//! full time-series metric catalogue (`metrics::timeseries`) for both
-//! along the way, and writes the result to `output/`.
+//! The `simulate` command: streams a real order-status archive (CSV or the
+//! binary/gzip files under `data/order_statuses/`, via
+//! `inputs::simulator::collect_input_files` + a per-file `stream_file` loop
+//! driven from here) through fresh,
+//! isolated `FbaOrderBook`/`CdaOrderBook` instances, recording the full
+//! time-series metric catalogue (`metrics::timeseries`) for both along the
+//! way, and writing the result to `output/<slug>/`.
 //!
 //! Deliberately separate from the live session's own `fba`/`cda` (owned by
 //! `inputs::cli::run`) — a multi-million-record replay has no business
 //! mutating what `add`/`load`/`metrics`/`orderbook` show the user
 //! afterward.
+//!
+//! ## Streaming, incremental output, resume
+//!
+//! A full-month archive is far too large to buffer every event and only
+//! write once at the end, and a run that takes days must survive being
+//! interrupted. So the replay is processed one input file at a time, and
+//! after each file:
+//!
+//! - `MetricsRecorder::emit` flushes every interval bucket that has settled
+//!   — i.e. whose end is more than `SETTLE_SECS` behind the latest
+//!   event-time — and those rows are *appended* to
+//!   `output/<slug>/{fba,cda}_timeseries.csv`. The recorder then drops the
+//!   events for those buckets, so memory stays bounded to roughly the last
+//!   `SETTLE_SECS` of activity instead of the whole run.
+//! - `output/<slug>/checkpoint.txt` is rewritten (atomically) with how many
+//!   files are done, the cumulative counters, the bucket-grid cursor, and
+//!   the running summary accumulators.
+//!
+//! Re-running `simulate` on the same source picks up from that checkpoint:
+//! finished files are skipped and the CSVs are appended to (trimmed first
+//! back to the checkpoint's row counts, in case a crash left them ahead).
+//! Resume is approximate — the in-flight event window and the engine books
+//! are not persisted, so a resumed run leaves a gap of empty interval rows
+//! roughly `SETTLE_SECS` wide at the seam; everything after it is exact.
+//! `summary.txt` is written once, at completion.
 
-use std::fs;
-use std::io::Write;
-use std::path::Path;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -22,12 +48,29 @@ use colored::Colorize;
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
 use crate::inputs::progress;
+use crate::inputs::replay_checkpoint::{self, Checkpoint};
 use crate::inputs::simulator;
-use crate::metrics::timeseries::{self, MetricsRecorder};
-use crate::types::{EngineKind, Order, Side};
+use crate::metrics::timeseries::{self, IntervalMetrics, MetricsRecorder};
+use crate::types::{EngineKind, Order, Side, PRICE_SCALE};
 
 const DEFAULT_INTERVAL_SECS: u64 = 1;
 const NS_PER_SEC: u64 = 1_000_000_000;
+
+/// How far event-time must move past a bucket's end before that bucket is
+/// considered settled and flushed to CSV. It bounds in-run memory (only
+/// this much recent activity is retained) and the size of the empty-row gap
+/// a resumed run leaves behind.
+///
+/// ~1h 1min, chosen so it exceeds two things at once: the widest
+/// realized-spread markout horizon (30s — a bucket must not flush before
+/// its forward prices exist), and the backwards jump in event-time when the
+/// stream moves from an hour's *accepted* file to that same hour's
+/// *rejected* file (`inputs::simulator::collect_input_files` orders them
+/// accepted-then-rejected, so `ts` can drop by nearly a full hour there).
+/// Raising it trades more retained memory for fewer boundary
+/// approximations; lowering it makes CSV rows appear sooner but risks
+/// dropping late rejected-order records (counted as `late_events_dropped`).
+const SETTLE_SECS: u64 = 3_660;
 
 pub fn run(path_str: &str, interval_secs: Option<u64>) {
     // `simulate all` is shorthand for running `btc`, `eth`, then `sol` back
@@ -44,6 +87,7 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
 
     let interval_secs = interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS);
     let interval_width_ns = interval_secs * NS_PER_SEC;
+    let settle_ns = SETTLE_SECS.saturating_mul(NS_PER_SEC);
 
     // `simulate btc|eth|sol` is shorthand for the directory `download
     // <coin>` populates — resolved here rather than in the CLI parser so
@@ -70,30 +114,116 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
         }
     };
 
-    println!("{}", format!("==> Simulating {} file(s) from '{resolved_path}', interval={interval_secs}s ...", files.len()).cyan());
-    std::io::stdout().flush().ok();
-    let wall_clock_start = Instant::now();
+    let out_dir = replay_checkpoint::output_dir(&resolved_path);
+    let fba_csv = out_dir.join(replay_checkpoint::FBA_CSV);
+    let cda_csv = out_dir.join(replay_checkpoint::CDA_CSV);
 
-    // Total on-disk size of every file about to be streamed — cheap (just
-    // `stat`s, no decompression) and the whole basis for the live progress
-    // bar below: `simulator::stream_records` counts raw bytes actually
-    // read from disk (compressed size for `.gz`) as it goes, so comparing
-    // that running count against this total gives a real percentage
-    // through the run, not just an unbounded "N records so far".
-    let total_bytes: u64 = files.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum();
-    let bytes_read = Arc::new(AtomicU64::new(0));
-    let records_seen = Arc::new(AtomicU64::new(0));
+    // ---- resume-or-fresh decision ----
+    let prior = match Checkpoint::load(&out_dir) {
+        Ok(p) => p,
+        Err(err) => {
+            println!("{}", format!("[ERROR] Couldn't read existing checkpoint in {}: {err}", out_dir.display()).red());
+            return;
+        }
+    };
+    let (mut ckpt, resuming) = match prior {
+        Some(c) => {
+            if c.source != resolved_path || c.interval_ns != interval_width_ns || c.files_total != files.len() {
+                println!(
+                    "{}",
+                    format!(
+                        "[ERROR] {} holds a different run (source / interval / file count changed). Delete that directory to start over.",
+                        out_dir.display()
+                    )
+                    .red()
+                );
+                return;
+            }
+            if c.complete {
+                println!("{}", format!("[OK] '{resolved_path}' is already fully processed — see {}. Delete that directory to re-run.", out_dir.display()).green());
+                return;
+            }
+            (c, true)
+        }
+        None => {
+            if let Err(err) = fs::create_dir_all(&out_dir) {
+                println!("{}", format!("[ERROR] Couldn't create {}: {err}", out_dir.display()).red());
+                return;
+            }
+            (Checkpoint::fresh(resolved_path.clone(), interval_width_ns, settle_ns, files.len()), false)
+        }
+    };
 
+    // A checkpoint with nothing flushed yet means the previous run was
+    // interrupted inside the first settle window — none of its events were
+    // persisted, so there's nothing to resume onto. Restart the replay from
+    // the top (no CSV rows exist to duplicate); only the cumulative
+    // wall-clock carries over.
+    let restart_from_scratch = resuming && ckpt.fba_rows_written == 0 && ckpt.cda_rows_written == 0;
+    if restart_from_scratch {
+        let kept_elapsed = ckpt.elapsed_secs;
+        ckpt = Checkpoint::fresh(resolved_path.clone(), interval_width_ns, settle_ns, files.len());
+        ckpt.elapsed_secs = kept_elapsed;
+    }
+    let appending = resuming && !restart_from_scratch;
+
+    let header_line = format!("{}\n", timeseries::csv_header());
+    if appending {
+        // A crash between appending rows and rewriting the checkpoint can
+        // leave a CSV ahead of `*_rows_written` — trim it back so appends
+        // resume exactly where the checkpoint says.
+        if let Err(err) = replay_checkpoint::truncate_data_rows(&fba_csv, ckpt.fba_rows_written).and_then(|_| replay_checkpoint::truncate_data_rows(&cda_csv, ckpt.cda_rows_written)) {
+            println!("{}", format!("[ERROR] Couldn't reconcile existing CSVs against the checkpoint: {err}").red());
+            return;
+        }
+        for p in [&fba_csv, &cda_csv] {
+            if !p.exists() {
+                let _ = fs::write(p, &header_line); // deleted between runs — recreate the header
+            }
+        }
+        println!(
+            "{}",
+            format!(
+                "==> Resuming '{resolved_path}' (interval={interval_secs}s): {}/{} file(s) done, {} FBA + {} CDA row(s) already written.",
+                ckpt.files_done,
+                files.len(),
+                ckpt.fba_rows_written,
+                ckpt.cda_rows_written
+            )
+            .cyan()
+        );
+    } else {
+        if let Err(err) = fs::write(&fba_csv, &header_line).and_then(|_| fs::write(&cda_csv, &header_line)) {
+            println!("{}", format!("[ERROR] Couldn't create output CSVs in {}: {err}", out_dir.display()).red());
+            return;
+        }
+        let lead = if restart_from_scratch { "Restarting (prior run stopped before its first flush)" } else { "Simulating" };
+        println!("{}", format!("==> {lead} {} file(s) from '{resolved_path}', interval={interval_secs}s -> {} ...", files.len(), out_dir.display()).cyan());
+    }
+    io::stdout().flush().ok();
+
+    let base_elapsed_secs = ckpt.elapsed_secs;
+    let todo_files: Vec<PathBuf> = files[ckpt.files_done.min(files.len())..].to_vec();
+
+    // ---- engines + recorders (books start fresh even on resume) ----
     let mut fba = FbaOrderBook::new();
     let mut cda = CdaOrderBook::new();
-    let mut fba_recorder = MetricsRecorder::new(EngineKind::Fba, interval_width_ns);
-    let mut cda_recorder = MetricsRecorder::new(EngineKind::Cda, interval_width_ns);
-    // Owned once, shared by reference into both recorders' `finalize()` at
-    // the end — used to be cloned into each recorder separately (one full
-    // second copy of the entire message stream, including a re-allocated
-    // `user_id: String` per message), which on a large multi-file replay
-    // (up to ~1.4B messages for a full coin) doubled an already enormous
-    // allocation for no reason: both recorders only ever read this data.
+    let (mut fba_recorder, mut cda_recorder) = match ckpt.anchor {
+        Some(a) => (
+            MetricsRecorder::resume(EngineKind::Fba, interval_width_ns, a, ckpt.emitted_upto, ckpt.fba_prev_close, ckpt.fba_prev_clearing, ckpt.fba_late_dropped),
+            MetricsRecorder::resume(EngineKind::Cda, interval_width_ns, a, ckpt.emitted_upto, ckpt.cda_prev_close, ckpt.cda_prev_clearing, ckpt.cda_late_dropped),
+        ),
+        None => (MetricsRecorder::new(EngineKind::Fba, interval_width_ns), MetricsRecorder::new(EngineKind::Cda, interval_width_ns)),
+    };
+    let mut fba_summary = ckpt.fba_summary.clone();
+    let mut cda_summary = ckpt.cda_summary.clone();
+
+    let mut anchor: Option<u64> = ckpt.anchor;
+    let mut max_seen_ts: u64 = ckpt.emitted_upto;
+
+    // Message log for the currently-retained window only (pruned after each
+    // file to the same bucket boundary the recorders prune to). Shared by
+    // reference into both recorders' `emit`.
     let mut messages: Vec<timeseries::OrderMessage> = Vec::new();
 
     // FBA has no continuous clock of its own — `simulate` triggers a
@@ -103,21 +233,20 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
     let mut fba_batch_open_ts: Option<u64> = None;
     let mut last_seen_ts: Option<u64> = None;
 
-    // `cda.bid_depth()`/`cda.ask_depth()` are O(1) running counters (see
-    // `CdaOrderBook`), so they're read fresh every record below — no
-    // caching needed for those two anymore. `depth_schedule` (the
-    // bps-banded breakdown) is a different story: its membership can shift
-    // for orders that didn't themselves change, just because the reference
-    // midpoint moved, so it isn't a simple running counter. It's still an
-    // O(book size) scan, so it's still only recomputed when a record could
-    // actually have changed the book (see `is_actionable` below) — when a
-    // record is a no-op (rejection, cancellation of an already-gone order,
-    // fill, un-triggered conditional order), `cda.bids`/`cda.asks` are
-    // byte-for-byte unchanged from the previous record, so the previous
-    // schedule is still exactly correct.
+    // `cda.bid_depth()`/`cda.ask_depth()` are O(1) running counters, read
+    // fresh every record. `depth_schedule` (the bps-banded breakdown) is an
+    // O(book size) scan whose membership can shift even for orders that
+    // didn't change (the reference midpoint moved), so it's only recomputed
+    // when a record could actually have changed the book (`is_actionable`).
     let mut cached_depth_sched = [(0u128, 0u128); timeseries::DEPTH_BPS_THRESHOLDS.len()];
 
-    let stream_result = progress::run_with_progress(
+    let total_bytes: u64 = todo_files.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum();
+    let bytes_read = Arc::new(AtomicU64::new(0));
+    let records_seen = Arc::new(AtomicU64::new(ckpt.records_seen as u64));
+
+    let wall_clock_start = Instant::now();
+
+    let stream_result: io::Result<()> = progress::run_with_progress(
         (total_bytes > 0).then_some(total_bytes),
         {
             let bytes_read = Arc::clone(&bytes_read);
@@ -129,158 +258,250 @@ pub fn run(path_str: &str, interval_secs: Option<u64>) {
             move || format!("  {} record(s)", records_seen.load(Ordering::Relaxed))
         },
         || {
-            simulator::stream_records(&files, &bytes_read, |order: Order| {
-                records_seen.fetch_add(1, Ordering::Relaxed);
-                last_seen_ts = Some(order.ts);
+            // Snapshot the resume offset once — `ckpt.files_done` is mutated
+            // inside the loop below.
+            let already_done = ckpt.files_done;
+            for (i, path) in todo_files.iter().enumerate() {
+                let file_index = already_done + i; // 0-based into `files`
+                println!("{}", format!("-> [{}/{}] {}", file_index + 1, files.len(), path.display()).dimmed());
+                io::stdout().flush().ok();
 
-                // Both recorders see the raw message stream before any gating —
-                // same "sees rejections/cancellations too" principle the message
-                // log has always used, needed for order-to-trade ratio etc. One
-                // shared log, read by both recorders' `finalize()` at the end,
-                // rather than each recorder holding its own cloned copy.
-                messages.push(timeseries::OrderMessage {
-                    ts: order.ts,
-                    oid: order.oid,
-                    user_id: order.user_id.clone(),
-                    side: order.side(),
-                    limit_price: order.limit_price(),
-                    quantity: order.orig_sz,
-                    accepted: order.is_new_live_order(),
-                });
+                let (seen, skipped, dropped) = simulator::stream_file(path, &bytes_read, &mut |order: Order| {
+                    records_seen.fetch_add(1, Ordering::Relaxed);
+                    last_seen_ts = Some(order.ts);
+                    if anchor.is_none() {
+                        anchor = Some(order.ts);
+                        // Pin BOTH recorders to the same grid origin now, so
+                        // FBA (which otherwise wouldn't anchor until its
+                        // first batch clear) and CDA share bucket boundaries.
+                        fba_recorder.set_anchor(order.ts);
+                        cda_recorder.set_anchor(order.ts);
+                    }
 
-                if next_fba_boundary.is_none() {
-                    next_fba_boundary = Some(order.ts + interval_width_ns);
-                    fba_batch_open_ts = Some(order.ts);
-                }
-                while order.ts >= next_fba_boundary.expect("just ensured Some above") {
-                    let open_ts = fba_batch_open_ts.expect("set alongside next_fba_boundary");
-                    let close_ts = next_fba_boundary.expect("checked by the while condition");
-                    clear_fba_batch(&mut fba, &mut fba_recorder, open_ts, close_ts);
-                    fba_batch_open_ts = Some(close_ts);
-                    next_fba_boundary = Some(close_ts + interval_width_ns);
-                }
-
-                // Rejections, cancellations of already-gone orders, fills, and
-                // un-triggered conditional orders are guaranteed no-ops in both
-                // `FbaOrderBook::submit` and `CdaOrderBook::submit` (see their own
-                // `is_new_live_order`/`is_cancellation` gating) — skip the clone +
-                // call entirely for those rather than paying for a call that's
-                // known in advance to do nothing.
-                let is_actionable = order.is_new_live_order() || order.is_cancellation();
-
-                // Captured before `order` potentially gets moved into
-                // `cda.submit` below (its last use) — both are cheap Copy
-                // reads, so capturing them costs nothing, and lets that
-                // final submit take ownership instead of cloning.
-                let ts = order.ts;
-                let side = order.side();
-
-                if is_actionable {
-                    fba.submit(order.clone());
-                }
-
-                let reference_price = midpoint(cda.best_bid(), cda.best_ask());
-                let cda_start = Instant::now();
-                let trades = if is_actionable { cda.submit(order) } else { Vec::new() };
-                let compute_time = cda_start.elapsed();
-
-                for trade in &trades {
-                    cda_recorder.record_trade(timeseries::TradeEvent {
-                        trade: trade.clone(),
-                        reference_price,
-                        aggressor_side: Some(side),
+                    // Both recorders see the raw message stream before any gating —
+                    // needed for order-to-trade ratio etc. One shared log, read by
+                    // both recorders' `emit`.
+                    messages.push(timeseries::OrderMessage {
+                        ts: order.ts,
+                        oid: order.oid,
+                        user_id: order.user_id.clone(),
+                        side: order.side(),
+                        limit_price: order.limit_price(),
+                        quantity: order.orig_sz,
+                        accepted: order.is_new_live_order(),
                     });
+
+                    if next_fba_boundary.is_none() {
+                        next_fba_boundary = Some(order.ts + interval_width_ns);
+                        fba_batch_open_ts = Some(order.ts);
+                    }
+                    while order.ts >= next_fba_boundary.expect("just ensured Some above") {
+                        let open_ts = fba_batch_open_ts.expect("set alongside next_fba_boundary");
+                        let close_ts = next_fba_boundary.expect("checked by the while condition");
+                        clear_fba_batch(&mut fba, &mut fba_recorder, open_ts, close_ts);
+                        fba_batch_open_ts = Some(close_ts);
+                        next_fba_boundary = Some(close_ts + interval_width_ns);
+                    }
+
+                    // Rejections, cancellations of already-gone orders, fills, and
+                    // un-triggered conditional orders are guaranteed no-ops in both
+                    // engines' `submit` — skip the clone + call for those.
+                    let is_actionable = order.is_new_live_order() || order.is_cancellation();
+
+                    let ts = order.ts;
+                    let side = order.side();
+
+                    if is_actionable {
+                        fba.submit(order.clone());
+                    }
+
+                    let reference_price = midpoint(cda.best_bid(), cda.best_ask());
+                    let cda_start = Instant::now();
+                    let trades = if is_actionable { cda.submit(order) } else { Vec::new() };
+                    let compute_time = cda_start.elapsed();
+
+                    for trade in &trades {
+                        cda_recorder.record_trade(timeseries::TradeEvent { trade: trade.clone(), reference_price, aggressor_side: Some(side) });
+                    }
+
+                    let best_bid = cda.best_bid();
+                    let best_ask = cda.best_ask();
+                    let best_bid_qty: u128 = cda.best_bid_order().map(|o| o.remaining).unwrap_or(0);
+                    let best_ask_qty: u128 = cda.best_ask_order().map(|o| o.remaining).unwrap_or(0);
+
+                    let cached_bid_depth = cda.bid_depth();
+                    let cached_ask_depth = cda.ask_depth();
+
+                    if is_actionable {
+                        cached_depth_sched = match midpoint(best_bid, best_ask) {
+                            Some(mid) => timeseries::depth_schedule(
+                                mid,
+                                cda.bids_iter()
+                                    .map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))
+                                    .chain(cda.asks_iter().map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))),
+                            ),
+                            None => [(0, 0); timeseries::DEPTH_BPS_THRESHOLDS.len()],
+                        };
+                    }
+                    cda_recorder.record_book_snapshot(timeseries::BookSnapshot {
+                        ts,
+                        best_bid,
+                        best_ask,
+                        best_bid_qty,
+                        best_ask_qty,
+                        bid_depth: cached_bid_depth,
+                        ask_depth: cached_ask_depth,
+                        depth_schedule: cached_depth_sched,
+                        compute_time,
+                    });
+                })?;
+
+                ckpt.files_processed += 1;
+                if dropped {
+                    ckpt.files_skipped += 1;
+                }
+                ckpt.records_seen += seen;
+                ckpt.records_skipped += skipped;
+                ckpt.files_done = file_index + 1;
+                ckpt.last_file = path.display().to_string();
+                if let Some(w) = last_seen_ts {
+                    max_seen_ts = max_seen_ts.max(w);
                 }
 
-                let best_bid = cda.best_bid();
-                let best_ask = cda.best_ask();
-                // `best_bid_order`/`best_ask_order` read straight off the
-                // touch (best price level's front order) — separate from
-                // `bid_depth`/`ask_depth` below, which sum the whole book.
-                let best_bid_qty: u128 = cda.best_bid_order().map(|o| o.remaining).unwrap_or(0);
-                let best_ask_qty: u128 = cda.best_ask_order().map(|o| o.remaining).unwrap_or(0);
+                let is_last = ckpt.files_done == files.len();
 
-                // O(1) running counters — see `CdaOrderBook::bid_depth`/`ask_depth`.
-                let cached_bid_depth = cda.bid_depth();
-                let cached_ask_depth = cda.ask_depth();
-
-                // `depth_schedule` still needs an O(book size) scan, so it's
-                // still only recomputed when this record could have changed
-                // the book — otherwise `cda`'s resting book (and therefore
-                // best_bid/best_ask above) are identical to last time, so
-                // the cached schedule is still exactly right.
-                if is_actionable {
-                    cached_depth_sched = match midpoint(best_bid, best_ask) {
-                        Some(mid) => timeseries::depth_schedule(
-                            mid,
-                            cda.bids_iter()
-                                .map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))
-                                .chain(cda.asks_iter().map(|o| (o.limit_price().unwrap_or(mid), o.side(), o.remaining))),
-                        ),
-                        None => [(0, 0); timeseries::DEPTH_BPS_THRESHOLDS.len()],
-                    };
+                // On the final file, flush whatever's left in the still-open
+                // FBA batch before the last emit.
+                if is_last && !fba.pending_orders.is_empty() {
+                    let open_ts = fba_batch_open_ts.unwrap_or(0);
+                    let close_ts = last_seen_ts.unwrap_or(open_ts);
+                    clear_fba_batch(&mut fba, &mut fba_recorder, open_ts, close_ts.max(open_ts));
                 }
-                cda_recorder.record_book_snapshot(timeseries::BookSnapshot {
-                    ts,
-                    best_bid,
-                    best_ask,
-                    best_bid_qty,
-                    best_ask_qty,
-                    bid_depth: cached_bid_depth,
-                    ask_depth: cached_ask_depth,
-                    depth_schedule: cached_depth_sched,
-                    compute_time,
-                });
-            })
+
+                let (fba_rows, cda_rows) = if is_last {
+                    (fba_recorder.finish(&messages, max_seen_ts), cda_recorder.finish(&messages, max_seen_ts))
+                } else {
+                    let hi = flush_hi(anchor, false, max_seen_ts, settle_ns, interval_width_ns);
+                    (fba_recorder.emit(&messages, hi), cda_recorder.emit(&messages, hi))
+                };
+                debug_assert_eq!(fba_recorder.anchor(), cda_recorder.anchor(), "both recorders share the grid origin");
+                debug_assert_eq!(fba_recorder.emitted_upto(), cda_recorder.emitted_upto(), "both recorders flush the same buckets");
+                append_rows(&fba_csv, &fba_rows)?;
+                append_rows(&cda_csv, &cda_rows)?;
+                for r in &fba_rows {
+                    fba_summary.fold(r);
+                }
+                for r in &cda_rows {
+                    cda_summary.fold(r);
+                }
+                ckpt.fba_rows_written += fba_rows.len() as u64;
+                ckpt.cda_rows_written += cda_rows.len() as u64;
+
+                fba_recorder.prune();
+                cda_recorder.prune();
+                if let Some(a) = anchor {
+                    let cutoff = fba_recorder.emitted_upto();
+                    messages.retain(|m| timeseries::bucket_of(m.ts, a, interval_width_ns) >= cutoff);
+                }
+
+                ckpt.anchor = anchor;
+                ckpt.emitted_upto = fba_recorder.emitted_upto();
+                ckpt.fba_prev_close = fba_recorder.prev_close();
+                ckpt.cda_prev_close = cda_recorder.prev_close();
+                ckpt.fba_prev_clearing = fba_recorder.prev_clearing();
+                ckpt.cda_prev_clearing = cda_recorder.prev_clearing(); // always None
+                ckpt.fba_late_dropped = fba_recorder.late_events_dropped();
+                ckpt.cda_late_dropped = cda_recorder.late_events_dropped();
+                ckpt.elapsed_secs = base_elapsed_secs + wall_clock_start.elapsed().as_secs_f64();
+                ckpt.complete = is_last;
+                ckpt.fba_summary = fba_summary.clone();
+                ckpt.cda_summary = cda_summary.clone();
+                ckpt.save_atomic(&out_dir)?;
+            }
+            Ok(())
         },
     );
 
-    let stats = match stream_result {
-        Ok(stats) => stats,
-        Err(err) => {
-            println!("{}", format!("[ERROR] Streaming failed: {err}").red());
-            return;
-        }
-    };
-
-    // Flush whatever's left in the final, still-open FBA batch.
-    if !fba.pending_orders.is_empty() {
-        let open_ts = fba_batch_open_ts.unwrap_or(0);
-        let close_ts = last_seen_ts.unwrap_or(open_ts);
-        clear_fba_batch(&mut fba, &mut fba_recorder, open_ts, close_ts.max(open_ts));
+    if let Err(err) = stream_result {
+        println!("{}", format!("[ERROR] Streaming failed: {err}").red());
+        println!("{}", format!("        Progress up to file {}/{} is checkpointed in {} — re-run the same command to resume.", ckpt.files_done, files.len(), out_dir.display()).yellow());
+        return;
     }
 
-    let elapsed = wall_clock_start.elapsed();
+    // Resume-after-a-crash-at-the-very-end: every file was already done, so
+    // the loop body never ran. Mark complete and fall through to the summary.
+    if todo_files.is_empty() && !ckpt.complete {
+        ckpt.complete = true;
+        ckpt.elapsed_secs = base_elapsed_secs + wall_clock_start.elapsed().as_secs_f64();
+        let _ = ckpt.save_atomic(&out_dir);
+    }
+
     println!(
         "{}",
         format!(
-            "[OK] Streamed {} file(s), {} record(s) seen ({} skipped), in {:.1}s wall-clock.",
-            stats.files_processed,
-            stats.records_seen,
-            stats.records_skipped,
-            elapsed.as_secs_f64()
+            "[OK] {}/{} file(s) done ({} record(s) seen, {} skipped, cumulative); {:.1}s wall-clock this run.",
+            ckpt.files_done,
+            files.len(),
+            ckpt.records_seen,
+            ckpt.records_skipped,
+            wall_clock_start.elapsed().as_secs_f64()
         )
         .green()
     );
-    if stats.files_skipped > 0 {
+    if ckpt.files_skipped > 0 {
+        println!(
+            "{}",
+            format!("[WARN] {} file(s) didn't look like order-status data and were skipped entirely.", ckpt.files_skipped).yellow()
+        );
+    }
+    if ckpt.fba_late_dropped > 0 || ckpt.cda_late_dropped > 0 {
         println!(
             "{}",
             format!(
-                "[WARN] {} of those file(s) didn't look like order-status data and were skipped entirely (not counted above) — see the per-file warnings.",
-                stats.files_skipped
+                "[WARN] {} FBA / {} CDA event(s) arrived after their interval had already been flushed and were dropped (event-time went backwards further than the settle window). See summary.txt.",
+                ckpt.fba_late_dropped, ckpt.cda_late_dropped
             )
             .yellow()
         );
     }
+    println!("FBA: {} interval(s)  |  CDA: {} interval(s)", ckpt.fba_summary.intervals_total(), ckpt.cda_summary.intervals_total());
 
-    let fba_series = fba_recorder.finalize(&messages);
-    let cda_series = cda_recorder.finalize(&messages);
-    println!("FBA: {} interval(s)  |  CDA: {} interval(s)", fba_series.len(), cda_series.len());
-
-    match write_output(&resolved_path, &stats, elapsed, &fba_series, &cda_series) {
-        Ok(dir) => println!("{}", format!("[OK] Wrote time series + summary to {}", dir.display()).green()),
-        Err(err) => println!("{}", format!("[ERROR] Failed to write output: {err}").red()),
+    match write_summary(&out_dir, &resolved_path, &ckpt) {
+        Ok(()) => println!("{}", format!("[OK] Time series + summary in {}", out_dir.display()).green()),
+        Err(err) => println!("{}", format!("[ERROR] Failed to write summary: {err}").red()),
     }
+}
+
+/// Exclusive upper bucket boundary to flush up to after a file. On the last
+/// file: everything through the bucket holding `max_seen_ts`. Otherwise:
+/// only buckets that have settled (`SETTLE_SECS` behind event-time), rounded
+/// down to a grid boundary; returns `anchor` (a no-op for `emit`) when
+/// nothing has settled yet.
+fn flush_hi(anchor: Option<u64>, is_last: bool, max_seen_ts: u64, settle_ns: u64, width: u64) -> u64 {
+    let Some(a) = anchor else {
+        return 0;
+    };
+    if is_last {
+        return max_seen_ts.saturating_add(1);
+    }
+    let safe = max_seen_ts.saturating_sub(settle_ns);
+    if safe > a {
+        a + ((safe - a) / width) * width
+    } else {
+        a
+    }
+}
+
+/// Append already-computed interval rows to a time-series CSV that already
+/// carries its header line. Flushes to the OS so an interrupted run's
+/// partial output is on disk.
+fn append_rows(path: &Path, rows: &[IntervalMetrics]) -> io::Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let mut f = OpenOptions::new().create(true).append(true).open(path)?;
+    f.write_all(timeseries::csv_rows(rows).as_bytes())?;
+    f.flush()
 }
 
 /// Clears FBA's current batch (if it has anything queued) and records a
@@ -339,8 +560,7 @@ fn clear_fba_batch(fba: &mut FbaOrderBook, recorder: &mut MetricsRecorder, batch
         traded_quantity: clearing.traded_quantity,
         // The heavier ELIGIBLE side's leftover (`|demand - supply|`), not a
         // full-residual-orders sum — see `FbaOrderBook::unexecuted_residual_share`'s
-        // doc comment for why the latter can push a share past 1. Same fix,
-        // applied here too rather than reintroducing that bug in a new place.
+        // doc comment for why the latter can push a share past 1.
         unexecuted_quantity: clearing.demand_at_price.abs_diff(clearing.supply_at_price),
         best_unfilled_buy: fba.best_unfilled_buy(),
         best_unfilled_sell: fba.best_unfilled_sell(),
@@ -358,23 +578,10 @@ fn midpoint(best_bid: Option<u128>, best_ask: Option<u128>) -> Option<u128> {
     }
 }
 
-fn write_output(
-    source: &str,
-    stats: &simulator::RunStats,
-    elapsed: std::time::Duration,
-    fba_series: &[timeseries::IntervalMetrics],
-    cda_series: &[timeseries::IntervalMetrics],
-) -> std::io::Result<std::path::PathBuf> {
-    let out_dir = Path::new("output");
-    std::fs::create_dir_all(out_dir)?;
-
-    // Tag every file from this run with when it was produced, so repeated
-    // `simulate` runs accumulate in output/ instead of clobbering each
-    // other's results.
+fn write_summary(out_dir: &Path, source: &str, ckpt: &Checkpoint) -> io::Result<()> {
     let ts = run_timestamp();
-
-    std::fs::write(out_dir.join(format!("fba_timeseries_{ts}.csv")), timeseries::to_csv(fba_series))?;
-    std::fs::write(out_dir.join(format!("cda_timeseries_{ts}.csv")), timeseries::to_csv(cda_series))?;
+    let fba = &ckpt.fba_summary;
+    let cda = &ckpt.cda_summary;
 
     let summary = format!(
         "Simulation summary\n\
@@ -385,7 +592,9 @@ fn write_output(
          Files skipped (not order-status data): {}\n\
          Records seen:            {}\n\
          Records skipped:         {}\n\
-         Wall-clock duration:     {:.1}s\n\
+         Wall-clock duration:     {:.1}s (cumulative across runs)\n\
+         Settle window:           {SETTLE_SECS}s (bucket flush lag; also the resumed-run gap width)\n\
+         Late events dropped:     {} (FBA) / {} (CDA)\n\
          \n\
          FBA intervals:           {}\n\
          CDA intervals:           {}\n\
@@ -400,150 +609,39 @@ fn write_output(
          internally throughout this crate — divide price-denominated values\n\
          by 1,000,000 for real USD (already done for the dollar figures\n\
          above). Quantities (volume, depth) are already whole SOL units.\n\
+         `kyle_lambda` is a slope in bps-of-mid-move per SOL of signed order\n\
+         flow — NOT a price, so it is NOT PRICE_SCALE-denominated.\n\
          \n\
          \"avg\" below means the mean across only the intervals where that\n\
          metric was actually computable (see IntervalMetrics' doc comment —\n\
          `None` always means \"not computable from what was recorded,\" never\n\
          a silent zero, so intervals with no value for a given metric are\n\
          excluded from its average rather than pulling it toward zero).\n",
-        stats.files_processed,
-        stats.files_skipped,
-        stats.records_seen,
-        stats.records_skipped,
-        elapsed.as_secs_f64(),
-        fba_series.len(),
-        cda_series.len(),
-        fba_series.iter().map(|m| m.trade_count).sum::<u64>(),
-        fba_series.iter().map(|m| m.executed_volume).sum::<f64>(),
-        fba_series.iter().map(|m| m.executed_notional).sum::<f64>() / crate::types::PRICE_SCALE as f64,
-        cda_series.iter().map(|m| m.trade_count).sum::<u64>(),
-        cda_series.iter().map(|m| m.executed_volume).sum::<f64>(),
-        cda_series.iter().map(|m| m.executed_notional).sum::<f64>() / crate::types::PRICE_SCALE as f64,
-        stats_section("FBA", fba_series),
-        stats_section("CDA", cda_series),
+        ckpt.files_processed,
+        ckpt.files_skipped,
+        ckpt.records_seen,
+        ckpt.records_skipped,
+        ckpt.elapsed_secs,
+        ckpt.fba_late_dropped,
+        ckpt.cda_late_dropped,
+        fba.intervals_total(),
+        cda.intervals_total(),
+        fba.trade_count_sum(),
+        fba.executed_volume_sum(),
+        fba.executed_notional_sum() / PRICE_SCALE as f64,
+        cda.trade_count_sum(),
+        cda.executed_volume_sum(),
+        cda.executed_notional_sum() / PRICE_SCALE as f64,
+        fba.render_section("FBA"),
+        cda.render_section("CDA"),
     );
-    std::fs::write(out_dir.join(format!("summary_{ts}.txt")), summary)?;
-
-    Ok(out_dir.to_path_buf())
+    fs::write(out_dir.join(replay_checkpoint::SUMMARY_FILE), summary)
 }
 
-/// avg/min/max of `f(interval)` across only the intervals where it's `Some`
-/// — `None` intervals are excluded entirely rather than counted as zero
-/// (matching what `None` means throughout this catalogue). `n` is how many
-/// intervals actually contributed, so a structurally-always-`None` metric
-/// (e.g. `pricing_error_bps`) is visibly distinct from one that's merely
-/// sparse.
-struct Stat {
-    avg: Option<f64>,
-    min: Option<f64>,
-    max: Option<f64>,
-    n: usize,
-}
-
-fn stat_of(series: &[timeseries::IntervalMetrics], f: impl Fn(&timeseries::IntervalMetrics) -> Option<f64>) -> Stat {
-    let values: Vec<f64> = series.iter().filter_map(&f).collect();
-    if values.is_empty() {
-        return Stat { avg: None, min: None, max: None, n: 0 };
-    }
-    Stat {
-        avg: Some(values.iter().sum::<f64>() / values.len() as f64),
-        min: Some(values.iter().cloned().fold(f64::INFINITY, f64::min)),
-        max: Some(values.iter().cloned().fold(f64::NEG_INFINITY, f64::max)),
-        n: values.len(),
-    }
-}
-
-/// Same as `stat_of`, but for the catalogue's non-`Option` per-interval
-/// fields (`executed_volume`, `executed_notional`, `trader_surplus`) —
-/// every interval counts (there's no "not computable" case for these,
-/// a quiet interval is legitimately `0.0`, not missing).
-fn stat_of_f64(series: &[timeseries::IntervalMetrics], f: impl Fn(&timeseries::IntervalMetrics) -> f64) -> Stat {
-    stat_of(series, |m| Some(f(m)))
-}
-
-/// Why a metric can legitimately be `n/a` for *every* interval, distinct
-/// from "just happened to have no trades this run" — a bare "n/a" reads
-/// the same in both cases, which is exactly what made the old summary
-/// noisy. `Universal` metrics still show avg/min/max/(n=computable/total)
-/// as before; the other three print a one-line reason instead of three
-/// `n/a`s, and only for the engine(s) the reason actually applies to.
-#[derive(Clone, Copy)]
-enum Scope {
-    Universal,
-    FbaOnly,
-    CdaOnly,
-    /// Structurally uncomputable from this dataset alone, for either
-    /// engine — e.g. needs an external oracle/mark-price feed.
-    NeedsExternalData(&'static str),
-}
-
-fn fmt_stat_row(label: &str, s: &Stat, total: usize, scope: Scope, engine: &str) -> String {
-    match scope {
-        Scope::FbaOnly if engine != "FBA" => return format!("  {label:<32} n/a — FBA-only (no batch window in a CDA)\n"),
-        Scope::CdaOnly if engine != "CDA" => return format!("  {label:<32} n/a — CDA-only (no resting book to measure in FBA's uniform-price batch)\n"),
-        Scope::NeedsExternalData(reason) => return format!("  {label:<32} n/a — {reason}\n"),
-        _ => {}
-    }
-    let fmt = |v: Option<f64>| v.map(|x| format!("{x:.4}")).unwrap_or_else(|| "n/a".to_string());
-    format!("  {label:<32} avg={:<12} min={:<12} max={:<12} (n={}/{total})\n", fmt(s.avg), fmt(s.min), fmt(s.max), s.n)
-}
-
-/// One engine's block of per-metric avg/min/max for the detailed summary —
-/// every field in `IntervalMetrics` that isn't purely structural
-/// (`engine`/`interval_start`/`interval_width`), so this stays in sync with
-/// the catalogue by construction rather than by remembering to add a line
-/// here every time a metric is added there.
-fn stats_section(label: &str, series: &[timeseries::IntervalMetrics]) -> String {
-    if series.is_empty() {
-        return format!("\n{label} stats: (no intervals)\n");
-    }
-    let total = series.len();
-
-    let rows: Vec<(&str, Stat, Scope)> = vec![
-        ("quoted_spread_bps", stat_of(series, |m| m.quoted_spread_bps), Scope::Universal),
-        ("depth_at_best", stat_of(series, |m| m.depth_at_best), Scope::Universal),
-        ("depth_within_10bps", stat_of(series, |m| m.depth_within_bps[0]), Scope::Universal),
-        ("depth_within_50bps", stat_of(series, |m| m.depth_within_bps[1]), Scope::Universal),
-        ("depth_within_100bps", stat_of(series, |m| m.depth_within_bps[2]), Scope::Universal),
-        ("book_imbalance", stat_of(series, |m| m.book_imbalance), Scope::CdaOnly),
-        ("total_book_depth", stat_of(series, |m| m.total_book_depth), Scope::CdaOnly),
-        ("effective_spread_bps", stat_of(series, |m| m.effective_spread_bps), Scope::Universal),
-        ("realized_spread_bps_1s", stat_of(series, |m| m.realized_spread_bps_1s), Scope::Universal),
-        ("realized_spread_bps_5s", stat_of(series, |m| m.realized_spread_bps_5s), Scope::Universal),
-        ("realized_spread_bps_30s", stat_of(series, |m| m.realized_spread_bps_30s), Scope::Universal),
-        ("price_impact_bps_1s", stat_of(series, |m| m.price_impact_bps_1s), Scope::Universal),
-        ("price_impact_bps_5s", stat_of(series, |m| m.price_impact_bps_5s), Scope::Universal),
-        ("price_impact_bps_30s", stat_of(series, |m| m.price_impact_bps_30s), Scope::Universal),
-        ("amihud_illiquidity", stat_of(series, |m| m.amihud_illiquidity), Scope::Universal),
-        ("realized_volatility", stat_of(series, |m| m.realized_volatility), Scope::Universal),
-        ("intra_interval_price_dispersion", stat_of(series, |m| m.intra_interval_price_dispersion), Scope::Universal),
-        ("pricing_error_bps", stat_of(series, |m| m.pricing_error_bps), Scope::NeedsExternalData("requires an external oracle/mark-price feed; not in this dataset (see IntervalMetrics::pricing_error_bps)")),
-        ("executed_volume", stat_of_f64(series, |m| m.executed_volume), Scope::Universal),
-        ("executed_notional", stat_of_f64(series, |m| m.executed_notional), Scope::Universal),
-        ("vwap", stat_of(series, |m| m.vwap), Scope::Universal),
-        ("trader_surplus", stat_of_f64(series, |m| m.trader_surplus), Scope::Universal),
-        ("fill_rate", stat_of(series, |m| m.fill_rate), Scope::Universal),
-        ("avg_time_to_execution_secs", stat_of(series, |m| m.avg_time_to_execution_secs), Scope::Universal),
-        ("order_size_inflation", stat_of(series, |m| m.order_size_inflation), Scope::Universal),
-        ("order_to_trade_ratio", stat_of(series, |m| m.order_to_trade_ratio), Scope::Universal),
-        ("boundary_concentration", stat_of(series, |m| m.boundary_concentration), Scope::FbaOnly),
-        ("throughput_orders_per_sec", stat_of(series, |m| m.throughput_orders_per_sec), Scope::Universal),
-        ("avg_clearing_latency_micros", stat_of(series, |m| m.avg_clearing_latency_micros), Scope::Universal),
-        ("unexecuted_residual_share", stat_of(series, |m| m.unexecuted_residual_share), Scope::FbaOnly),
-    ];
-
-    let mut out = format!("\n{label} stats (avg/min/max across intervals where computable; n = computable/total intervals):\n");
-    for (name, stat, scope) in &rows {
-        out.push_str(&fmt_stat_row(name, stat, total, *scope, label));
-    }
-    out
-}
-
-/// Formats the current UTC time as `YYYYMMDD_HHMMSS`, for tagging this
-/// run's output filenames. Pure integer arithmetic — no date/time crate
-/// needed: `civil_from_days` below is the inverse of
-/// `inputs::simulator::days_from_civil` (both Howard Hinnant's public-domain
-/// algorithm), so this is just running that same date math backwards.
+/// Formats the current UTC time as `YYYYMMDD_HHMMSS`, for the summary's
+/// "Generated" line. Pure integer arithmetic — no date/time crate needed:
+/// `civil_from_days` is the inverse of `inputs::simulator::days_from_civil`
+/// (both Howard Hinnant's public-domain algorithm).
 fn run_timestamp() -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     let total_secs = now.as_secs() as i64;
@@ -576,8 +674,7 @@ mod tests {
 
     /// `civil_from_days` is the inverse of `inputs::simulator::days_from_civil`
     /// — same known-correct reference points that function's own tests use
-    /// (`parses_dataset_timestamps` there), run backwards: days-since-epoch
-    /// -> (year, month, day) instead of the other way around.
+    /// (`parses_dataset_timestamps` there), run backwards.
     #[test]
     fn civil_from_days_round_trips_known_dates() {
         assert_eq!(civil_from_days(20423), (2025, 12, 1)); // 2025-12-01
@@ -594,18 +691,21 @@ mod tests {
     }
 
     #[test]
-    fn stat_of_skips_none_and_computes_avg_min_max() {
-        let mut a = timeseries::IntervalMetrics::empty("FBA", 0, 1_000_000_000);
-        a.quoted_spread_bps = Some(2.0);
-        let mut b = timeseries::IntervalMetrics::empty("FBA", 1, 1_000_000_000);
-        b.quoted_spread_bps = None; // must be excluded, not counted as 0.0
-        let mut c = timeseries::IntervalMetrics::empty("FBA", 2, 1_000_000_000);
-        c.quoted_spread_bps = Some(4.0);
+    fn flush_hi_withholds_unsettled_buckets_but_releases_everything_on_the_last_file() {
+        let w = 1_000_000_000u64;
+        let settle = 10 * w;
+        let anchor = Some(1_000u64);
 
-        let stat = stat_of(&[a, b, c], |m| m.quoted_spread_bps);
-        assert_eq!(stat.avg, Some(3.0), "mean of [2.0, None, 4.0] should be 3.0, not 2.0 (which is what treating None as 0 would give)");
-        assert_eq!(stat.min, Some(2.0));
-        assert_eq!(stat.max, Some(4.0));
-        assert_eq!(stat.n, 2, "only the 2 Some(..) intervals should count, out of 3 total");
+        // Nothing has settled yet -> returns the anchor (a no-op for `emit`).
+        assert_eq!(flush_hi(anchor, false, 1_000 + 5 * w, settle, w), 1_000);
+        // 25s of event-time in, 10s settle -> buckets up to ~15s past anchor,
+        // grid-aligned.
+        let hi = flush_hi(anchor, false, 1_000 + 25 * w, settle, w);
+        assert_eq!(hi, 1_000 + 15 * w);
+        assert_eq!((hi - 1_000) % w, 0, "grid-aligned");
+        // Last file: everything through the bucket holding max_seen_ts.
+        assert_eq!(flush_hi(anchor, true, 1_000 + 25 * w + 7, settle, w), 1_000 + 25 * w + 8);
+        // No anchor -> nothing to emit.
+        assert_eq!(flush_hi(None, false, 999_999, settle, w), 0);
     }
 }

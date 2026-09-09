@@ -358,9 +358,13 @@ fn open_reader(path: &Path, bytes_read: &Arc<AtomicU64>) -> io::Result<Box<dyn R
 /// decoded `Order` — never collects them into a `Vec`. Prints a short
 /// progress line per file (there are at most 48 per day, so this doesn't
 /// spam a multi-day run) so a long replay doesn't look hung. `bytes_read`
-/// accumulates raw bytes consumed across every file — `simulate_cmd` polls
-/// it from another thread to drive a live progress bar against the total
-/// on-disk size of `files`, computed upfront.
+/// accumulates raw bytes consumed across every file.
+///
+/// `simulate` no longer uses this — it drives the file loop itself (via
+/// `stream_file`) so it can flush metrics and checkpoint between files —
+/// but it stays as the straightforward whole-list streaming entry point,
+/// exercised by `streams_the_real_sample_gz_file_correctly`.
+#[allow(dead_code)]
 pub fn stream_records(files: &[PathBuf], bytes_read: &Arc<AtomicU64>, mut on_record: impl FnMut(Order)) -> io::Result<RunStats> {
     let mut stats = RunStats::default();
 
@@ -464,7 +468,7 @@ pub fn stream_records_parallel(files: &[PathBuf], bytes_read: &Arc<AtomicU64>, o
 /// `looks_like_order_status_header`/`binary_format::looks_like_order_status_record`)
 /// and was skipped in its entirety, in which case `records_seen`/
 /// `records_skipped` are both 0 (nothing in it was even looked at).
-fn stream_file(path: &Path, bytes_read: &Arc<AtomicU64>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize, bool)> {
+pub(crate) fn stream_file(path: &Path, bytes_read: &Arc<AtomicU64>, on_record: &mut impl FnMut(Order)) -> io::Result<(usize, usize, bool)> {
     let is_csv = path.extension().and_then(|e| e.to_str()) == Some("csv");
     let reader = open_reader(path, bytes_read)?;
 

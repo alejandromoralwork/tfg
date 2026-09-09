@@ -339,3 +339,36 @@ is the same "engines don't know metrics exist" boundary the design has
 always had, just inverted from a push model to a pull one: instead of
 engines pushing events out to a collector as they happen, `metrics::stats`
 pulls numbers in on demand by calling public getters.
+
+### 2.6 The `simulate` command — a separate, streaming pipeline
+
+`simulate <path|coin> [interval_secs]` is the one place that *does* keep an
+event log: `metrics::timeseries::MetricsRecorder` collects
+`OrderMessage`/`TradeEvent`/`BatchClearedEvent`/`BookSnapshot` per record
+and buckets them into a per-`interval_secs` time series
+(`docs/expose.tex`'s RQ2.1/2.2/2.3 catalogue). It never fits the whole
+run in memory:
+
+- **Streaming.** `inputs/simulate_cmd.rs` drives the input files one at a
+  time (`simulator::stream_file`). After each file, `MetricsRecorder::emit`
+  flushes every interval bucket that has settled — end more than
+  `SETTLE_SECS` (~1h) behind the latest event-time — and drops its events;
+  `MetricsRecorder::finish` flushes the tail on the last file. So RSS stays
+  bounded to ~`SETTLE_SECS` of activity. The per-bucket metric formulas are
+  unchanged from the old one-shot `finalize` (verified by
+  `streaming_emit_in_pieces_matches_one_shot_finish`).
+- **Incremental output.** Flushed rows are *appended* to
+  `output/<slug>/{fba,cda}_timeseries.csv` (header written once). `<slug>`
+  is the source path's last component. `summary.txt` is written once, at
+  completion, from running accumulators (`replay_checkpoint::SummaryAccumulator`).
+- **Resumable.** `output/<slug>/checkpoint.txt` is rewritten atomically
+  after every file (file count, cumulative counters, bucket-grid cursor,
+  serialized summary accumulators). Re-running the same source skips
+  finished files and appends (CSVs trimmed back to the checkpoint's row
+  counts first, in case a crash left them ahead). Resume is approximate:
+  engine books and the in-flight event window aren't persisted, so a
+  resumed run leaves ~`SETTLE_SECS` of empty interval rows at the seam
+  (unless nothing had been flushed yet, in which case it restarts from the
+  top and is exact). `SETTLE_SECS` also exceeds the ~1h backwards jump in
+  event-time at each hour's accepted→rejected file boundary; anything later
+  than that is counted as `late_events_dropped` and reported.
