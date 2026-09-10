@@ -13,6 +13,8 @@ data/*.tar.xz
 data/*.log
 data/__pycache__/
 
+cloud_results/
+
 # --- `download` command's own data (BTC/ETH/SOL order-status archives,
 # fetched on demand by src/inputs/download_cmd.rs) — separate from the
 # top-level data/ tree above, entirely downloaded artifacts, nothing here

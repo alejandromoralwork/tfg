@@ -184,9 +184,12 @@ inputs/simulator.rs
     — a pure CSV-row-to-Order parser, no engine knowledge at all.
 
 inputs/test_suite.rs
-    run_fba_tests() / run_cda_tests() / print_checklist(). Constructs
-    fresh, isolated FbaOrderBook/CdaOrderBook instances per test case and
-    asserts on their behavior directly.
+    run_fba_tests() / run_cda_tests() / run_timeseries_metric_tests() /
+    print_checklist(). The first two build fresh isolated FbaOrderBook/
+    CdaOrderBook instances per case and assert on their getters directly; the
+    third drives metrics::timeseries::MetricsRecorder with synthetic events
+    and checks each CSV column against a hand value. Run via
+    `test engine <continuous|cda|batch|fba|metrics|all>`.
 
 metrics/stats.rs
     print_summary / print_fba / print_cda. Depends on engines/fba.rs and
@@ -332,10 +335,12 @@ User types: orderbook   (alias: ob)
        (current_mode), paired with that engine's own book/buffer display
        (render_pending / render_book)
 
-User types: test engine <continuous|batch>
-    -> inputs::test_suite::run_cda_tests() / run_fba_tests(), each
-       constructing fresh, disposable orderbooks — nothing to do with the
-       live session's own fba/cda instances
+User types: test engine <continuous|cda|batch|fba|metrics|all>
+    -> inputs::test_suite::run_cda_tests() / run_fba_tests() (fresh,
+       disposable orderbooks — nothing to do with the live session's own
+       fba/cda instances) and/or run_timeseries_metric_tests() (drives the
+       metrics::timeseries streaming pipeline). Also an argv command:
+       `market_sim test engine all` exits 0/1.
 ```
 
 `metrics/stats.rs` never touches engine internals — every number it prints

@@ -7,11 +7,16 @@
 //! independently hand-computed expectation — not just "whatever the code
 //! currently does".
 
+use std::time::Duration;
+
 use colored::Colorize;
 
 use crate::engines::cda::CdaOrderBook;
 use crate::engines::fba::FbaOrderBook;
-use crate::types::{EngineKind, Order, Side, PRICE_SCALE};
+use crate::metrics::timeseries::{
+    BatchClearedEvent, BookSnapshot, MetricsRecorder, OrderMessage, TradeEvent, DEPTH_BPS_THRESHOLDS,
+};
+use crate::types::{EngineKind, Order, Side, Trade, PRICE_SCALE};
 
 pub struct TestCase {
     pub name: &'static str,
@@ -66,10 +71,123 @@ fn filled_event(oid: u64, ts: u64) -> Order {
     o
 }
 
-pub fn print_checklist(engine_label: &str, cases: &[TestCase]) {
+// ---- Time-series metric builders (feed MetricsRecorder directly) ----
+
+const TS_W: u64 = 1_000_000_000; // 1 s bucket, `simulate`'s default
+const TS_WIDE: u64 = 100_000_000_000; // 100 s bucket — "everything lands in bucket 0"
+
+/// Zero sub-band depth schedule (the common case).
+const NO_SCHED: [(u128, u128); DEPTH_BPS_THRESHOLDS.len()] = [(0, 0); DEPTH_BPS_THRESHOLDS.len()];
+
+/// Relative-tolerance compare, for metrics whose magnitude is a raw
+/// PRICE_SCALE-scaled quantity (`executed_notional`, `vwap`, `trader_surplus`)
+/// where `approx_eq`'s fixed `abs < 0.01` is far tighter than an f64 sum of
+/// 1e8-scale terms can hold.
+fn approx_rel(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-9 * b.abs().max(1.0)
+}
+
+fn tmsg(ts: u64, oid: u64, user: &str, side: Side, limit_price: Option<u128>, qty: u128) -> OrderMessage {
+    OrderMessage { ts, oid, user_id: user.to_string(), side, limit_price, quantity: qty, accepted: true }
+}
+
+fn ttrade(ts: u64, price: u128, qty: u128, buy_oid: u64, sell_oid: u64, engine: EngineKind) -> Trade {
+    Trade {
+        trade_id: buy_oid,
+        price,
+        quantity: qty,
+        buyer_id: "b".to_string(),
+        seller_id: "s".to_string(),
+        buy_order_id: buy_oid,
+        sell_order_id: sell_oid,
+        engine_type: engine,
+        ts,
+        trade_tx_hash: None,
+        chain_id: None,
+    }
+}
+
+/// A CDA trade with an explicit pre-trade reference mid and aggressor side.
+fn tcda_trade(ts: u64, price: u128, qty: u128, buy_oid: u64, sell_oid: u64, reference: Option<u128>, side: Option<Side>) -> TradeEvent {
+    TradeEvent { trade: ttrade(ts, price, qty, buy_oid, sell_oid, EngineKind::Cda), reference_price: reference, aggressor_side: side }
+}
+
+/// An FBA batch trade — no taker/maker, so `aggressor_side` is always `None`.
+fn tfba_trade(ts: u64, price: u128, qty: u128, buy_oid: u64, sell_oid: u64, reference: Option<u128>) -> TradeEvent {
+    TradeEvent { trade: ttrade(ts, price, qty, buy_oid, sell_oid, EngineKind::Fba), reference_price: reference, aggressor_side: None }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tbook(
+    ts: u64,
+    best_bid: Option<u128>,
+    best_ask: Option<u128>,
+    best_bid_qty: u128,
+    best_ask_qty: u128,
+    bid_depth: u128,
+    ask_depth: u128,
+    sched: [(u128, u128); DEPTH_BPS_THRESHOLDS.len()],
+    compute_us: u64,
+) -> BookSnapshot {
+    BookSnapshot {
+        ts,
+        best_bid,
+        best_ask,
+        best_bid_qty,
+        best_ask_qty,
+        bid_depth,
+        ask_depth,
+        depth_schedule: sched,
+        compute_time: Duration::from_micros(compute_us),
+    }
+}
+
+/// A book snapshot that only carries a price point (both sides == `mid`),
+/// used as a forward-markout reference for realized-spread / Kyle's lambda.
+fn tbook_px(ts: u64, mid: u128) -> BookSnapshot {
+    tbook(ts, Some(mid), Some(mid), 0, 0, 0, 0, NO_SCHED, 0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tbatch(
+    ts: u64,
+    batch_open_ts: u64,
+    clearing_price: Option<u128>,
+    demand: u128,
+    supply: u128,
+    net_order_flow: f64,
+    unexecuted: u128,
+    best_buy: Option<u128>,
+    best_sell: Option<u128>,
+    sched: [(u128, u128); DEPTH_BPS_THRESHOLDS.len()],
+    compute_us: u64,
+) -> BatchClearedEvent {
+    BatchClearedEvent {
+        ts,
+        batch_open_ts,
+        clearing_price,
+        demand_at_price: demand,
+        supply_at_price: supply,
+        net_order_flow,
+        traded_quantity: demand.min(supply),
+        unexecuted_quantity: unexecuted,
+        best_unfilled_buy: best_buy,
+        best_unfilled_sell: best_sell,
+        depth_schedule: sched,
+        compute_time: Duration::from_micros(compute_us),
+    }
+}
+
+/// A priced batch that only carries a clearing-price point.
+fn tbatch_px(ts: u64, batch_open_ts: u64, clearing_price: u128) -> BatchClearedEvent {
+    tbatch(ts, batch_open_ts, Some(clearing_price), 0, 0, 0.0, 0, None, None, NO_SCHED, 0)
+}
+
+/// Print a checklist section and return whether every case passed.
+pub fn print_checklist(engine_label: &str, cases: &[TestCase]) -> bool {
     let rule = "==========================================================================".cyan();
     println!("\n{rule}");
-    println!("{}", format!("                       {engine_label} ENGINE TEST CHECKLIST                      ").cyan().bold());
+    println!("{}", format!("                       {engine_label} TEST CHECKLIST                      ").cyan().bold());
     println!("{rule}");
 
     for c in cases {
@@ -85,11 +203,13 @@ pub fn print_checklist(engine_label: &str, cases: &[TestCase]) {
     let total = cases.len();
     println!("--------------------------------------------------------------------------");
     if passed == total {
-        println!("{}", format!("  RESULT: {passed}/{total} passed — {engine_label} engine OK").green().bold());
+        println!("{}", format!("  RESULT: {passed}/{total} passed — {engine_label} OK").green().bold());
     } else {
         println!("{}", format!("  RESULT: {passed}/{total} passed — {} case(s) FAILING", total - passed).red().bold());
     }
     println!("{rule}\n");
+
+    passed == total
 }
 
 // ============================================================================
@@ -718,5 +838,358 @@ fn fba_tie_with_history_picks_closest_price() -> TestCase {
         "fba_tie_with_history_picks_closest_price",
         ok,
         format!("price={} (expected 100, vs. 90 with no history)", result.clearing_price),
+    )
+}
+
+// ============================================================================
+// Time-series metric catalogue (metrics::timeseries::MetricsRecorder)
+// ============================================================================
+//
+// A separate code path from the engine getters above: these drive the
+// streaming aggregator `simulate` uses, with hand-built events, and check each
+// of the ~32 CSV columns against an independently hand-computed value. Uses
+// `finish` (not the `#[cfg(test)]`-only `finalize`) so it runs in the release
+// binary / the container.
+
+pub fn run_timeseries_metric_tests() -> Vec<TestCase> {
+    vec![
+        ts_cda_liquidity_and_book_metrics(),
+        ts_cda_effective_realized_impact(),
+        ts_cda_volatility_and_amihud(),
+        ts_cda_execution_allocation(),
+        ts_cda_kyle_lambda_known_slope(),
+        ts_fba_batch_liquidity_metrics(),
+        ts_fba_effective_realized_impact(),
+        ts_fba_kyle_lambda_net_order_flow(),
+    ]
+}
+
+/// Book-derived liquidity columns: quoted spread, depth-at-best, depth bands,
+/// imbalance, whole-book depth, plus the wall-clock instrumentation columns
+/// (deterministic here because `compute_time` is hand-set).
+fn ts_cda_liquidity_and_book_metrics() -> TestCase {
+    let mut rec = MetricsRecorder::new(EngineKind::Cda, TS_W);
+    rec.set_anchor(0);
+    let messages = vec![
+        tmsg(1, 1, "m", Side::Buy, None, 1),
+        tmsg(2, 2, "m", Side::Buy, None, 1),
+        tmsg(3, 3, "m", Side::Buy, None, 1),
+    ];
+    // S1: bid 100 / ask 102, touch 8/12, book 40/60, bands (5,7)/(20,25)/(40,60), 200us
+    rec.record_book_snapshot(tbook(1, Some(100), Some(102), 8, 12, 40, 60, [(5, 7), (20, 25), (40, 60)], 200));
+    // S2: bid 100 / ask 104, touch 10/10, book 50/50, bands (6,6)/(20,20)/(55,45), 400us
+    rec.record_book_snapshot(tbook(2, Some(100), Some(104), 10, 10, 50, 50, [(6, 6), (20, 20), (55, 45)], 400));
+    let series = rec.finish(&messages, 3);
+    if series.len() != 1 {
+        return check("ts_cda_liquidity_and_book_metrics", false, format!("expected 1 row, got {}", series.len()));
+    }
+    let r = &series[0];
+    // spread: (2/101 + 4/102)/2 * 1e4 = 295.088332 bps
+    // depth_at_best: ((8+12)/2 + (10+10)/2)/2 = 10 ; imbalance: (-0.2 + 0)/2 = -0.1
+    // total_book_depth: (50 + 50)/2 = 50
+    // d10 = (6 + 6)/2 = 6 ; d50 = (22.5 + 20)/2 = 21.25 ; d100 = (50 + 50)/2 = 50
+    // latency = (200 + 400)/2 = 300 us ; throughput = 3 msgs / 0.0006 s = 5000
+    // fill_rate = 0 filled / 3 orig = 0
+    let ok = r.quoted_spread_bps.is_some_and(|v| approx_eq(v, 295.088332))
+        && r.depth_at_best.is_some_and(|v| approx_eq(v, 10.0))
+        && r.book_imbalance.is_some_and(|v| approx_eq(v, -0.1))
+        && r.total_book_depth.is_some_and(|v| approx_eq(v, 50.0))
+        && r.depth_within_bps[0].is_some_and(|v| approx_eq(v, 6.0))
+        && r.depth_within_bps[1].is_some_and(|v| approx_eq(v, 21.25))
+        && r.depth_within_bps[2].is_some_and(|v| approx_eq(v, 50.0))
+        && r.avg_clearing_latency_micros.is_some_and(|v| approx_eq(v, 300.0))
+        && r.throughput_orders_per_sec.is_some_and(|v| approx_eq(v, 5000.0))
+        && r.fill_rate.is_some_and(|v| approx_eq(v, 0.0));
+    check(
+        "ts_cda_liquidity_and_book_metrics",
+        ok,
+        format!(
+            "spread={:?} depth={:?} imb={:?} total={:?} d={:?}/{:?}/{:?} lat={:?} tput={:?} fill={:?}",
+            r.quoted_spread_bps, r.depth_at_best, r.book_imbalance, r.total_book_depth,
+            r.depth_within_bps[0], r.depth_within_bps[1], r.depth_within_bps[2],
+            r.avg_clearing_latency_micros, r.throughput_orders_per_sec, r.fill_rate
+        ),
+    )
+}
+
+/// The spread-decomposition columns (effective / realized / price impact at
+/// 1/5/30 s) plus volume, notional, VWAP, trade count, trader surplus,
+/// relative price dispersion, order-to-trade ratio — all in one CDA bucket.
+fn ts_cda_effective_realized_impact() -> TestCase {
+    let p = |x: u128| x * PRICE_SCALE;
+    let mut rec = MetricsRecorder::new(EngineKind::Cda, TS_WIDE);
+    rec.set_anchor(0);
+    let messages = vec![
+        tmsg(500_000, 10, "u", Side::Buy, Some(p(102)), 4),
+        tmsg(500_000, 20, "u", Side::Sell, Some(p(100)), 4),
+        tmsg(500_000, 11, "u", Side::Buy, Some(p(104)), 6),
+        tmsg(500_000, 21, "u", Side::Sell, Some(p(100)), 6),
+    ];
+    // Two buyer-initiated trades, pre-trade mid p(100).
+    rec.record_trade(tcda_trade(1_000_000, p(101), 4, 10, 20, Some(p(100)), Some(Side::Buy)));
+    rec.record_trade(tcda_trade(2_000_000, p(103), 6, 11, 21, Some(p(100)), Some(Side::Buy)));
+    // Forward mids at +1 s / +5 s / +30 s (first series point at/after each target).
+    rec.record_book_snapshot(tbook_px(1_500_000_000, p(100)));
+    rec.record_book_snapshot(tbook_px(5_500_000_000, p(101)));
+    rec.record_book_snapshot(tbook_px(30_500_000_000, p(98)));
+    let series = rec.finish(&messages, 30_500_000_000);
+    if series.len() != 1 {
+        return check("ts_cda_effective_realized_impact", false, format!("expected 1 row, got {}", series.len()));
+    }
+    let r = &series[0];
+    // effective: (200*4 + 600*6)/10 = 440
+    // realized_1s (mid p100): (200*4 + 600*6)/10 = 440 -> impact_1s = 0
+    // realized_5s (mid p101): (0*4 + 400*6)/10 = 240 -> impact_5s = 200
+    // realized_30s (mid p98): (600*4 + 1000*6)/10 = 840 -> impact_30s = -400
+    // executed_volume 10 ; executed_notional 4*p(101)+6*p(103) = 1_022_000_000
+    // vwap = 102_200_000 ; trade_count 2
+    // trader_surplus = 4e6 + 4e6 + 6e6 + 18e6 = 32_000_000
+    // dispersion = stddev([p101,p103])/mean * 1e4 = 1e6 / 102e6 * 1e4 bps
+    // order_to_trade_ratio = 4 msgs / 2 trades = 2
+    let ok = r.effective_spread_bps.is_some_and(|v| approx_eq(v, 440.0))
+        && r.realized_spread_bps_1s.is_some_and(|v| approx_eq(v, 440.0))
+        && r.realized_spread_bps_5s.is_some_and(|v| approx_eq(v, 240.0))
+        && r.realized_spread_bps_30s.is_some_and(|v| approx_eq(v, 840.0))
+        && r.price_impact_bps_1s.is_some_and(|v| approx_eq(v, 0.0))
+        && r.price_impact_bps_5s.is_some_and(|v| approx_eq(v, 200.0))
+        && r.price_impact_bps_30s.is_some_and(|v| approx_eq(v, -400.0))
+        && r.executed_volume == 10.0
+        && approx_rel(r.executed_notional, 1_022_000_000.0)
+        && r.vwap.is_some_and(|v| approx_rel(v, 102_200_000.0))
+        && r.trade_count == 2
+        && approx_rel(r.trader_surplus, 32_000_000.0)
+        && r.intra_interval_price_dispersion.is_some_and(|v| approx_eq(v, 1.0 / 102.0 * 10_000.0))
+        && r.order_to_trade_ratio.is_some_and(|v| approx_eq(v, 2.0));
+    check(
+        "ts_cda_effective_realized_impact",
+        ok,
+        format!(
+            "eff={:?} rs={:?}/{:?}/{:?} pi={:?}/{:?}/{:?} vol={} notio={} vwap={:?} tc={} surplus={} disp={:?} otr={:?}",
+            r.effective_spread_bps,
+            r.realized_spread_bps_1s, r.realized_spread_bps_5s, r.realized_spread_bps_30s,
+            r.price_impact_bps_1s, r.price_impact_bps_5s, r.price_impact_bps_30s,
+            r.executed_volume, r.executed_notional, r.vwap, r.trade_count, r.trader_surplus,
+            r.intra_interval_price_dispersion, r.order_to_trade_ratio
+        ),
+    )
+}
+
+/// `realized_volatility` (root-sum-of-squared returns) and
+/// `amihud_illiquidity` (|return| per DOLLAR volume, carried across buckets).
+fn ts_cda_volatility_and_amihud() -> TestCase {
+    let p = |x: u128| x * PRICE_SCALE;
+    let mut rec = MetricsRecorder::new(EngineKind::Cda, TS_W);
+    rec.set_anchor(0);
+    // Bucket 0: three mids -> returns +0.2 and -0.2 ; close p(96).
+    rec.record_book_snapshot(tbook_px(1_000_000, p(100)));
+    rec.record_book_snapshot(tbook_px(2_000_000, p(120)));
+    rec.record_book_snapshot(tbook_px(3_000_000, p(96)));
+    // Bucket 1: close p(120) and a trade of 5 @ p(200) -> dollar volume 1000.
+    rec.record_book_snapshot(tbook_px(1_500_000_000, p(120)));
+    rec.record_trade(tcda_trade(1_001_000_000, p(200), 5, 900, 901, None, None));
+    let series = rec.finish(&[], 1_500_000_000);
+    if series.len() != 2 {
+        return check("ts_cda_volatility_and_amihud", false, format!("expected 2 rows, got {}", series.len()));
+    }
+    // row 0: rv = sqrt(0.2^2 + 0.2^2) = sqrt(0.08) ; amihud None (no prev close)
+    // row 1: ret (p120 from p96) = 0.25 ; dollar vol = 5*200 = 1000
+    //        amihud = 0.25 / 1000 * 1e6 = 250 (ILLIQ x 1e6)
+    let ok = series[0].realized_volatility.is_some_and(|v| approx_eq(v, 0.08_f64.sqrt()))
+        && series[0].amihud_illiquidity.is_none()
+        && series[1].amihud_illiquidity.is_some_and(|v| approx_eq(v, 250.0))
+        && series[1].executed_volume == 5.0
+        && series[1].trade_count == 1;
+    check(
+        "ts_cda_volatility_and_amihud",
+        ok,
+        format!(
+            "rv0={:?} amihud0={:?} amihud1={:?} vol1={} tc1={}",
+            series[0].realized_volatility, series[0].amihud_illiquidity, series[1].amihud_illiquidity,
+            series[1].executed_volume, series[1].trade_count
+        ),
+    )
+}
+
+/// Allocation columns bucketed by each order's own submission time:
+/// `fill_rate`, `avg_time_to_execution_secs`, `order_size_inflation`.
+fn ts_cda_execution_allocation() -> TestCase {
+    let mut rec = MetricsRecorder::new(EngineKind::Cda, TS_WIDE);
+    rec.set_anchor(0);
+    let messages = vec![
+        tmsg(0, 1, "Whale", Side::Buy, Some(100), 10),
+        tmsg(0, 2, "Whale", Side::Buy, Some(100), 10), // never fills
+        tmsg(1_000_000, 3, "Minnow", Side::Buy, Some(100), 4),
+    ];
+    rec.record_trade(tcda_trade(500_000_000, 100, 6, 1, 900, None, None)); // fills oid 1: 6 of 10
+    rec.record_trade(tcda_trade(1_500_000_000, 100, 4, 3, 901, None, None)); // fills oid 3: 4 of 4
+    let series = rec.finish(&messages, 1_500_000_000);
+    if series.len() != 1 {
+        return check("ts_cda_execution_allocation", false, format!("expected 1 row, got {}", series.len()));
+    }
+    let r = &series[0];
+    // fill_rate = (6 + 0 + 4) / (10 + 10 + 4) = 10/24
+    // ttf: oid1 0.5 s ; oid3 (1_500_000_000 - 1_000_000)/1e9 = 1.499 s ; mean 0.9995
+    // inflation: Whale 20/6 ; Minnow 4/4 = 1 ; mean (20/6 + 1)/2
+    // order_to_trade_ratio = 3 msgs / 2 trades = 1.5
+    let ok = r.fill_rate.is_some_and(|v| approx_eq(v, 10.0 / 24.0))
+        && r.avg_time_to_execution_secs.is_some_and(|v| approx_eq(v, 0.9995))
+        && r.order_size_inflation.is_some_and(|v| approx_eq(v, (20.0 / 6.0 + 1.0) / 2.0))
+        && r.order_to_trade_ratio.is_some_and(|v| approx_eq(v, 1.5));
+    check(
+        "ts_cda_execution_allocation",
+        ok,
+        format!(
+            "fill_rate={:?} ttf={:?} inflation={:?} otr={:?}",
+            r.fill_rate, r.avg_time_to_execution_secs, r.order_size_inflation, r.order_to_trade_ratio
+        ),
+    )
+}
+
+/// CDA `kyle_lambda`: OLS-through-origin slope of the +5 s relative mid move
+/// (bps) on signed sweep flow (SOL). Mirrors the `timeseries.rs` unit test.
+fn ts_cda_kyle_lambda_known_slope() -> TestCase {
+    let pre = 1_000_000u128;
+    let lambda = 2.0;
+    let post = |x: i128| -> u128 { (pre as f64 * (1.0 + lambda * x as f64 / 10_000.0)).round() as u128 };
+    let mut rec = MetricsRecorder::new(EngineKind::Cda, 10 * TS_W);
+    rec.set_anchor(0);
+    // Obs 1: net +5.
+    rec.record_trade(tcda_trade(1_000_000, pre, 5, 1, 2, Some(pre), Some(Side::Buy)));
+    rec.record_book_snapshot(tbook_px(1_000_000 + 5 * TS_W, post(5)));
+    // Obs 2: net -3.
+    rec.record_trade(tcda_trade(2_000_000, pre, 3, 3, 4, Some(pre), Some(Side::Sell)));
+    rec.record_book_snapshot(tbook_px(2_000_000 + 5 * TS_W, post(-3)));
+    // Obs 3: same-ts sweep, net +5.
+    rec.record_trade(tcda_trade(3_000_000, pre, 2, 5, 6, Some(pre), Some(Side::Buy)));
+    rec.record_trade(tcda_trade(3_000_000, pre, 3, 7, 8, Some(pre), Some(Side::Buy)));
+    rec.record_book_snapshot(tbook_px(3_000_000 + 5 * TS_W, post(5)));
+    // Obs 4: net-zero sweep, inert.
+    rec.record_trade(tcda_trade(4_000_000, pre, 3, 9, 10, Some(pre), Some(Side::Buy)));
+    rec.record_trade(tcda_trade(4_000_000, pre, 3, 11, 12, Some(pre), Some(Side::Sell)));
+    let series = rec.finish(&[], 3_000_000 + 5 * TS_W);
+    if series.len() != 1 {
+        return check("ts_cda_kyle_lambda_known_slope", false, format!("expected 1 row, got {}", series.len()));
+    }
+    // Sxx = 25 + 9 + 25 = 59 ; Sxy = 50 + 18 + 50 = 118 ; lambda = 2.0
+    let ok = series[0].kyle_lambda.is_some_and(|v| (v - 2.0).abs() < 1e-9) && series[0].pricing_error_bps.is_none();
+    check(
+        "ts_cda_kyle_lambda_known_slope",
+        ok,
+        format!("kyle_lambda={:?} pricing_error_bps={:?}", series[0].kyle_lambda, series[0].pricing_error_bps),
+    )
+}
+
+/// FBA `BatchClearedEvent`-derived columns: implied quoted spread, depth,
+/// depth bands, residual share, boundary concentration, latency, throughput.
+fn ts_fba_batch_liquidity_metrics() -> TestCase {
+    let mut rec = MetricsRecorder::new(EngineKind::Fba, TS_W);
+    rec.set_anchor(0);
+    let messages: Vec<OrderMessage> = [0u64, 50, 95, 100, 150, 195, 200]
+        .iter()
+        .enumerate()
+        .map(|(i, &ts)| tmsg(ts, i as u64 + 1, "m", Side::Buy, None, 1))
+        .collect();
+    // B1: window [0,100], cleared 100, demand/supply 30/20, unexec 10, book 98/103.
+    rec.record_batch(tbatch(100, 0, Some(100), 30, 20, 0.0, 10, Some(98), Some(103), [(4, 6), (10, 14), (30, 20)], 600));
+    // B2: window [100,200], cleared 100, demand/supply 10/25, unexec 15, book 99/101.
+    rec.record_batch(tbatch(200, 100, Some(100), 10, 25, 0.0, 15, Some(99), Some(101), [(6, 4), (12, 12), (10, 25)], 800));
+    let series = rec.finish(&messages, 200);
+    if series.len() != 1 {
+        return check("ts_fba_batch_liquidity_metrics", false, format!("expected 1 row, got {}", series.len()));
+    }
+    let r = &series[0];
+    // spread: ((103-98)/100 + (101-99)/100)/2 * 1e4 = (500 + 200)/2 = 350
+    // depth_at_best: ((30+20)/2 + (10+25)/2)/2 = (25 + 17.5)/2 = 21.25
+    // d10 = (5 + 5)/2 = 5 ; d50 = (12 + 12)/2 = 12 ; d100 = (25 + 17.5)/2 = 21.25
+    // residual = (10 + 15) / (30 + 25) = 25/55
+    // boundary_concentration: B1 {95,100}/{0,50,95,100} + B2 {195,200}/{100,150,195,200}
+    //                         = (2 + 2) / (4 + 4) = 0.5
+    // latency = (600 + 800)/2 = 700 us ; throughput = 7 msgs / 0.0014 s = 5000
+    let ok = r.quoted_spread_bps.is_some_and(|v| approx_eq(v, 350.0))
+        && r.depth_at_best.is_some_and(|v| approx_eq(v, 21.25))
+        && r.depth_within_bps[0].is_some_and(|v| approx_eq(v, 5.0))
+        && r.depth_within_bps[1].is_some_and(|v| approx_eq(v, 12.0))
+        && r.depth_within_bps[2].is_some_and(|v| approx_eq(v, 21.25))
+        && r.unexecuted_residual_share.is_some_and(|v| approx_eq(v, 25.0 / 55.0))
+        && r.boundary_concentration.is_some_and(|v| approx_eq(v, 0.5))
+        && r.avg_clearing_latency_micros.is_some_and(|v| approx_eq(v, 700.0))
+        && r.throughput_orders_per_sec.is_some_and(|v| approx_eq(v, 5000.0));
+    check(
+        "ts_fba_batch_liquidity_metrics",
+        ok,
+        format!(
+            "spread={:?} depth={:?} d={:?}/{:?}/{:?} residual={:?} boundary={:?} lat={:?} tput={:?}",
+            r.quoted_spread_bps, r.depth_at_best,
+            r.depth_within_bps[0], r.depth_within_bps[1], r.depth_within_bps[2],
+            r.unexecuted_residual_share, r.boundary_concentration,
+            r.avg_clearing_latency_micros, r.throughput_orders_per_sec
+        ),
+    )
+}
+
+/// FBA spread decomposition — exercises the unsigned (`aggressor_side: None`)
+/// branch of `deviation_bps` / the realized-spread markout.
+fn ts_fba_effective_realized_impact() -> TestCase {
+    let mut rec = MetricsRecorder::new(EngineKind::Fba, TS_WIDE);
+    rec.set_anchor(0);
+    rec.record_trade(tfba_trade(1_000_000, 102, 10, 1, 2, Some(100)));
+    // Forward clearing prices at +1 s / +5 s / +30 s.
+    rec.record_batch(tbatch_px(1_500_000_000, 0, 100));
+    rec.record_batch(tbatch_px(5_500_000_000, 0, 105));
+    rec.record_batch(tbatch_px(30_500_000_000, 0, 97));
+    let series = rec.finish(&[], 30_500_000_000);
+    if series.len() != 1 {
+        return check("ts_fba_effective_realized_impact", false, format!("expected 1 row, got {}", series.len()));
+    }
+    let r = &series[0];
+    // unsigned: eff = 2*|102-100|/100 * 1e4 = 400
+    // realized_1s (cp 100) = 400 -> impact_1s = 0
+    // realized_5s (cp 105) = 2*|102-105|/100 * 1e4 = 600 -> impact_5s = -200
+    // realized_30s (cp 97) = 2*|102-97|/100 * 1e4 = 1000 -> impact_30s = -600
+    let ok = r.effective_spread_bps.is_some_and(|v| approx_eq(v, 400.0))
+        && r.realized_spread_bps_1s.is_some_and(|v| approx_eq(v, 400.0))
+        && r.realized_spread_bps_5s.is_some_and(|v| approx_eq(v, 600.0))
+        && r.realized_spread_bps_30s.is_some_and(|v| approx_eq(v, 1000.0))
+        && r.price_impact_bps_1s.is_some_and(|v| approx_eq(v, 0.0))
+        && r.price_impact_bps_5s.is_some_and(|v| approx_eq(v, -200.0))
+        && r.price_impact_bps_30s.is_some_and(|v| approx_eq(v, -600.0));
+    check(
+        "ts_fba_effective_realized_impact",
+        ok,
+        format!(
+            "eff={:?} rs={:?}/{:?}/{:?} pi={:?}/{:?}/{:?}",
+            r.effective_spread_bps,
+            r.realized_spread_bps_1s, r.realized_spread_bps_5s, r.realized_spread_bps_30s,
+            r.price_impact_bps_1s, r.price_impact_bps_5s, r.price_impact_bps_30s
+        ),
+    )
+}
+
+/// FBA `kyle_lambda`: slope of a priced batch's relative clearing-price move
+/// (bps) on its own pre-selection net order flow (SOL). Mirrors the
+/// `timeseries.rs` unit test; also exercises the unpriced-batch skip.
+fn ts_fba_kyle_lambda_net_order_flow() -> TestCase {
+    let mut rec = MetricsRecorder::new(EngineKind::Fba, TS_WIDE);
+    rec.set_anchor(0);
+    // b0 seeds prev_clearing.
+    rec.record_batch(tbatch(1_000_000, 0, Some(1_000_000), 0, 0, 0.0, 0, None, None, NO_SCHED, 0));
+    // b1: x=8,  y = (1_100_000-1_000_000)/1_000_000 * 1e4 = 1000
+    rec.record_batch(tbatch(2_000_000, 0, Some(1_100_000), 0, 0, 8.0, 0, None, None, NO_SCHED, 0));
+    // b2: x=-4, y = (1_045_000-1_100_000)/1_100_000 * 1e4 = -500
+    rec.record_batch(tbatch(3_000_000, 0, Some(1_045_000), 0, 0, -4.0, 0, None, None, NO_SCHED, 0));
+    // b3: unpriced -> inert, does not advance the carry.
+    rec.record_batch(tbatch(4_000_000, 0, None, 0, 0, 99.0, 0, None, None, NO_SCHED, 0));
+    // b4: x=2,  y = (1_071_125-1_045_000)/1_045_000 * 1e4 = 250
+    rec.record_batch(tbatch(5_000_000, 0, Some(1_071_125), 0, 0, 2.0, 0, None, None, NO_SCHED, 0));
+    let series = rec.finish(&[], 5_000_000);
+    if series.len() != 1 {
+        return check("ts_fba_kyle_lambda_net_order_flow", false, format!("expected 1 row, got {}", series.len()));
+    }
+    // Sxx = 64 + 16 + 4 = 84 ; Sxy = 8000 + 2000 + 500 = 10500 ; lambda = 125.0
+    let ok = series[0].kyle_lambda.is_some_and(|v| (v - 125.0).abs() < 1e-6) && series[0].pricing_error_bps.is_none();
+    check(
+        "ts_fba_kyle_lambda_net_order_flow",
+        ok,
+        format!("kyle_lambda={:?} pricing_error_bps={:?}", series[0].kyle_lambda, series[0].pricing_error_bps),
     )
 }

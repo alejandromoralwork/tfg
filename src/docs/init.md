@@ -46,7 +46,12 @@ With arguments, the binary runs one command and exits with its status
 
 ```
 .\target\release\market_sim.exe simulate data\sample\order_statuses\20251201 1
+.\target\release\market_sim.exe test engine all      # every built-in checklist; exits 0/1
 ```
+
+`test engine <continuous|cda|batch|fba|metrics|all>` runs the built-in
+behaviour + metric-catalogue checklists with no Rust toolchain needed — handy
+for a smoke test inside the container image.
 
 For Docker + Google Cloud Batch, see [`DEPLOY.md`](DEPLOY.md).
 

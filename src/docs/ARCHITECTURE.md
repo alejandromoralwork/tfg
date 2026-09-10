@@ -267,14 +267,21 @@ locked `.exe`.
 
 ### 2.14 `inputs/test_suite.rs`
 
-A deterministic behavioural checklist for both engines, runnable at runtime
-via `test engine <continuous|batch>` (so it works without a Rust toolchain).
-Each case builds a fresh isolated book and hand-designed orders (explicit
+Deterministic checklists runnable at runtime via
+`test engine <continuous|cda|batch|fba|metrics|all>` (interactively or as an
+argv command, so they work without a Rust toolchain — `all` exits `0`/`1`).
+Every case builds fresh isolated state and hand-designed events (explicit
 ids/timestamps, never wall-clock) and asserts against an independently
-hand-computed expectation — crossing/resting/partial-fill/price-time
-priority, market orders, non-live filtering, cancellation replay (and the
-deliberate non-replay of `filled`), and a hand-computed metrics scenario per
-engine.
+hand-computed expectation:
+- `run_cda_tests` / `run_fba_tests` — the engine getters: crossing / resting /
+  partial fill / price-time priority, market orders, non-live filtering,
+  cancellation replay (and the deliberate non-replay of `filled`), plus a
+  hand-computed metrics scenario per engine.
+- `run_timeseries_metric_tests` — the *streaming* pipeline: drives
+  `metrics::timeseries::MetricsRecorder` with synthetic
+  `OrderMessage`/`TradeEvent`/`BatchClearedEvent`/`BookSnapshot`s and checks
+  every one of the ~32 CSV columns against a worked value (a different code
+  path from the engine getters above).
 
 ### 2.15 `metrics/mod.rs` / `metrics/stats.rs`
 
@@ -478,10 +485,10 @@ noted. RQ column maps to `docs/expose.tex`.
 | `effective_spread_bps` | U | 2.1 | Quantity-weighted `2·D·(p−m)/m·1e4`, `m` = pre-trade midpoint, `D` = aggressor sign (unsigned for FBA). |
 | `realized_spread_bps_{1,5,30}s` | U | 2.1 | Same, but vs the midpoint `Δ` seconds *after* the trade — the part the liquidity provider keeps. |
 | `price_impact_bps_{1,5,30}s` | U | 2.1 | `effective_spread_bps − realized_spread_bps_Δs` — the adverse-selection component. |
-| `amihud_illiquidity` | U | 2.1 | `|(close − prev_close)/prev_close| / executed_volume`, `prev_close` carried across intervals. |
+| `amihud_illiquidity` | U | 2.1 | `|(close − prev_close)/prev_close| / dollar_volume · 1e6`, where `dollar_volume = executed_notional / PRICE_SCALE` — the canonical Amihud (2002) measure (per-currency, not per-SOL), reported ×10⁶ per the standard convention. `prev_close` carried across intervals. |
 | `kyle_lambda` | U | 2.1 | **Price-impact slope, bps per SOL** (see §5.1). NOT PRICE_SCALE-denominated. |
-| `realized_volatility` | U | 2.2 | Population stddev of consecutive reference-price returns within the interval. |
-| `intra_interval_price_dispersion` | U | 2.2 | Population stddev of trade prices within the interval. Zero by construction for FBA. |
+| `realized_volatility` | U | 2.2 | `sqrt(Σ r²)` over the interval's consecutive reference-price returns (the realized-variance estimator). A single return in the interval yields `|r|`. |
+| `intra_interval_price_dispersion` | U | 2.2 | `stddev(trade prices) / mean(trade prices) · 1e4` — relative, in bps. ~0 by construction for FBA (one clearing price per batch). |
 | `pricing_error_bps` | X | 2.2 | Always empty — needs an external oracle/mark-price feed the dataset lacks. Kept as a visible gap. |
 | `executed_volume`, `executed_notional` | U | 2.3 | Σ trade quantity, Σ `quantity·price` (raw PRICE_SCALE). |
 | `vwap` | U | 2.3 | `executed_notional / executed_volume`. |
@@ -492,8 +499,8 @@ noted. RQ column maps to `docs/expose.tex`.
 | `order_size_inflation` | U | 2.3 | Mean per-user `orig/filled` over users with some fill — over-sizing relative to what executes. |
 | `order_to_trade_ratio` | U | 2.3 | Messages / trades in the interval. |
 | `boundary_concentration` | F | 2.3 | Share of order arrivals in the final 10% of each batch's window. |
-| `throughput_orders_per_sec` | U | 2.3 | Messages / Σ engine compute time. **Wall-clock; non-deterministic.** |
-| `avg_clearing_latency_micros` | U | 2.3 | Mean per-event engine compute time. **Wall-clock; non-deterministic.** |
+| `throughput_orders_per_sec` | U | 2.3 | *All* messages (incl. rejected) / Σ measured engine compute time (`submit`/`clear` only). **Wall-clock; non-deterministic**, and the numerator/denominator populations don't match — a rough gauge, not a precise rate. |
+| `avg_clearing_latency_micros` | U | 2.3 | Mean per-event engine compute time — per `submit` for CDA, per `clear` for FBA (the two are not the same operation). **Wall-clock; non-deterministic.** |
 | `unexecuted_residual_share` | F | 2.3 | `|demand − supply| / max(demand, supply)` from the batch clear. |
 
 ### 5.1 `kyle_lambda` in detail
@@ -540,17 +547,24 @@ Inside the REPL:
 simulate data/sample/order_statuses/20251201 1     # replay the bundled 1-hour sample
 scan sol                                            # count records without running the engines
 download sol                                        # fetch + extract the SOL archive from Zenodo
-test engine batch                                   # run the FBA behavioural checklist
+test engine batch                                   # FBA matching-behaviour checklist
+test engine metrics                                 # time-series metric catalogue checklist
+test engine all                                     # every checklist
 ```
 
 `market_sim` also takes the same commands as **arguments** for scripting /
 containers — `market_sim simulate sol 1` runs that one command and exits with
 its status (`0` ok, `1` run-time failure, `2` bad request). No arguments →
-the REPL. See [`DEPLOY.md`](DEPLOY.md) for the Docker image and the Google
-Cloud Batch job spec.
+the REPL. `market_sim test engine <continuous|cda|batch|fba|metrics|all>` works
+this way too, exiting `0` if every checklist case passed and `1` otherwise — so
+the checklists can be run inside the Docker image with no Rust toolchain. See
+[`DEPLOY.md`](DEPLOY.md) for the image and the Google Cloud Batch job spec.
 
-`test_suite.rs`'s cases run via `test engine …`, not `cargo test`. The
-`#[ignore]`d tests (`streams_the_real_sample_gz_file_correctly`,
+`test_suite.rs`'s cases run via `test engine …` (interactively or as an argv
+command), not `cargo test`. `run_cda_tests` / `run_fba_tests` check the engine
+getters; `run_timeseries_metric_tests` drives `metrics::timeseries::MetricsRecorder`
+directly and checks every CSV column against a hand-computed value. The
+`#[ignore]`d `cargo test` cases (`streams_the_real_sample_gz_file_correctly`,
 `scan_reproduces_known_totals_for_the_real_sample_data`,
 `extract_archive_produces_the_expected_files`) need `data/sample/` or network
 access.
@@ -571,9 +585,22 @@ access.
   persisted).
 - **`throughput_orders_per_sec` / `avg_clearing_latency_micros`** measure
   wall-clock engine cost and are non-deterministic between runs and machines.
-- **`kyle_lambda`** — the CDA 5s horizon and sweep grouping are choices; the
-  FBA construction (contemporaneous on pre-selection net order flow) differs
-  from the CDA one, and the near-zero FBA result is inherent to the auction's
-  price-selection rule, not noise.
+  `throughput`'s numerator counts every message (incl. rejected) but its
+  denominator only sums the measured `submit`/`clear` time, so the two
+  populations don't line up; `avg_clearing_latency_micros` is per-`submit` for
+  CDA but per-`clear` for FBA under one column name.
+- **`price_impact_bps_Δ = effective_spread_bps − realized_spread_bps_Δ`** is
+  formed from two separately quantity-weighted trade populations; they can
+  differ for trades near the end of the retained window. Harmless in a real run
+  — the 35 s `MARKOUT_GUARD_SECS` flush guarantees every flushed bucket's
+  ≤30 s markouts already exist.
+- **`kyle_lambda`** — the CDA 5s horizon and sweep grouping are choices (a
+  multi-level sweep is one regression observation, though `trade_count` counts
+  it as several); the FBA construction (contemporaneous on pre-selection net
+  order flow) differs from the CDA one, and the near-zero FBA result is
+  inherent to the auction's price-selection rule, not noise.
+- The `metrics::timeseries` catalogue is checked column-by-column against
+  hand-computed values by `test engine metrics` (`inputs/test_suite.rs`), which
+  also runs as an argv command in the container.
 - **Not built:** the "implementation shortfall of standardized probe orders"
   and the "simulated latency arbitrageur" metrics from RQ2.1 / RQ2.3.

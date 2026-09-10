@@ -20,7 +20,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
-use crate::types::{EngineKind, Side, Trade};
+use crate::types::{EngineKind, Side, Trade, PRICE_SCALE};
 
 /// Basis-point offsets the depth-within-x-bps metric is reported at.
 pub const DEPTH_BPS_THRESHOLDS: [u32; 3] = [10, 50, 100];
@@ -682,8 +682,14 @@ impl MetricsRecorder {
         }
 
         for (b, prices) in &bucket_trade_prices {
+            // Relative dispersion (coefficient of variation), reported in bps,
+            // so it's scale-free and comparable across price regimes / coins —
+            // an absolute stddev of PRICE_SCALE prices was level-dependent.
+            // ~0 for FBA by construction (one clearing price per batch).
+            let m = mean(prices);
+            let disp = if m > 0.0 { stddev(prices) / m * 10_000.0 } else { 0.0 };
             let entry = buckets.get_mut(b).unwrap();
-            entry.intra_interval_price_dispersion = Some(stddev(prices));
+            entry.intra_interval_price_dispersion = Some(disp);
         }
 
         // ---- CDA Kyle's lambda: OLS slope through the origin of the
@@ -747,7 +753,12 @@ impl MetricsRecorder {
             if points.len() >= 2 {
                 let returns: Vec<f64> = points.windows(2).filter(|w| w[0] > 0.0).map(|w| (w[1] - w[0]) / w[0]).collect();
                 if !returns.is_empty() {
-                    buckets.get_mut(b).unwrap().realized_volatility = Some(stddev(&returns));
+                    // Realized volatility: root sum of squared intra-bucket
+                    // returns (Andersen/Bollerslev realized-variance estimator),
+                    // NOT the stddev of the returns about their mean. With a
+                    // single return in the bucket this is |r|, not 0.
+                    let rv = returns.iter().map(|r| r * r).sum::<f64>().sqrt();
+                    buckets.get_mut(b).unwrap().realized_volatility = Some(rv);
                 }
             }
         }
@@ -769,8 +780,14 @@ impl MetricsRecorder {
                     if prev > 0.0 {
                         let ret = (close - prev) / prev;
                         let entry = buckets.get_mut(&start).unwrap();
-                        if entry.executed_volume > 0.0 {
-                            entry.amihud_illiquidity = Some(ret.abs() / entry.executed_volume);
+                        // Canonical Amihud (2002): |return| / DOLLAR volume, not
+                        // per-SOL quantity. `executed_notional` is Σ qty·price in
+                        // PRICE_SCALE units, so divide it back to plain currency.
+                        // Reported ×1e6 (`ILLIQ × 10^6`), the standard convention —
+                        // the raw per-dollar value is ~1e-9 on real data.
+                        let dollar_vol = entry.executed_notional / PRICE_SCALE as f64;
+                        if dollar_vol > 0.0 {
+                            entry.amihud_illiquidity = Some(ret.abs() / dollar_vol * 1e6);
                         }
                     }
                 }
@@ -1795,5 +1812,59 @@ mod tests {
             "FBA streaming flush must reproduce the one-shot series exactly"
         );
         assert!(strm_rows.len() as u64 >= seconds, "expected at least one row per second, got {}", strm_rows.len());
+    }
+
+    // ---- fixed-formula value checks (Amihud dollar volume, realized-vol
+    //      estimator, relative dispersion) ----
+
+    #[test]
+    fn realized_volatility_is_root_sum_of_squared_returns() {
+        // Three mids in one bucket -> two returns: +0.1 and -0.1.
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, 10 * W);
+        rec.record_book_snapshot(book(1_000_000, Some(100), Some(100)));
+        rec.record_book_snapshot(book(2_000_000, Some(110), Some(110)));
+        rec.record_book_snapshot(book(3_000_000, Some(99), Some(99)));
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 1);
+        // sqrt(0.1^2 + (-0.1)^2) = sqrt(0.02) — NOT the 0.1 stddev of {0.1,-0.1}.
+        let got = series[0].realized_volatility.expect("rv computable");
+        assert!((got - 0.02_f64.sqrt()).abs() < 1e-9, "rv {got}, expected {}", 0.02_f64.sqrt());
+
+        // A single return in the bucket now reports |r|, not 0.
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, 10 * W);
+        rec.record_book_snapshot(book(1_000_000, Some(100), Some(100)));
+        rec.record_book_snapshot(book(2_000_000, Some(105), Some(105)));
+        let series = rec.finalize(&[]);
+        assert_eq!(series[0].realized_volatility, Some(0.05));
+    }
+
+    #[test]
+    fn amihud_illiquidity_divides_the_return_by_dollar_volume() {
+        let p = |x: u128| x * PRICE_SCALE;
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, W);
+        // Bucket A: one mid -> close p(100), no trades.
+        rec.record_book_snapshot(book(1, Some(p(100)), Some(p(100))));
+        // Bucket B: close p(110) and a trade of 5 @ p(200) -> dollar volume
+        // = 5*200 = 1000 (after dividing notional back out of PRICE_SCALE).
+        rec.record_book_snapshot(book(1_000_000_001, Some(p(110)), Some(p(110))));
+        rec.record_trade(cda_flow(1_000_000_100, Side::Buy, 5, p(200)));
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 2);
+        assert_eq!(series[0].amihud_illiquidity, None, "no prev_close for the first bucket");
+        // |(110-100)/100| / 1000 * 1e6 = 0.1 / 1000 * 1e6 = 100 (ILLIQ x 1e6).
+        let got = series[1].amihud_illiquidity.expect("amihud computable");
+        assert!((got - 100.0).abs() < 1e-6, "amihud {got}, expected 100");
+    }
+
+    #[test]
+    fn intra_interval_price_dispersion_is_relative_in_bps() {
+        let mut rec = MetricsRecorder::new(EngineKind::Cda, 10 * W);
+        rec.record_trade(cda_flow(1_000_000, Side::Buy, 1, 100));
+        rec.record_trade(cda_flow(2_000_000, Side::Buy, 1, 102));
+        let series = rec.finalize(&[]);
+        assert_eq!(series.len(), 1);
+        // stddev({100,102}) = 1.0 ; mean = 101 ; 1/101 * 1e4 bps.
+        let got = series[0].intra_interval_price_dispersion.expect("dispersion computable");
+        assert!((got - (1.0 / 101.0 * 10_000.0)).abs() < 1e-9, "dispersion {got}");
     }
 }

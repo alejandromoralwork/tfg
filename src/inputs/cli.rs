@@ -24,6 +24,17 @@ enum EngineMode {
     Batch,
 }
 
+/// Which checklist(s) `test engine <…>` runs. Separate from `EngineMode`
+/// (which is only for live engine switching) because `Metrics` / `All` don't
+/// map onto a single engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TestTarget {
+    Cda,
+    Fba,
+    Metrics,
+    All,
+}
+
 #[derive(Debug, PartialEq)]
 enum CliCommand {
     // `price: None` means a market order (fills at the resting/eligible
@@ -37,7 +48,7 @@ enum CliCommand {
     Log,
     Metrics,
     Orderbook,
-    TestEngine(EngineMode),
+    TestEngine(TestTarget),
     Load { paths: Vec<String> },
     Simulate { path: String, interval_secs: Option<u64> },
     Scan { path: String },
@@ -110,14 +121,16 @@ impl CliCommand {
             "orderbook" | "ob" => Some(CliCommand::Orderbook),
             "test" => {
                 if parts.len() < 3 || parts[1].to_lowercase() != "engine" {
-                    println!(" Usage: test engine <continuous|batch>");
+                    println!(" Usage: test engine <continuous|cda|batch|fba|metrics|all>");
                     return None;
                 }
                 match parts[2].to_lowercase().as_str() {
-                    "continuous" | "cda" => Some(CliCommand::TestEngine(EngineMode::Continuous)),
-                    "batch" | "fba" => Some(CliCommand::TestEngine(EngineMode::Batch)),
+                    "continuous" | "cda" => Some(CliCommand::TestEngine(TestTarget::Cda)),
+                    "batch" | "fba" => Some(CliCommand::TestEngine(TestTarget::Fba)),
+                    "metrics" => Some(CliCommand::TestEngine(TestTarget::Metrics)),
+                    "all" => Some(CliCommand::TestEngine(TestTarget::All)),
                     _ => {
-                        println!(" Unknown engine type. Choose 'continuous' or 'batch'.");
+                        println!(" Unknown test target. Choose continuous|cda|batch|fba|metrics|all.");
                         None
                     }
                 }
@@ -341,11 +354,13 @@ mod tests {
 
     #[test]
     fn parses_test_engine_command_and_its_aliases() {
-        assert_eq!(CliCommand::parse("test engine continuous"), Some(CliCommand::TestEngine(EngineMode::Continuous)));
-        assert_eq!(CliCommand::parse("test engine cda"), Some(CliCommand::TestEngine(EngineMode::Continuous)));
-        assert_eq!(CliCommand::parse("test engine batch"), Some(CliCommand::TestEngine(EngineMode::Batch)));
-        assert_eq!(CliCommand::parse("test engine fba"), Some(CliCommand::TestEngine(EngineMode::Batch)));
-        assert_eq!(CliCommand::parse("test"), None); // missing "engine <mode>"
+        assert_eq!(CliCommand::parse("test engine continuous"), Some(CliCommand::TestEngine(TestTarget::Cda)));
+        assert_eq!(CliCommand::parse("test engine cda"), Some(CliCommand::TestEngine(TestTarget::Cda)));
+        assert_eq!(CliCommand::parse("test engine batch"), Some(CliCommand::TestEngine(TestTarget::Fba)));
+        assert_eq!(CliCommand::parse("test engine fba"), Some(CliCommand::TestEngine(TestTarget::Fba)));
+        assert_eq!(CliCommand::parse("test engine metrics"), Some(CliCommand::TestEngine(TestTarget::Metrics)));
+        assert_eq!(CliCommand::parse("test engine all"), Some(CliCommand::TestEngine(TestTarget::All)));
+        assert_eq!(CliCommand::parse("test"), None); // missing "engine <target>"
         assert_eq!(CliCommand::parse("test something continuous"), None); // wrong second word
     }
 
@@ -465,14 +480,8 @@ pub fn run() {
                 }
             },
 
-            Some(CliCommand::TestEngine(EngineMode::Continuous)) => {
-                let cases = test_suite::run_cda_tests();
-                test_suite::print_checklist("CDA", &cases);
-            }
-
-            Some(CliCommand::TestEngine(EngineMode::Batch)) => {
-                let cases = test_suite::run_fba_tests();
-                test_suite::print_checklist("FBA", &cases);
+            Some(CliCommand::TestEngine(target)) => {
+                let _ = run_test_target(target);
             }
 
             Some(CliCommand::Load { paths }) => {
@@ -537,8 +546,29 @@ pub fn run() {
 /// GCP Batch job. Dispatches straight from the argv slice (each element is
 /// one token, so a path with spaces is fine); only the batch-shaped commands
 /// are wired up — the interactive ones need the REPL's live order books.
+/// Run the requested `test engine` checklist(s) and return a process exit
+/// code: `0` if every case passed, `1` if any failed. Shared by the REPL
+/// dispatch and the non-interactive `run_once` path.
+fn run_test_target(target: TestTarget) -> i32 {
+    let mut all_ok = true;
+    if matches!(target, TestTarget::Cda | TestTarget::All) {
+        all_ok &= test_suite::print_checklist("CDA ENGINE", &test_suite::run_cda_tests());
+    }
+    if matches!(target, TestTarget::Fba | TestTarget::All) {
+        all_ok &= test_suite::print_checklist("FBA ENGINE", &test_suite::run_fba_tests());
+    }
+    if matches!(target, TestTarget::Metrics | TestTarget::All) {
+        all_ok &= test_suite::print_checklist("TIME-SERIES METRICS", &test_suite::run_timeseries_metric_tests());
+    }
+    if all_ok {
+        0
+    } else {
+        1
+    }
+}
+
 pub fn run_once(args: &[String]) -> i32 {
-    const USAGE: &str = "Non-interactive usage: market_sim <simulate <path|coin> [interval_secs] | scan <path|coin|all> | download <coin|all> | extract <coin|all> | update [branch] | help>";
+    const USAGE: &str = "Non-interactive usage: market_sim <simulate <path|coin> [interval_secs] | scan <path|coin|all> | test engine <continuous|cda|batch|fba|metrics|all> | download <coin|all> | extract <coin|all> | update [branch] | help>";
     let rest: Vec<&str> = args[1..].iter().map(String::as_str).collect();
     match args[0].to_lowercase().as_str() {
         "simulate" => {
@@ -590,7 +620,26 @@ pub fn run_once(args: &[String]) -> i32 {
             print_help();
             0
         }
-        "add" | "engine" | "batch" | "clear" | "log" | "metrics" | "stats" | "orderbook" | "ob" | "load" | "test" => {
+        "test" => {
+            let target = match (rest.first().map(|s| s.to_lowercase()), rest.get(1).map(|s| s.to_lowercase())) {
+                (Some(a), Some(b)) if a == "engine" => match b.as_str() {
+                    "continuous" | "cda" => TestTarget::Cda,
+                    "batch" | "fba" => TestTarget::Fba,
+                    "metrics" => TestTarget::Metrics,
+                    "all" => TestTarget::All,
+                    _ => {
+                        eprintln!("test: unknown target {b:?}. Choose continuous|cda|batch|fba|metrics|all.");
+                        return 2;
+                    }
+                },
+                _ => {
+                    eprintln!("Non-interactive usage: market_sim test engine <continuous|cda|batch|fba|metrics|all>");
+                    return 2;
+                }
+            };
+            run_test_target(target)
+        }
+        "add" | "engine" | "batch" | "clear" | "log" | "metrics" | "stats" | "orderbook" | "ob" | "load" => {
             eprintln!("'{}' is interactive-only — run `market_sim` with no arguments for the prompt.", args[0]);
             2
         }
@@ -624,7 +673,7 @@ fn print_help() {
         ("log", "Audit chronological ledger (combined FBA + CDA executed trades)"),
         ("metrics", "Print core metrics computed so far, for both engines"),
         ("orderbook", "Print the active engine's orderbook state + its own core metrics, in one view"),
-        ("test engine <continuous|batch>", "Run the built-in test checklist against a fresh, isolated instance of that engine"),
+        ("test engine <continuous|cda|batch|fba|metrics|all>", "Run a built-in checklist: an engine's matching behaviour (continuous/batch), the time-series metric catalogue (metrics), or every checklist (all). Also works as an argv command, exiting 0/1"),
         ("help", "Review configuration tools"),
         ("exit", "Safely close terminal stream"),
     ];

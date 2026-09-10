@@ -7,6 +7,9 @@
 #     -v "$PWD/data:/work/data:ro" -v "$PWD/out:/work/output" \
 #     market_sim simulate data/sample/order_statuses/20251201 1
 #
+# Smoke test (no data needed, exits 0 all-pass / 1 any-fail):
+#   docker run --rm market_sim test engine all
+#
 # See src/docs/DEPLOY.md for the Google Cloud Batch job spec.
 
 # ---- build ----------------------------------------------------------------

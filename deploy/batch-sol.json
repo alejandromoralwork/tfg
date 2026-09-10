@@ -1,0 +1,52 @@
+{
+  "taskGroups": [
+    {
+      "taskCount": 1,
+      "taskSpec": {
+        "runnables": [
+          {
+            "container": {
+              "imageUri": "europe-west1-docker.pkg.dev/market-sim-26072001/market-sim/market_sim:v2",
+              "commands": ["simulate", "sol", "1"],
+              "volumes": [
+                "/mnt/disks/data:/work/data:ro",
+                "/mnt/disks/out:/work/output:rw"
+              ]
+            }
+          }
+        ],
+        "volumes": [
+          {
+            "gcs": { "remotePath": "market-sim-26072001-data" },
+            "mountPath": "/mnt/disks/data"
+          },
+          {
+            "gcs": { "remotePath": "market-sim-26072001-output" },
+            "mountPath": "/mnt/disks/out"
+          }
+        ],
+        "computeResource": { "cpuMilli": 4000, "memoryMib": 8192 },
+        "maxRetryCount": 3,
+        "maxRunDuration": "604800s",
+        "lifecyclePolicies": [
+          { "action": "RETRY_TASK", "actionCondition": { "exitCodes": [1, 50001] } }
+        ]
+      }
+    }
+  ],
+
+  "allocationPolicy": {
+    "location": { "allowedLocations": ["regions/europe-west1"] },
+    "instances": [
+      {
+        "policy": {
+          "machineType": "e2-standard-4",
+          "provisioningModel": "STANDARD",
+          "bootDisk": { "sizeGb": 30 }
+        }
+      }
+    ]
+  },
+
+  "logsPolicy": { "destination": "CLOUD_LOGGING" }
+}

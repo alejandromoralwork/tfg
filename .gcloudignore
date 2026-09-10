@@ -1,0 +1,27 @@
+# What `gcloud builds submit` uploads as the build context. If this file is
+# absent, gcloud derives one from .gitignore; when present it is used INSTEAD.
+#
+# NOTE: do not `#!include:.dockerignore` here — that file starts with `*`
+# (exclude everything, then re-include src/), which would drop the Dockerfile
+# itself from the *upload*. Docker's own build special-cases the Dockerfile;
+# the context upload does not. So list the exclusions explicitly and keep the
+# Dockerfile + the crate source.
+
+.git
+.gitignore
+old/
+docs/
+deploy/
+download_data.sh
+*.md
+
+# build artifacts, the multi-GB dataset, prior run output — never needed to compile
+src/target/
+src/data/
+src/output/
+src/.dist/
+src/docs/
+
+**/*.swp
+**/.DS_Store
+**/Thumbs.db
