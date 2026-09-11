@@ -1,0 +1,103 @@
+%=======================================================================
+%  Bachelor Thesis
+%  Frequent Batch Auction Engine: A Design Analysis and
+%  Simulation-Based Comparison against Continuous Trading
+%
+%  Compile with:  latexmk -pdf main.tex
+%             or: pdflatex main && bibtex main && pdflatex main && pdflatex main
+%=======================================================================
+\documentclass[12pt,a4paper,oneside]{report}
+
+
+% --- Font and Language Setup (Compile with XeLaTeX or LuaLaTeX) ---
+\usepackage{fontspec}
+\setmainfont{Arial} % Sets Arial for the whole document 
+
+% --- Page Layout & Margins ---
+\usepackage[a4paper, margin=2.00cm]{geometry} % Exactly 2.00 cm on all sides
+
+% --- Line Spacing & Paragraph Formatting ---
+\usepackage{setspace}
+\onehalfspacing % 1.5 line spacing globally
+
+\usepackage{parskip}
+\setlength{\parindent}{0pt}   % No paragraph indent
+\setlength{\parskip}{6pt}      % 6 pt spacing after paragraphs
+
+% --- Alignment ---
+\usepackage{ragged2e}
+\justifying % Forces main text to be justified
+
+% --- Footnote Customization ---
+\usepackage{footmisc}
+\renewcommand{\footnotelayout}{\fontsize{10pt}{12pt}\selectfont\justifying} 
+% Footnotes: Arial (inherited), 10 pt, and justified
+
+% --- Heading Formatting ---
+\usepackage{titlesec}
+
+% Level 1 Heading: 16pt, Bold, Left-aligned, 12pt before, 12pt after
+\titleformat{\section}
+  {\normalfont\fontsize{16pt}{20pt}\bfseries\RaggedRight}{} {0pt}{}
+\titlespacing*{\section}{0pt}{12pt}{12pt}
+
+% Level 2 Heading: 14pt, Bold, Left-aligned, 12pt before, 6pt after
+\titleformat{\subsection}
+  {\normalfont\fontsize{14pt}{18pt}\bfseries\RaggedRight}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{12pt}{6pt}
+
+% Level 3 Heading: 11pt, Bold, Left-aligned, 12pt before, 6pt after
+\titleformat{\subsubsection}
+  {\normalfont\fontsize{11pt}{14pt}\bfseries\RaggedRight}{}{0pt}{}
+\titlespacing*{\subsubsection}{0pt}{12pt}{6pt}
+
+% --- Table of Contents Setup ---
+\usepackage{tocloft}
+\renewcommand{\cftsecfont}{\normalfont\RaggedRight}
+\renewcommand{\cftsubsecfont}{\normalfont\RaggedRight}
+\renewcommand{\cftsubsubsecfont}{\normalfont\RaggedRight}
+
+% --- Reference List Hanging Indent (1.27 cm) ---
+\newenvironment{myreferences}
+  {\begin{list}{}{
+     \setlength{\leftmargin}{1.27cm}
+     \setlength{\itemindent}{-1.27cm}
+     \setlength{\parsep}{\parskip}
+     \setlength{\itemsep}{6pt}
+   }}
+  {\end{list}}
+
+
+
+\input{preamble}
+
+\begin{document}
+
+%------------------------- FRONT MATTER --------------------------------
+\pagenumbering{roman}
+\input{frontmatter}
+
+%------------------------- BODY ----------------------------------------
+\cleardoublepage
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+\input{chapters/ch1_introduction}
+\input{chapters/ch2_foundations}
+\input{chapters/ch3_design}
+\input{chapters/ch4_simulation}
+\input{chapters/ch5_results}
+\input{chapters/ch6_discussion}
+\input{chapters/ch7_conclusion}
+
+%------------------------- BACK MATTER ---------------------------------
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Bibliography}
+\bibliographystyle{apalike}
+\bibliography{references}
+
+\appendix
+\input{chapters/appendix}
+
+\end{document}

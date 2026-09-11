@@ -1,0 +1,89 @@
+\chapter{Batch Clearing Algorithm}
+\label{app:algorithm}
+
+The clearing routine implements \eqref{eq:demandsupply} and
+\eqref{eq:clearing} by a search over the admissible price grid, followed
+by the tie-break cascade and the rationing step of
+\Cref{sec:rationing}.
+
+\begin{lstlisting}[language=,caption={Batch clearing, single asset
+pair.},label={lst:clearing}]
+INPUT : buys B = {(pi_i, q_i)}, sells S = {(pi_j, q_j)},
+        tick grid P, tie-break cascade C, rationing rule R,
+        reference price p_ref
+OUTPUT: clearing price p*, fills F, residual E
+
+1  candidates <- distinct limit prices in B and S, snapped to P
+2  for each p in candidates:
+3      D(p) <- sum of q_i over buys with pi_i >= p
+4      S(p) <- sum of q_j over sells with pi_j <= p
+5      V(p) <- min(D(p), S(p))
+6  Vmax  <- max over p of V(p)
+7  M     <- { p : V(p) = Vmax }              // maximising set
+8  if Vmax = 0: return (no clearing, all orders roll over)
+9  M     <- argmin over p in M of |D(p) - S(p)|      // cascade 1
+10 if |M| > 1: M <- side of residual imbalance       // cascade 2
+11 if |M| > 1: M <- argmin over p in M of |p - p_ref| // cascade 3
+12 p*    <- unique element of M
+13 fill all buys with pi_i > p* completely            // inframarginal
+14 fill all sells with pi_j < p* completely
+15 marginal <- orders with pi = p* on the long side
+16 allocate Vmax - (filled inframarginal) among marginal using R
+17 E     <- unmatched quantity on the long side
+18 apply time-in-force to E: roll over, or cancel
+19 return (p*, F, E)
+\end{lstlisting}
+
+Steps 1--7 are the line search; the unimodality of $V$ noted in
+\Cref{sec:clearing} guarantees that the maximising set is an interval on
+the grid. Steps 9--11 are the documented tie-break cascade, and step 16
+is the only place where the rationing rule enters, which is why the
+rules of \Cref{tab:rationing} can be swapped without touching the price
+computation.
+
+\chapter{Engine Configuration Parameters}
+\label{app:config}
+
+\begin{table}[htbp]
+\centering
+\caption[Engine configuration parameters]{Configuration parameters of
+the two engines. The baseline column gives the values used in the
+headline comparison of \Cref{ch:results}.}
+\label{tab:config}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.6cm} L p{2.8cm}@{}}
+\toprule
+\textbf{Parameter} & \textbf{Meaning} & \textbf{Baseline}\\
+\midrule
+\texttt{engine}            & CDA or FBA & both, paired\\
+\texttt{tau\_ns}           & Batch interval in nanoseconds & 100\,ms\\
+\texttt{boundary}          & Fixed, randomised, or randomised extension
+& fixed\\
+\texttt{boundary\_seed}    & Seed for randomised closing & n/a\\
+\texttt{rationing}         & Price-time, pro rata, size priority,
+random, hybrid & pro rata\\
+\texttt{hybrid\_kappa}     & Share allocated pro rata under the hybrid
+rule & n/a\\
+\texttt{tie\_break}        & Cascade order for the maximising set &
+imbalance, side, reference\\
+\texttt{residual\_policy}  & Roll over or cancel unmatched remainder &
+roll over\\
+\texttt{self\_match}       & Self-trade prevention policy & cancel
+newest\\
+\texttt{warmup\_ns}        & Lead-in excluded from metrics & 60\,s\\
+\texttt{log\_level}        & Granularity of the structured log & full\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\chapter{Reproducibility}
+\label{app:repro}
+
+Every run writes a log header containing the engine identity, the full
+configuration of \Cref{tab:config}, the input file hash, and the code
+commit hash. Given these, a run is byte-reproducible. The analysis
+pipeline reads only the logs and is shared by both engines, so no metric
+is computed by engine-specific code.
+
+\ph[repository URL, dataset DOI and commit hash to be inserted before
+submission]

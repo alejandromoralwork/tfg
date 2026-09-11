@@ -1,0 +1,458 @@
+\chapter{Simulation Design and Data}
+\label{ch:simulation}
+
+\section{Overall Research Design}
+\label{sec:design}
+
+The thesis uses a two-part mixed-method design. Part~I,
+\Cref{ch:design}, is a conceptual and architectural analysis answering
+RQ1 by theoretical synthesis supported by literature. Part~II, this
+chapter and the next, is a quantitative simulation study answering RQ2.
+
+The two parts are linked in both directions. The design blocks derived
+in Part~I define the parameters that Part~II varies: the batch interval
+sweep operationalises \Cref{sec:interval}, and the rationing rule
+comparison operationalises \Cref{sec:rationing}. In the other direction,
+the measured results feed into the architectural recommendation of
+\Cref{ch:discussion}, and the predictions of \Cref{tab:predictions} that
+the simulation cannot test define the boundary of what that
+recommendation can claim.
+
+The identifying idea of Part~II is simple. A single historical order
+flow is replayed twice, once through a continuous engine and once
+through a batch engine. Everything that could otherwise confound a
+comparison between mechanisms --- the asset, the participant
+population, the information environment, the time period, the
+volatility regime --- is held fixed by construction, because it is
+literally the same event stream. The matching engine is the only
+treatment variable.
+
+\section{Simulation Environment}
+\label{sec:environment}
+
+\subsection{Shared Type System and Matching Interface}
+
+Both engines are implemented in Rust and share one order, trade, and
+book type system, and both implement one common matching interface.
+This is not a stylistic choice. If the two engines had separate order
+representations or separate event loops, any measured difference could
+originate in the representation rather than in the mechanism. A shared
+interface makes the engine substitutable at a single point in the
+harness and makes the claim ``the engine is the only difference''
+verifiable rather than asserted.
+
+\begin{lstlisting}[caption={The shared matching interface. Both engines
+implement the same trait, so the harness is generic over the
+mechanism.},label={lst:trait}]
+pub trait MatchingEngine {
+    /// Submit, modify or cancel. Returns events generated
+    /// immediately (empty for the FBA during accumulation).
+    fn on_event(&mut self, ev: &InboundEvent) -> Vec<EngineEvent>;
+
+    /// Advance the engine clock. The FBA clears here when a
+    /// batch boundary is crossed; the CDA is a no-op.
+    fn on_clock(&mut self, now: Nanos) -> Vec<EngineEvent>;
+
+    /// Snapshot of the current book state for metric computation.
+    fn book_state(&self, pair: PairId) -> BookState;
+
+    /// Engine identity and configuration, written to the log
+    /// header for reproducibility.
+    fn config(&self) -> EngineConfig;
+}
+\end{lstlisting}
+
+\subsection{The Continuous Engine (CDA)}
+
+The continuous engine maintains a price-time priority limit order book
+per asset pair. Each incoming order is matched immediately against the
+opposite side of the book, executing at the resting maker price, and any
+unfilled remainder rests according to its time-in-force. Cancellations
+and modifications are applied in arrival order; a modification that
+increases size or improves price loses time priority, following the
+convention of the venue whose data is replayed.
+
+This engine is the control condition. It is not intended to be a novel
+contribution but a faithful reference implementation, and
+\Cref{sec:validation} describes how its fidelity is checked against the
+trades that the source venue actually produced from the same flow.
+
+\subsection{The Batch Engine (FBA)}
+
+The batch engine buffers all events arriving within an interval $\tau$
+and clears at the end of the interval. Clearing proceeds in the stages
+of \Cref{fig:pipeline}: the accumulated buy and sell schedules are
+constructed as in \eqref{eq:demandsupply}, the volume-maximising price
+is found by a search over the price grid as in \eqref{eq:clearing}, ties
+are resolved by the documented cascade, inframarginal orders are filled
+completely, and the marginal side is rationed by the configured rule
+from \Cref{sec:rationing}.
+
+Volume that cannot be matched at $\clr$ is not executed. It is rolled
+over into the next batch unless its time-in-force says otherwise. No
+external liquidity source, such as an automated market maker, is used to
+fill the residual. This is what keeps the comparison strictly
+like-for-like: both engines can only execute against the order flow that
+was actually submitted, so neither has access to liquidity the other
+lacks.
+
+The engine is configurable along the dimensions derived in
+\Cref{ch:design}: $\tau$, fixed or randomised boundary, rationing rule,
+tie-break cascade, and residual policy. \Cref{sec:experiments} states
+which of these are varied.
+
+\subsection{The Replay Harness}
+
+A shared harness reads the event stream, dispatches each event to the
+engine under test in timestamp order, triggers clock ticks so that the
+FBA's batch boundaries fall where the configuration says they should,
+and writes every order, trade, and book state transition to a structured
+log for offline metric computation. Metrics are never computed inside
+the engine; they are computed from the log by a separate analysis
+pipeline, so that both engines are measured by exactly the same code.
+
+Two properties of the harness matter for the validity of the results.
+It is deterministic: given the same input stream and the same
+configuration, including the seed for any randomised rule, it produces
+byte-identical logs. And it separates simulation time from wall-clock
+time, so that engine throughput and clearing latency can be measured
+without those measurements affecting the simulated market.
+
+\section{Data Source and Data Levels}
+\label{sec:data}
+
+\subsection{The Hyperliquid Level~4 Dataset}
+
+The simulation is fed with the publicly released Hyperliquid Level~4
+order book dataset of \citet{albers2026openbook}, captured directly at a
+non-validating Hyperliquid node and published on Zenodo. Beyond a
+standard L4 feed it also records rejected orders, failed cancellations,
+both counterparties to every trade, and post-trade inventory, all at
+nanosecond precision. Because it is captured at the node rather than
+sampled from periodic snapshots, no book reconstruction step is
+required, which removes a substantial source of error that affects
+studies working from vendor feeds.
+
+Three properties make this dataset the right choice here. Order-by-order
+granularity is the necessary condition for replaying historical flow
+through a different matching engine at all. Participant attribution is
+what makes the allocation and per-participant metrics of RQ2.3
+computable. And nanosecond timestamps are what make interval boundary
+placement meaningful at the millisecond scale of the batch intervals
+tested.
+
+\subsection{The Data-Level Framework}
+
+\Cref{tab:levels} sets out the standard hierarchy of order book data and
+what each level enables. The framework serves two purposes in this
+thesis. It scopes the metric catalogue, since every metric in
+\Cref{sec:metrics} is tagged with the minimum level it requires. And it
+makes the contribution of the dataset explicit by showing which metrics
+would simply be unavailable at a lower level.
+
+\begin{table}[htbp]
+\centering
+\caption[Order book data levels]{The order book data-level hierarchy
+and what each level enables. This thesis works with L4 throughout.}
+\label{tab:levels}
+\small
+\begin{tabularx}{\textwidth}{@{}p{1.0cm} p{4.2cm} L@{}}
+\toprule
+\textbf{Level} & \textbf{Content} & \textbf{What it enables}\\
+\midrule
+L1 & Best bid and offer, last trade & Quoted spread, midpoint series,
+realized volatility, effective spread\\
+L2 & Aggregated depth per price level (the ladder) & Depth at best and
+within $x$ bps, depth curve shape, book imbalance, slippage of a
+hypothetical order\\
+L3 & Order-by-order feed: every add, modify, cancel and execution with
+an order ID and timestamp & Exact book reconstruction, queue position,
+time priority effects, cancellation and order-to-trade ratios,
+arrival-time distribution inside an interval\\
+L4 & L3 plus participant attribution (wallet or account identifier) per
+order and per fill & Per-participant metrics: maker inventory and
+markout PnL, adverse selection by counterparty type, fill distribution
+across participants under a rationing rule, order size inflation, flow
+classification into benign and toxic\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{What the Simulation Observes and What It Proxies}
+
+Because the engines are the author's own, several quantities that are
+unobservable in field data become directly observable here: every
+submitted limit price including those of orders that never execute, the
+exact rationing outcome order by order, the internal clearing state
+including the full demand and supply schedules at every candidate price,
+and the volume left unexecuted after each batch. Field studies must
+infer these or do without them.
+
+What remains unobservable is proxied or modelled instead, and stating
+this explicitly is part of the design:
+
+\begin{itemize}
+  \item \textbf{The true fundamental value} is proxied by Hyperliquid's
+  own oracle and mark price, which is used as the external reference in
+  the pricing error metric.
+  \item \textbf{Hidden liquidity} that was never submitted as a visible
+  order cannot be recovered and is absent from both engines equally.
+  \item \textbf{True participant latency} is not observable; the
+  timestamps record when the node saw the message, not when the
+  participant decided to send it.
+\end{itemize}
+
+The third of these bears on interpretation. Because arrival times are
+those produced under Hyperliquid's own continuous engine, the position
+of an order relative to a simulated batch boundary is an artefact of
+where the boundary was placed, not a choice the participant made. The
+consequences are drawn out in \Cref{sec:testable}.
+
+\section{Experimental Design and Comparability Protocol}
+\label{sec:experiments}
+
+\subsection{Treatment and Controls}
+
+The treatment is the matching engine. The comparability protocol
+enforces that nothing else differs:
+
+\begin{enumerate}
+  \item \textbf{Identical input.} Both runs consume the same event
+  stream, byte for byte, in the same order.
+  \item \textbf{Identical initial state.} Both engines start from an
+  empty book and are warmed up over the same lead-in period, which is
+  excluded from all metric computation.
+  \item \textbf{Identical metric code.} Metrics are computed offline
+  from the logs by one implementation shared by both engines.
+  \item \textbf{Identical treatment of edge cases.} Self-matching,
+  rejected orders, and failed cancellations are handled by the same
+  policy in both engines, documented in the configuration header of
+  every log.
+  \item \textbf{Determinism.} Every run is reproducible from its
+  configuration and seed.
+\end{enumerate}
+
+\subsection{Sample Selection}
+
+The sample is drawn along three dimensions so that results are not an
+artefact of one instrument or one market state:
+
+\begin{itemize}
+  \item \textbf{Instruments:} a liquid major pair and a less liquid pair,
+  since \Cref{sec:interval} predicts that interval length interacts with
+  the volume accumulating per batch.
+  \item \textbf{Sessions:} several full trading days, plus at least one
+  high-volatility episode, since the value of removing latency
+  arbitrage should be state-dependent.
+  \item \textbf{Time of day:} intervals of high and low activity, to
+  separate mechanism effects from activity effects.
+\end{itemize}
+
+\subsection{Parameter Sweeps}
+
+Two sweeps operationalise design blocks from \Cref{ch:design}:
+
+\begin{itemize}
+  \item \textbf{Interval sweep.} $\tau \in \{1, 10, 50, 100, 250, 500,
+  1000\}$ milliseconds, spanning the range from below to well above the
+  latency dispersion the mechanism is meant to neutralise. This sweep
+  tests prediction~P8 and traces the delay-versus-thickness trade-off of
+  \Cref{sec:interval}.
+  \item \textbf{Rationing sweep.} Price-time within batch, pro rata,
+  size priority, and random allocation, holding $\tau$ fixed at the
+  baseline. Because the flow is historical, this sweep measures the
+  mechanical redistribution each rule produces on a fixed order set, not
+  a behavioural response.
+\end{itemize}
+
+The baseline configuration against which the CDA is compared is
+$\tau = 100$\,ms, fixed boundary, pro rata rationing, roll-over
+residual, tie-break cascade as in \Cref{sec:clearing}.
+
+\subsection{Statistical Treatment}
+
+The comparison is paired by construction: each interval of the source
+data produces one CDA observation and one FBA observation from the same
+flow. Differences are therefore evaluated as paired differences per
+interval rather than as two independent samples, which removes the
+common variation driven by the market state and leaves the mechanism
+effect. Because microstructure series are strongly autocorrelated,
+inference uses standard errors robust to autocorrelation, and results
+are reported per instrument and per session as well as pooled, so that
+a single unusual session cannot drive a pooled conclusion.
+
+\section{Metric Catalogue}
+\label{sec:metrics}
+
+Notation: $a_t$ and $b_t$ are the best ask and bid, $\midp = (a_t+b_t)/2$
+the midpoint, $p_k$ the execution price of trade $k$, $q_k$ its size,
+$D_k \in \{+1,-1\}$ its sign (buyer- or seller-initiated), $\pi_k$ the
+submitted limit price, $\clr$ the uniform clearing price of a batch, and
+$\Delta$ a markout horizon. The \emph{Data} column gives the minimum
+data level required.
+
+\begin{table}[htbp]
+\centering
+\caption[Metrics for RQ2.1]{RQ2.1 --- liquidity and transaction cost
+metrics.}
+\label{tab:metrics1}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.1cm} L p{1.6cm}@{}}
+\toprule
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data}\\
+\midrule
+Quoted spread & $(a_t-b_t)/\midp$, time-weighted per interval; for the
+FBA the implied spread between the marginal unexecuted buy and sell of
+the batch & L1/L2\\
+Depth at best & Displayed volume at the best bid and ask, time-weighted;
+for the FBA the volume at $\clr$ in the batch schedules & L2\\
+Depth within $x$ bps & Cumulative volume within $x$ basis points of
+$\midp$ (or of $\clr$), for several $x$ & L2\\
+Book imbalance & $(V^{bid}-V^{ask})/(V^{bid}+V^{ask})$ at the top $n$
+levels & L2\\
+Effective spread & $2D_k(p_k-m_k)/m_k$, volume-weighted; $m_k$ is the
+pre-trade midpoint, for the FBA the midpoint at the start of the batch
+& L1 + trades\\
+Realized spread & $2D_k(p_k-m_{k+\Delta})/m_k$ for
+$\Delta \in \{1,5,30\}$ seconds; the part of the spread the liquidity
+provider keeps & L1 + trades\\
+Price impact & Effective spread minus realized spread; the adverse
+selection component & L1 + trades\\
+Amihud illiquidity & $|r_t|/\text{volume}_t$ averaged over intervals &
+L1 + trades\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption[Metrics for RQ2.2]{RQ2.2 --- price discovery and market quality
+metrics.}
+\label{tab:metrics2}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.1cm} L p{1.6cm}@{}}
+\toprule
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data}\\
+\midrule
+Realized volatility & Standard deviation of interval midpoint or
+clearing price returns & L1\\
+Intra-interval price dispersion & Standard deviation of execution prices
+within one interval; zero by construction for the FBA, strictly positive
+for the CDA, and therefore a direct measure of the uniform-price
+property & L1 + trades\\
+Pricing error & $|\clr-p^{ref}|$ or $|\midp-p^{ref}|$ against an
+external reference price (Hyperliquid's oracle/mark price), in bps &
+L1 + ref\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption[Metrics for RQ2.3]{RQ2.3 --- execution, allocation and
+order-arrival timing metrics, plus engine controls.}
+\label{tab:metrics3}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.1cm} L p{1.6cm}@{}}
+\toprule
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data}\\
+\midrule
+Executed volume & Matched quantity and notional per interval; number of
+trades & L1 + trades\\
+Fill rate & Filled quantity divided by submitted quantity, overall and
+by participant class & L3/L4\\
+Time to execution & Elapsed time from submission to fill; for the FBA
+bounded below by the time to the next batch boundary, which quantifies
+the delay cost of batching & L3\\
+Trader surplus & $\sum_k |\pi_k - \clr|\, q_k$ over executed orders: the
+gain relative to the submitted limit price & L3/L4\\
+Order size inflation & Ratio of submitted to filled size per participant
+over time; the empirical signature of order stuffing under pro rata &
+L4\\
+Order-to-trade ratio & Submitted messages per executed trade;
+cancellation rate per interval; measures message traffic and quote
+flickering & L3\\
+Boundary concentration & Share of order arrivals in the final $x\%$ of
+the batch interval & L3\\
+Throughput & Orders processed per second under identical load &
+control\\
+Clearing latency & Wall-clock time per batch clearing computation and
+per continuous match & control\\
+Unexecuted residual & Share of batch volume on the heavier side that
+cannot be matched at $\clr$ and remains unexecuted (rolled over or
+cancelled, per time-in-force) & control\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Interpretive Status of the RQ2.3 Metrics}
+\label{sec:testable}
+
+Three metrics in \Cref{tab:metrics3} require an interpretive caveat that
+is easy to state and important not to forget when reading
+\Cref{ch:results}.
+
+Order size inflation, boundary concentration, and to a lesser extent
+trader surplus are all quantities whose theoretical interest lies in
+their being \emph{responses} to the mechanism. Order size inflation is
+interesting because participants inflate size when facing pro rata
+allocation. Boundary concentration is interesting because participants
+cluster submissions near a predictable gate.
+
+The orders replayed here were submitted under Hyperliquid's own
+continuous engine. Their sizes were not chosen in response to the
+rationing rule under test, and their arrival times were not chosen in
+response to a batch boundary that did not exist. What the simulation
+measures is therefore the mechanical effect of the rule on fixed
+historical flow: how the pro rata rule would have allocated these
+particular orders, and how this particular arrival-time distribution
+happens to fall relative to a boundary chosen for the simulation. These
+are meaningful quantities --- they establish the baseline against which
+a behavioural response would have to be measured --- but they are not
+evidence about how participants would behave. Predictions P5, P6, and P7
+of \Cref{tab:predictions} are therefore out of reach of this design, and
+\Cref{sec:futurework} discusses the agent-based extension that would
+reach them.
+
+The throughput and clearing latency metrics serve a different purpose.
+They are not results about market quality but a control: if the two
+engines differed substantially in processing performance, a measured
+difference in market outcomes could reflect implementation rather than
+mechanism. Reporting them is how that alternative explanation is ruled
+out.
+
+\section{Validation of the Harness}
+\label{sec:validation}
+
+A simulation result is only as credible as the machinery that produced
+it. Four layers of validation are applied.
+
+\paragraph{Invariant checks.} Every engine run asserts a set of
+invariants continuously: quantity conservation (executed buy volume
+equals executed sell volume in every batch and every match), price
+bounds (no buyer pays more than its limit, no seller receives less), no
+negative or duplicated fills, and monotone timestamps. A violated
+invariant aborts the run rather than producing a quietly wrong log.
+
+\paragraph{Unit tests against hand-computed cases.} The clearing routine
+is tested against small books whose clearing price and allocation can be
+computed by hand, including the awkward cases: an empty book, no
+crossing orders, a unique clearing price, a clearing interval requiring
+each stage of the tie-break cascade, an exactly balanced batch requiring
+no rationing, and a batch in which a single order is pivotal.
+
+\paragraph{Replay fidelity of the CDA.} The continuous engine is
+replayed against the same flow that Hyperliquid's own engine processed,
+and its output is compared with the trades the venue actually produced.
+Perfect agreement is not expected, since matching details, self-trade
+prevention, and message handling at the node are not fully specified in
+the public documentation, but the agreement rate is reported as a
+measure of how faithful the control condition is. A low agreement rate
+would undermine the comparison, since the CDA would then not be the
+mechanism that generated the flow.
+
+\paragraph{Degenerate-parameter checks.} As $\tau \to 0$ the FBA should
+converge toward the CDA in cleared volume and price path, since a batch
+containing at most one event is a continuous match. Verifying this
+convergence numerically is a strong end-to-end test of the batch
+engine: it exercises the whole pipeline and has a known answer.

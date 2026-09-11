@@ -1,0 +1,263 @@
+\chapter{Discussion}
+\label{ch:discussion}
+
+This chapter brings the two parts together. \Cref{sec:synthesis}
+translates the design space of \Cref{ch:design} and the measurements of
+\Cref{ch:results} into a recommended configuration and shows how the
+recommendation changes with venue type. \Cref{sec:testable2} states
+precisely which theoretical predictions this design tested, which it
+confirmed by construction, and which it could not reach.
+\Cref{sec:positioning} places the findings against the existing
+literature, and \Cref{sec:validity} sets out the threats to validity.
+
+\section{From Design Space to Recommendation}
+\label{sec:synthesis}
+
+\subsection{The Structure of the Problem}
+
+The recurring finding of \Cref{ch:design} is that the FBA design space
+contains almost no free improvements. Each block offers options that
+shift competition from one variable to another rather than removing it.
+Randomising the close removes the timing target and adds planning cost.
+Opacity removes intent exposure and adds bid shading. Pro rata removes
+the timing channel from rationing and adds a size channel. Segregation
+lets makers quote tighter against benign flow and splits the pool.
+
+The one genuine structural gain is the pair of rules that constitutes
+the mechanism itself: discrete accumulation plus uniform pricing. That
+pair removes the value of a marginal speed advantage without requiring
+anything from participants and without depending on how any other block
+is configured. Everything else in the design space is a choice about
+which residual distortion to accept.
+
+This has a practical consequence for how an exchange operator should
+approach the problem. The blocks should not be optimised independently,
+because they interact. \Cref{sec:disclosure} showed the sharpest
+instance: an open book during accumulation strengthens the incentive to
+submit late, which raises the value of a randomised close, whereas a
+sealed-bid design removes most of the informational motive for waiting
+and makes a fixed boundary defensible. Disclosure and interval design
+must be chosen jointly. The same is true of interval length and
+instrument liquidity, since a short interval in a thin instrument
+produces empty batches and degenerates into a delayed continuous
+market.
+
+\subsection{A Recommended Baseline}
+
+\Cref{tab:recommendation} states a baseline configuration for a liquid
+instrument on a centralised venue, with the reasoning behind each
+choice. The recommendation follows from the theory of \Cref{ch:design}
+and is to be confirmed or revised against the results of
+\Cref{ch:results} once they are populated; the final column records
+which measurement bears on the choice.
+
+\begin{table}[htbp]
+\centering
+\caption[Recommended baseline configuration]{A recommended baseline FBA
+configuration for a liquid instrument on a centralised venue.}
+\label{tab:recommendation}
+\small
+\begin{tabularx}{\textwidth}{@{}p{2.3cm} p{3.0cm} L p{2.4cm}@{}}
+\toprule
+\textbf{Block} & \textbf{Recommendation} & \textbf{Reasoning} &
+\textbf{Evidence}\\
+\midrule
+Interval & 50--250\,ms, with a short randomised extension &
+Long enough that the ratio of latency dispersion to $\tau$ is
+negligible; short enough that delay is immaterial to any participant
+other than a market maker managing inventory & \Cref{tab:sweep};
+empty-batch share\\
+Disclosure & Indicative clearing price and aggregate imbalance; no
+order-level book & Retains the coordination benefit of transparency
+without exposing individual orders; the regime equity auctions already
+use at scale & Not testable here (P7)\\
+Segregation & Unified pool by default; intent segregation only where
+maker flow is demonstrably being adversely selected & Segregation splits
+liquidity, which is a certain cost against an uncertain benefit; the
+DFBA argument is strongest where the unified pool shows persistent
+maker-versus-maker crossing & \Cref{tab:res21} price impact\\
+Rationing & Pro rata with a small random component & Removes the timing
+channel, which is the one that would undo the mechanism; the random
+component blunts the size-inflation incentive without imposing full
+execution uncertainty & \Cref{tab:rationingres}\\
+Settlement & Net settlement with per-fill audit records retained;
+roll-over residual with standard time-in-force & Netting is a cost
+saving with no incentive consequence provided the audit trail is kept
+separately & Residual share, \Cref{tab:res23}\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{How the Recommendation Changes by Venue}
+
+The baseline is not universal, and three departures follow directly from
+the analysis.
+
+\textbf{Thin instruments.} The binding constraint is batch thickness,
+not speed neutralisation. A longer interval, or a volume-triggered
+close, keeps batches populated at the cost of longer delay. The
+degeneracy diagnostic is the share of empty batches, which is why
+\Cref{tab:sweep} reports it.
+
+\textbf{Decentralised venues.} The interval is not a free parameter,
+because settlement is already discrete and the natural boundary is the
+block. Disclosure is also constrained, since submitted intents are
+typically public. What the venue gains in exchange is the multi-asset
+formulation of \eqref{eq:multiflow}: coherent cross-rates across all
+pairs in a batch, which removes cross-pair arbitrage as a rent rather
+than paying arbitrageurs to enforce consistency
+\citep{walther2021multitoken,ramsay2023speedex}.
+
+\textbf{Venues with a large retail segment.} The Glosten--Milgrom
+argument for segregation is strongest here, because the uninformed
+subset is both large and identifiable. The countervailing consideration
+is regulatory rather than economic: participants in different segments
+receive different prices for the same asset at the same instant, which
+is difficult to reconcile with a uniform best-execution standard.
+
+\subsection{The Unresolved Question: Maker and Taker}
+
+\Cref{sec:segregation} argued that the maker--taker distinction has no
+natural definition under simultaneous uniform-price clearing, and set
+out four candidate redefinitions. This is not a peripheral issue. Fee
+and rebate schedules are a substantial share of exchange revenue and a
+substantial input into market maker economics, and a venue that adopts
+batching without resolving the definition will find that its rebate
+schedule is subsidising whichever behaviour its chosen proxy happens to
+track.
+
+Of the four candidates, persistence across batches has the strongest
+economic claim, because it is the only one that measures the standing
+provision of liquidity that the rebate is meant to compensate, rather
+than an instantaneous property of a single order. It is also the only
+one that cannot be satisfied by an order that exists for a single batch
+and is designed to capture the rebate. The cost is that it requires the
+engine to track order lineage across batches, which interacts with the
+residual policy of \Cref{sec:settlement}: an order can only accrue
+persistence if unmatched remainders roll over rather than being
+cancelled.
+
+\section{What This Design Can and Cannot Establish}
+\label{sec:testable2}
+
+\Cref{tab:predictions} classified nine predictions by testability, and
+the distinction deserves restating in the discussion because it bounds
+every claim in this thesis.
+
+\textbf{Mechanical predictions are established.} P1 (zero
+intra-interval dispersion), P4 (the delay lower bound), P8 (the effect
+of $\tau$ on batch composition), and P9 (positive surplus relative to
+submitted limits) follow from the clearing rule applied to a given order
+set. The simulation confirms them, and where confirmation is by
+construction rather than by measurement, \Cref{ch:results} says so.
+
+\textbf{One prediction is partly reachable.} P2, the claim that batching
+reduces the adverse selection component of the effective spread, is
+partly testable. The mechanical part is: given this flow, does clearing
+it in batches produce less price impact than clearing it continuously?
+The behavioural part is not: liquidity providers in the replay cannot
+requote in response to knowing they will not be sniped. A measured
+reduction in price impact is therefore a lower bound on the effect
+theory predicts, since the equilibrium response would go in the same
+direction.
+
+\textbf{Behavioural predictions are out of reach.} P3, P5, P6, and P7
+all require participants who can adapt. Quoted spreads narrow because
+market makers requote; size inflation occurs because participants
+respond to pro rata; boundary concentration occurs because participants
+respond to a predictable gate; bid shading occurs because participants
+respond to price uncertainty. None of these responses can occur in a
+replay of orders submitted under a different mechanism. What the
+simulation provides instead is the mechanical baseline against which
+such a response would have to be measured, which is a genuine
+contribution but a different one.
+
+The honest summary is that a replay design is the right instrument for
+isolating what a mechanism does to a given order flow, and the wrong
+instrument for establishing what a mechanism does to an equilibrium.
+\Cref{sec:futurework} describes the extension that would address the
+second question.
+
+\section{Positioning Relative to the Literature}
+\label{sec:positioning}
+
+Against \citet{budish2015hft}, this thesis takes the mechanism as given
+and asks how it is built. Their contribution is the equilibrium argument
+for batching; the contribution here is the enumeration of what remains
+undetermined once that argument is accepted, and the observation that
+several of the remaining choices can undo a meaningful part of the
+benefit. Price-time rationing inside the batch is the clearest example:
+a venue can implement frequent batch auctions exactly as specified and
+still have a speed race, because the allocation rule reintroduces one.
+
+Against \citet{aquilina2022quantifying}, the relationship is
+complementary. They measure what the continuous mechanism costs using
+field data; this thesis measures what an alternative mechanism does to
+the same flow. Their estimate is the benchmark against which any
+measured reduction in adverse selection should be scaled, with the
+caveat that their setting is an equity market with a different
+participant population and a different latency distribution from a
+crypto derivatives venue.
+
+Against \citet{lee2026taiwan}, the relationship is methodological. Their
+identification comes from a real transition, which means real behavioural
+adjustment, and their external validity is correspondingly high; their
+internal comparability is limited because everything moved at once. This
+thesis has the opposite profile: perfect internal comparability, since
+the flow is identical by construction, and limited external validity,
+since the flow cannot respond. Neither design dominates, and read
+together they bound the answer from two sides.
+
+Against the decentralised exchange literature
+\citep{walther2021multitoken,ramsay2023speedex,dutta2025cow}, the
+contribution is to import the clearing formulation into a microstructure
+framing. That literature solves the multi-asset clearing problem in
+practice, including at speed, but evaluates the result mostly in terms
+of throughput, gas cost, and solver incentives rather than in terms of
+spreads and adverse selection. Placing those systems in the same design
+space as an exchange matching engine, as \Cref{tab:casestudies} does,
+makes it visible that they are instances of one mechanism rather than a
+separate technology.
+
+\section{Threats to Validity}
+\label{sec:validity}
+
+\paragraph{Internal validity.} The main threat is that a measured
+difference reflects the implementation rather than the mechanism. This
+is addressed by the shared type system and matching interface of
+\Cref{lst:trait}, by computing all metrics offline from logs with one
+shared implementation, by the invariant and unit-test layers of
+\Cref{sec:validation}, and by reporting throughput and latency as
+explicit controls. The degenerate-parameter check, in which the FBA
+should converge to the CDA as $\tau \to 0$, is the strongest single
+test, because it has a known answer and exercises the entire pipeline.
+
+\paragraph{Construct validity.} Several metrics do not transfer
+unchanged from a continuous to a batch setting, and each adaptation is a
+place where the measured quantity may not be the intended one. The
+quoted spread has no direct FBA analogue and is proxied by the marginal
+unexecuted orders of the batch. The pre-trade midpoint referenced by
+effective and realized spreads must be defined as the midpoint at the
+start of the batch, which introduces an asymmetry: for the CDA the
+reference is contemporaneous with the trade, for the FBA it is up to
+$\tau$ old. Results should be read with this in mind, and the
+sensitivity of the effective spread comparison to the choice of
+reference point is worth reporting explicitly.
+
+\paragraph{External validity.} Three limits apply. The data come from
+one venue, and a crypto perpetuals exchange has a participant
+population, a fee structure, and a latency profile that differ from an
+equity market, so the magnitudes should not be transported. The sample
+covers a limited number of sessions, which is why results are reported
+per session as well as pooled. And, most fundamentally, the flow is
+fixed: the mechanism cannot change behaviour, so any equilibrium effect
+is absent by construction.
+
+\paragraph{Data validity.} The dataset is captured at a single
+non-validating node \citep{albers2026openbook}. What the node observed
+is what the simulation replays, and any message the node missed or saw
+in a different order than the venue's own engine is a discrepancy that
+propagates into both arms of the comparison. Because it propagates into
+both arms identically, it is largely differenced out of the paired
+comparison, but it does affect the absolute levels and it affects the
+CDA fidelity check of \Cref{sec:validation}.

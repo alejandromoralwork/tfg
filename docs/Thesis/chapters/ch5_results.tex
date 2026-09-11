@@ -1,0 +1,382 @@
+\chapter{Results: Comparing CDA and FBA}
+\label{ch:results}
+
+\begin{quote}
+\small
+\textbf{Status of this chapter.} This chapter is the reporting
+scaffold for RQ2. Every numeric cell is currently a placeholder,
+rendered as \ph, and every figure is a stub describing the plot that
+will occupy that position. The section structure, the table layouts, the
+metric definitions, and the reading conventions are final, so that
+populating the chapter from the simulation logs is a mechanical step
+rather than a rewrite. No number in this chapter should be read as a
+measured result until the placeholders are replaced. \emph{This note is
+to be deleted before submission.}
+\end{quote}
+
+\section{Sample and Descriptive Statistics}
+\label{sec:sample}
+
+\Cref{tab:sample} describes the replayed sample: the instruments, the
+sessions, the number of messages, and the composition of the event
+stream. Because both engines consume this stream unchanged, the table
+characterises the input to both arms of the comparison simultaneously,
+and any asymmetry in the results cannot originate here.
+
+\begin{table}[htbp]
+\centering
+\caption[Sample description]{Description of the replayed sample. Counts
+refer to the raw event stream, identical for both engines.}
+\label{tab:sample}
+\small
+\begin{tabularx}{\textwidth}{@{}L c c c c@{}}
+\toprule
+\textbf{Characteristic} & \textbf{Liquid pair} & \textbf{Less liquid
+pair} & \textbf{High-vol.\ session} & \textbf{Pooled}\\
+\midrule
+Sessions (days)              & \ph & \ph & \ph & \ph\\
+Total messages               & \ph & \ph & \ph & \ph\\
+\quad of which new orders    & \ph & \ph & \ph & \ph\\
+\quad of which cancellations & \ph & \ph & \ph & \ph\\
+\quad of which modifications & \ph & \ph & \ph & \ph\\
+Distinct participants        & \ph & \ph & \ph & \ph\\
+Trades in source data        & \ph & \ph & \ph & \ph\\
+Notional volume              & \ph & \ph & \ph & \ph\\
+Median inter-arrival time    & \ph & \ph & \ph & \ph\\
+Realized volatility (daily)  & \ph & \ph & \ph & \ph\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The median inter-arrival time in \Cref{tab:sample} deserves attention
+when reading the rest of the chapter, because it determines how many
+events a batch of a given length contains. If the median inter-arrival
+time is of the same order as $\tau$, most batches will contain few
+orders and the FBA will behave close to a delayed CDA, which is the
+degenerate case anticipated in \Cref{sec:interval}.
+
+\section{Validation Results}
+\label{sec:validationresults}
+
+\Cref{tab:validation} reports the four validation layers of
+\Cref{sec:validation}. These are prerequisites, not findings: the
+comparison in the following sections is only interpretable if the
+control engine reproduces the venue's own output reasonably faithfully
+and the batch engine converges to it in the degenerate limit.
+
+\begin{table}[htbp]
+\centering
+\caption[Validation results]{Validation of the replay harness and both
+engines.}
+\label{tab:validation}
+\small
+\begin{tabularx}{\textwidth}{@{}L c c@{}}
+\toprule
+\textbf{Validation check} & \textbf{Result} & \textbf{Threshold}\\
+\midrule
+Invariant violations across all runs & \ph & 0\\
+Unit tests on hand-computed clearing cases passed & \ph & all\\
+CDA trade-for-trade agreement with venue output (\%) & \ph & report\\
+CDA volume agreement with venue output (\%) & \ph & report\\
+FBA--CDA convergence in cleared volume as $\tau \to 0$ (\% deviation) &
+\ph & $\to 0$\\
+Run-to-run determinism (byte-identical logs) & \ph & yes\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{RQ2.1: Liquidity and Transaction Costs}
+\label{sec:res21}
+
+\Cref{tab:res21} reports the liquidity and cost metrics of
+\Cref{tab:metrics1} for both engines, with the paired difference and its
+robust standard error. Differences are computed per interval and then
+aggregated, following \Cref{sec:experiments}.
+
+\begin{table}[htbp]
+\centering
+\caption[RQ2.1 results]{Liquidity and transaction costs under both
+mechanisms. Paired differences per interval; standard errors robust to
+autocorrelation in parentheses.}
+\label{tab:res21}
+\small
+\begin{tabularx}{\textwidth}{@{}L c c c c@{}}
+\toprule
+\textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Difference} &
+\textbf{$p$}\\
+\midrule
+Quoted spread (bps)                & \ph & \ph & \ph & \ph\\
+Depth at best (notional)           & \ph & \ph & \ph & \ph\\
+Depth within 5 bps                 & \ph & \ph & \ph & \ph\\
+Depth within 25 bps                & \ph & \ph & \ph & \ph\\
+Book imbalance (abs., top 5)       & \ph & \ph & \ph & \ph\\
+Effective spread (bps)             & \ph & \ph & \ph & \ph\\
+Realized spread, $\Delta=1$s (bps) & \ph & \ph & \ph & \ph\\
+Realized spread, $\Delta=5$s (bps) & \ph & \ph & \ph & \ph\\
+Realized spread, $\Delta=30$s (bps)& \ph & \ph & \ph & \ph\\
+Price impact (bps)                 & \ph & \ph & \ph & \ph\\
+Amihud illiquidity ($\times 10^6$) & \ph & \ph & \ph & \ph\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The interpretation hinges on the decomposition of
+\Cref{sec:adverse}. The effective spread is the total cost of a trade;
+the realized spread is what the liquidity provider retains after the
+midpoint has adjusted; the difference is price impact, the adverse
+selection component. The theory of \Cref{sec:discretetime} predicts that
+if batching helps, the improvement should concentrate in price impact,
+because that is the component latency arbitrage inflates. An improvement
+concentrated in the realized spread instead would indicate a transfer to
+or from liquidity providers rather than a reduction in adverse
+selection, and would require a different explanation.
+
+The quoted spread row must be read with the caveat established in
+\Cref{sec:quality}: for the FBA it is not an observed quote but the
+implied spread between the marginal unexecuted buy and the marginal
+unexecuted sell of the batch. It is the closest available analogue, not
+the same object.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\begin{minipage}{0.9\textwidth}\centering\vspace{2.0cm}
+\textsf{\small [Figure stub] Effective spread decomposed into realized
+spread and price impact, CDA versus FBA, stacked bars per instrument
+and session.}\vspace{2.0cm}\end{minipage}}
+\caption[Spread decomposition]{Decomposition of the effective spread
+into the retained (realized) and adverse selection (price impact)
+components under both mechanisms.}
+\label{fig:spreaddecomp}
+\end{figure}
+
+\section{RQ2.2: Price Discovery and Market Quality}
+\label{sec:res22}
+
+\Cref{tab:res22} reports the price discovery metrics.
+
+\begin{table}[htbp]
+\centering
+\caption[RQ2.2 results]{Price discovery and market quality under both
+mechanisms.}
+\label{tab:res22}
+\small
+\begin{tabularx}{\textwidth}{@{}L c c c c@{}}
+\toprule
+\textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Difference} &
+\textbf{$p$}\\
+\midrule
+Realized volatility, 1s intervals (bps)   & \ph & \ph & \ph & \ph\\
+Realized volatility, 60s intervals (bps)  & \ph & \ph & \ph & \ph\\
+Intra-interval price dispersion (bps)     & \ph & 0.00 & \ph & ---\\
+Pricing error vs.\ oracle, mean (bps)     & \ph & \ph & \ph & \ph\\
+Pricing error vs.\ oracle, 95th pct (bps) & \ph & \ph & \ph & \ph\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+One row of \Cref{tab:res22} is not an empirical finding and is marked
+accordingly. Intra-interval price dispersion is zero for the FBA by
+construction, because every trade in an interval executes at $\clr$.
+Reporting it is nonetheless worthwhile for two reasons. It is the
+direct structural measure of the property that defines the difference
+between the two mechanisms, so its magnitude on the CDA side quantifies
+exactly how much within-interval price variation uniform clearing
+eliminates. And it functions as a check on the implementation: a
+non-zero value on the FBA side would indicate a bug, not a finding.
+This is prediction~P1 of \Cref{tab:predictions}, and it is confirmed by
+construction rather than tested.
+
+Pricing error against the oracle is the more informative row. It asks
+whether the batch clearing price tracks the external reference as
+closely as the continuous midpoint does. Theory does not give an
+unambiguous prediction here. Batching aggregates more orders per pricing
+event, which should improve the estimate, but it also prices with a
+delay of up to $\tau$, which in a fast-moving market means pricing
+against information that is up to one interval old. The 95th percentile
+row is included because the mean can hide exactly the fast-market
+episodes where the delay matters most.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\begin{minipage}{0.9\textwidth}\centering\vspace{2.0cm}
+\textsf{\small [Figure stub] Time series of the CDA midpoint, the FBA
+clearing price, and the oracle reference price over a
+high-volatility episode, with the pricing error of each mechanism in a
+lower panel.}\vspace{2.0cm}\end{minipage}}
+\caption[Price paths against the oracle reference]{Price paths of both
+mechanisms against the external reference during a high-volatility
+episode.}
+\label{fig:pricepaths}
+\end{figure}
+
+\section{RQ2.3: Execution, Allocation and Order-Arrival Timing}
+\label{sec:res23}
+
+\Cref{tab:res23} reports the execution and allocation metrics. The
+interpretive caveat of \Cref{sec:testable} applies throughout this
+section: order size inflation and boundary concentration describe
+mechanical properties of fixed historical flow, not behavioural
+responses.
+
+\begin{table}[htbp]
+\centering
+\caption[RQ2.3 results]{Execution, allocation and order-arrival timing
+under both mechanisms, plus engine controls.}
+\label{tab:res23}
+\small
+\begin{tabularx}{\textwidth}{@{}L c c c@{}}
+\toprule
+\textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Difference}\\
+\midrule
+Executed volume (notional)            & \ph & \ph & \ph\\
+Number of trades                      & \ph & \ph & \ph\\
+Fill rate, all orders (\%)            & \ph & \ph & \ph\\
+Fill rate, top-decile participants (\%) & \ph & \ph & \ph\\
+Median time to execution (ms)         & \ph & \ph & \ph\\
+95th pct.\ time to execution (ms)     & \ph & \ph & \ph\\
+Trader surplus (notional)             & \ph & \ph & \ph\\
+Trader surplus per executed unit (bps)& \ph & \ph & \ph\\
+Order size inflation ratio            & \ph & \ph & \ph\\
+Order-to-trade ratio                  & \ph & \ph & \ph\\
+Boundary concentration, final 10\% (\%) & --- & \ph & ---\\
+Unexecuted residual (\% of batch volume)& --- & \ph & ---\\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Engine controls}}\\
+Throughput (orders/s)                 & \ph & \ph & \ph\\
+Mean clearing / match latency ($\mu$s)& \ph & \ph & \ph\\
+99th pct.\ latency ($\mu$s)           & \ph & \ph & \ph\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Three rows carry most of the interpretive weight.
+
+\textbf{Time to execution} quantifies the delay cost of batching, which
+is the only unambiguous disadvantage the mechanism has. For the FBA it
+is bounded below by the time from submission to the next boundary, so
+its distribution is essentially the distribution of the position of
+arrivals within the interval, shifted by any rollover. Comparing the
+median with the 95th percentile separates the routine delay from the
+tail created by orders that fail to clear and roll into later batches.
+
+\textbf{Trader surplus} measures the price improvement relative to the
+submitted limit that uniform clearing produces. Prediction~P9 says this
+should be positive for every non-marginal executed order in the FBA. The
+economically meaningful comparison is not the level but the difference
+against the CDA, where executions occur at the resting price and the
+surplus split depends on which side was resting.
+
+\textbf{Engine controls} rule out the implementation explanation. If
+throughput and latency are of the same order for both engines, a
+difference in market outcomes cannot be attributed to one engine simply
+being slower under load.
+
+\section{The Interval Sweep}
+\label{sec:res_sweep}
+
+\Cref{tab:sweep} reports the headline metrics across the interval sweep
+of \Cref{sec:experiments}. This is the empirical counterpart of the
+trade-off argued theoretically in \Cref{sec:interval}: longer intervals
+accumulate more orders per batch, which should raise cleared volume per
+batch and improve the thickness of the auction, while also raising the
+delay imposed on every participant and the staleness of the information
+priced.
+
+\begin{table}[htbp]
+\centering
+\caption[Interval sweep]{Headline metrics as a function of the batch
+interval $\tau$. The CDA column is the $\tau$-independent reference.}
+\label{tab:sweep}
+\small
+\begin{tabularx}{\textwidth}{@{}L c c c c c c c c@{}}
+\toprule
+\textbf{Metric} & \textbf{CDA} & \textbf{1\,ms} & \textbf{10\,ms} &
+\textbf{50\,ms} & \textbf{100\,ms} & \textbf{250\,ms} &
+\textbf{500\,ms} & \textbf{1\,s}\\
+\midrule
+Effective spread (bps)      & \ph & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+Price impact (bps)          & \ph & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+Executed volume (index)     & \ph & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+Orders per batch            & --- & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+Empty batches (\%)          & --- & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+Median time to exec.\ (ms)  & \ph & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+Pricing error (bps)         & \ph & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+Unexecuted residual (\%)    & --- & \ph & \ph & \ph & \ph & \ph & \ph & \ph\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The share of empty batches is the diagnostic for the degeneracy
+discussed in \Cref{sec:interval}. If a large fraction of batches contain
+no crossing orders, the mechanism is not aggregating anything and the
+comparison at that interval says little about batching as such.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\begin{minipage}{0.9\textwidth}\centering\vspace{2.0cm}
+\textsf{\small [Figure stub] Two-panel plot against $\tau$ on a log
+scale: upper panel, effective spread and price impact with the CDA
+reference as a horizontal line; lower panel, median time to execution
+and orders per batch.}\vspace{2.0cm}\end{minipage}}
+\caption[The interval trade-off]{The batch interval trade-off:
+transaction costs against delay, as a function of $\tau$.}
+\label{fig:sweep}
+\end{figure}
+
+\section{The Rationing Rule Comparison}
+\label{sec:res_rationing}
+
+\Cref{tab:rationingres} compares the four rationing rules at the
+baseline interval. Because the flow is fixed, the rules cannot differ in
+clearing price or in total cleared volume; by the complementary
+slackness argument of \Cref{sec:clearing}, they differ only in the
+allocation of the marginal quantity at $\clr$. What the table therefore
+measures is distributional: who among the marginal participants gets
+filled.
+
+\begin{table}[htbp]
+\centering
+\caption[Rationing rule comparison]{Allocation outcomes under the four
+rationing rules, baseline $\tau$. Clearing price and total volume are
+invariant to the rule by construction.}
+\label{tab:rationingres}
+\small
+\begin{tabularx}{\textwidth}{@{}L c c c c@{}}
+\toprule
+\textbf{Outcome} & \textbf{Price-time} & \textbf{Pro rata} &
+\textbf{Size priority} & \textbf{Random}\\
+\midrule
+Share of volume rationed (\%)          & \ph & \ph & \ph & \ph\\
+Participants receiving partial fills   & \ph & \ph & \ph & \ph\\
+Gini of marginal allocation            & \ph & \ph & \ph & \ph\\
+Fill rate, largest size quartile (\%)  & \ph & \ph & \ph & \ph\\
+Fill rate, smallest size quartile (\%) & \ph & \ph & \ph & \ph\\
+Fill rate, earliest arrival quartile (\%) & \ph & \ph & \ph & \ph\\
+Corr(fill share, submitted size)       & \ph & \ph & \ph & \ph\\
+Corr(fill share, arrival position)     & \ph & \ph & \ph & \ph\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The two correlation rows are the informative ones, because they measure
+directly which variable the rule makes allocation depend on, and
+therefore which variable participants would compete on if they could
+adapt. A high correlation between fill share and submitted size under
+pro rata is the mechanical precondition for the size inflation that
+prediction~P5 describes; a high correlation with arrival position under
+price-time priority is the mechanical precondition for the micro-scale
+speed race of prediction~P6. Observing the precondition is not observing
+the behaviour, and \Cref{sec:testable} explains why this design cannot
+observe the latter.
+
+\section{Summary of Findings}
+\label{sec:res_summary}
+
+\ph[to be written once results are populated] The summary will state,
+for each of RQ2.1, RQ2.2 and RQ2.3, the direction and magnitude of the
+measured difference, whether it is consistent with the corresponding
+prediction in \Cref{tab:predictions}, and whether it is robust across
+instruments, sessions and volatility regimes. It will also state
+explicitly which predictions were confirmed by construction rather than
+tested, so that \Cref{ch:discussion} does not overstate what the
+simulation established.

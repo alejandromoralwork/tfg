@@ -1,0 +1,124 @@
+%----------------------------------------------------------------------
+%  Preamble
+%----------------------------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+% Body font. Swap freely: mathptmx (Times), charter, or lmodern if installed.
+\usepackage{mathptmx}
+\usepackage[scaled=0.92]{helvet}
+\usepackage[english]{babel}
+\usepackage{microtype}
+
+% --- page layout ---
+\usepackage[a4paper,left=3.0cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\setlength{\parskip}{0.4em}
+
+% --- maths ---
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{bm}
+
+% --- tables and floats ---
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{threeparttable}
+\usepackage{float}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{rotating}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+% --- lists, headers, colours ---
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=4pt}
+\usepackage{xcolor}
+\definecolor{linkblue}{RGB}{0,60,120}
+\definecolor{phgray}{RGB}{120,120,120}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\nouppercase{\leftmark}}
+\fancyhead[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage}%
+  \renewcommand{\headrulewidth}{0pt}}
+
+% --- code listings ---
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\bfseries,
+  commentstyle=\itshape\color{phgray},
+  breaklines=true,
+  frame=single,
+  framerule=0.3pt,
+  numbers=left,
+  numberstyle=\tiny\color{phgray},
+  captionpos=b,
+  showstringspaces=false
+}
+% listings has no built-in Rust definition, so declare a minimal one.
+\lstdefinelanguage{Rust}{
+  keywords={pub, trait, fn, let, mut, struct, enum, impl, for, in, if,
+            else, match, return, self, Self, use, mod, const, type,
+            where, as, ref, Vec},
+  keywordstyle=\bfseries,
+  ndkeywords={u64, i64, f64, usize, bool, String, Option, Result},
+  ndkeywordstyle=\itshape,
+  sensitive=true,
+  comment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]"
+}
+\lstset{language=Rust}
+
+% --- citations ---
+\usepackage[round,authoryear]{natbib}
+\setcitestyle{aysep={},yysep={,}}
+
+% --- hyperlinks (load late) ---
+\usepackage[hidelinks,breaklinks=true]{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=linkblue,
+  citecolor=linkblue,
+  urlcolor=linkblue,
+  pdftitle={Frequent Batch Auction Engine: A Design Analysis and Simulation-Based Comparison against Continuous Trading},
+  pdfsubject={Bachelor Thesis},
+  pdfkeywords={market microstructure, frequent batch auction, matching engine, latency arbitrage, Hyperliquid}
+}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+% --- placeholder macros -------------------------------------------------
+% \ph{} marks a value that the simulation has not yet produced. Every
+% number in Chapter 5 that is not yet computed must use this macro, so
+% that no placeholder can ever be mistaken for a measured result.
+\newcommand{\ph}[1][\ensuremath{\cdot}]{\textcolor{phgray}{\textsf{[#1]}}}
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+% --- notation shorthands ---
+\newcommand{\midp}{m_{t}}
+\newcommand{\clr}{p^{\ast}}
+\newcommand{\bps}{\,\text{bps}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+% --- theorem-like environments ---
+\usepackage{amsthm}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[chapter]
+\newtheorem{proposition}{Proposition}[chapter]
+\theoremstyle{remark}
+\newtheorem{hypothesisx}{Prediction}[chapter]
+\newenvironment{prediction}{\begin{hypothesisx}}{\end{hypothesisx}}
+
+% --- chapter heading style ---
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{16pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-20pt}{28pt}
+
+\widowpenalty=10000
+\clubpenalty=10000

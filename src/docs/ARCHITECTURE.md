@@ -11,10 +11,15 @@ here:
 | Doc | Covers |
 |---|---|
 | [`ENGINE_DESIGN.md`](ENGINE_DESIGN.md) | The FBA uniform-clearing-price algorithm (candidate prices, three-tier selection, rationing) with a worked example; the module-interaction walkthrough from `add`/`load` to settlement. |
+| [`METRICS.md`](METRICS.md) | Authoritative formula-by-formula reference for all 35 `simulate` time-series CSV columns — exact accumulators, `None`-vs-`0.0` edge cases, and CDA-vs-FBA differences. |
+| [`TESTING.md`](TESTING.md) | How every test is run and what it proves: the full `cargo test` catalog (80 tests, 11 files) and the runtime `test engine` checklist (37 cases) — both interactively and as terminal/argv commands. |
+| [`REFERENCE.md`](REFERENCE.md) | Exhaustive, file-by-file API reference — every public struct/enum/function in the crate with its exact signature and algorithm, one section per source file. |
 | [`SCHEMA.md`](SCHEMA.md) | Field-by-field schema of the 54-byte binary order-status record and the CSV PREVIEW format, plus the `mapdir` lookup tables. |
 | [`Cancellations.md`](Cancellations.md) | Why the dataset's `accepted` vs `_rejected` file split is *not* "live vs rejected", how cancellations are replayed (and fills deliberately are not), and the unenforced-TIF limitation. |
 | [`init.md`](init.md) | Toolchain prerequisites and how to build/run. |
 | [`DEPLOY.md`](DEPLOY.md) | Running `simulate` non-interactively — the Docker image and a Google Cloud Batch job spec (with checkpoint-backed retry). |
+| [`DATASET.md`](DATASET.md) | The upstream Hyperliquid dataset itself — archive sizes, the reference Python reader, citation, license (not `market_sim`'s own code). |
+| [`README.md`](README.md) | Index of this documentation set. |
 
 The research framing (RQ1/RQ2.1/2.2/2.3) lives in the repo-root
 `docs/expose.tex` (one level *above* `src/`).
@@ -73,6 +78,10 @@ main.rs                     fn main() { inputs::cli::run(); }
 **Architectural boundary:** `engines/*` depend *only* on `types.rs`. They
 never import `metrics` or `inputs` and don't know a CLI exists. `inputs/cli.rs`
 is the only module that touches both an engine and `metrics::stats`.
+
+The sections below give one paragraph per file — enough to navigate the crate. For the
+exhaustive, function-by-function reference (every signature, every struct field, every
+algorithm step) see [`REFERENCE.md`](REFERENCE.md).
 
 ### 2.1 `types.rs`
 
@@ -280,8 +289,9 @@ hand-computed expectation:
 - `run_timeseries_metric_tests` — the *streaming* pipeline: drives
   `metrics::timeseries::MetricsRecorder` with synthetic
   `OrderMessage`/`TradeEvent`/`BatchClearedEvent`/`BookSnapshot`s and checks
-  every one of the ~32 CSV columns against a worked value (a different code
-  path from the engine getters above).
+  every one of the 35 CSV columns against a worked value (a different code
+  path from the engine getters above). Full case-by-case catalogue:
+  [`TESTING.md`](TESTING.md).
 
 ### 2.15 `metrics/mod.rs` / `metrics/stats.rs`
 
@@ -300,6 +310,7 @@ types (`OrderMessage`, `TradeEvent`, `BatchClearedEvent`, `BookSnapshot`),
 
 ---
 
+<a id="order-lifecycle"></a>
 ## 3. The order lifecycle — record to matched trade
 
 ```
@@ -349,6 +360,7 @@ the object of study.
 
 ---
 
+<a id="simulate-pipeline"></a>
 ## 4. The `simulate` time-series pipeline, end to end
 
 `simulate <path|btc|eth|sol|all> [interval_secs]` → `inputs::simulate_cmd::run`.
@@ -474,64 +486,50 @@ One row per `τ`-interval per engine; 35 CSV columns. Scope: **U**niversal /
 "bps" = basis points; prices are `PRICE_SCALE` (1e6) fixed-point unless
 noted. RQ column maps to `docs/expose.tex`.
 
-| Column | Scope | RQ | Meaning |
+**Full formula, accumulator, and edge-case detail for every column below (including the
+`kyle_lambda` CDA-vs-FBA construction that used to be spelled out here) now lives in
+[`METRICS.md`](METRICS.md) — the authoritative reference. Treat the table below as an index,
+not a source of truth.**
+
+| Column | Scope | RQ | Short description |
 |---|---|---|---|
 | `engine`, `interval_start_ns`, `interval_width_ns` | U | — | Row key: `"FBA"`/`"CDA"`, bucket start (ns since epoch), `τ` in ns. |
-| `quoted_spread_bps` | U | 2.1 | Mean per-snapshot `(ask−bid)/mid·1e4` (CDA); mean per-batch `(best_unfilled_sell − best_unfilled_buy)/clearing_price·1e4` (FBA). |
-| `depth_at_best` | U | 2.1 | Mean top-of-book volume: `(best_bid_qty + best_ask_qty)/2` (CDA); `(demand_at_price + supply_at_price)/2` (FBA). |
-| `depth_within_{10,50,100}bps` | U | 2.1 | Mean cumulative resting volume within x bps of the mid / clearing price. |
-| `book_imbalance` | C | 2.1 | Mean `(best_bid_qty − best_ask_qty)/(best_bid_qty + best_ask_qty)`. |
+| `quoted_spread_bps` | U | 2.1 | Mean bid-ask (CDA) / unfilled-extremes (FBA) spread, bps. |
+| `depth_at_best` | U | 2.1 | Mean top-of-book volume (touch-only for CDA; demand+supply at clearing price for FBA). |
+| `depth_within_{10,50,100}bps` | U | 2.1 | Mean cumulative resting volume within x bps of mid / clearing price. |
+| `book_imbalance` | C | 2.1 | Mean `(bid_qty − ask_qty)/(bid_qty + ask_qty)`. |
 | `total_book_depth` | C | 2.1 | Mean whole-book resting volume, all levels both sides. |
-| `effective_spread_bps` | U | 2.1 | Quantity-weighted `2·D·(p−m)/m·1e4`, `m` = pre-trade midpoint, `D` = aggressor sign (unsigned for FBA). |
-| `realized_spread_bps_{1,5,30}s` | U | 2.1 | Same, but vs the midpoint `Δ` seconds *after* the trade — the part the liquidity provider keeps. |
-| `price_impact_bps_{1,5,30}s` | U | 2.1 | `effective_spread_bps − realized_spread_bps_Δs` — the adverse-selection component. |
-| `amihud_illiquidity` | U | 2.1 | `|(close − prev_close)/prev_close| / dollar_volume · 1e6`, where `dollar_volume = executed_notional / PRICE_SCALE` — the canonical Amihud (2002) measure (per-currency, not per-SOL), reported ×10⁶ per the standard convention. `prev_close` carried across intervals. |
-| `kyle_lambda` | U | 2.1 | **Price-impact slope, bps per SOL** (see §5.1). NOT PRICE_SCALE-denominated. |
-| `realized_volatility` | U | 2.2 | `sqrt(Σ r²)` over the interval's consecutive reference-price returns (the realized-variance estimator). A single return in the interval yields `|r|`. |
-| `intra_interval_price_dispersion` | U | 2.2 | `stddev(trade prices) / mean(trade prices) · 1e4` — relative, in bps. ~0 by construction for FBA (one clearing price per batch). |
-| `pricing_error_bps` | X | 2.2 | Always empty — needs an external oracle/mark-price feed the dataset lacks. Kept as a visible gap. |
+| `effective_spread_bps` | U | 2.1 | Quantity-weighted deviation of trade price from the pre-trade reference price. |
+| `realized_spread_bps_{1,5,30}s` | U | 2.1 | Same, vs the reference price `Δ` seconds *after* the trade. |
+| `price_impact_bps_{1,5,30}s` | U | 2.1 | `effective_spread_bps − realized_spread_bps_Δs`. |
+| `amihud_illiquidity` | U | 2.1 | Canonical Amihud (2002) illiquidity ratio, carried across intervals. |
+| `kyle_lambda` | U | 2.1 | Price-impact slope, bps per SOL — built differently per engine; see `METRICS.md`. |
+| `realized_volatility` | U | 2.2 | Root-sum-of-squares of consecutive reference-price returns. |
+| `intra_interval_price_dispersion` | U | 2.2 | Relative stddev of trade prices, in bps. |
+| `pricing_error_bps` | X | 2.2 | Always empty — needs an external oracle/mark-price feed the dataset lacks. |
 | `executed_volume`, `executed_notional` | U | 2.3 | Σ trade quantity, Σ `quantity·price` (raw PRICE_SCALE). |
 | `vwap` | U | 2.3 | `executed_notional / executed_volume`. |
 | `trade_count` | U | 2.3 | Trades in the interval. |
-| `fill_rate` | U | 2.3 | Σ filled / Σ original quantity, bucketed by each order's submission interval. |
+| `fill_rate` | U | 2.3 | Σ filled / Σ original quantity, bucketed by submission interval. |
 | `avg_time_to_execution_secs` | U | 2.3 | Mean first-fill latency, bucketed by submission interval. |
-| `trader_surplus` | U | 2.3 | Σ `(limit − price)·qty` clipped ≥ 0 over both sides — realized price improvement vs the limit. |
-| `order_size_inflation` | U | 2.3 | Mean per-user `orig/filled` over users with some fill — over-sizing relative to what executes. |
+| `trader_surplus` | U | 2.3 | Realized price improvement vs each side's own limit. |
+| `order_size_inflation` | U | 2.3 | Mean per-user `orig/filled` over users with some fill. |
 | `order_to_trade_ratio` | U | 2.3 | Messages / trades in the interval. |
 | `boundary_concentration` | F | 2.3 | Share of order arrivals in the final 10% of each batch's window. |
-| `throughput_orders_per_sec` | U | 2.3 | *All* messages (incl. rejected) / Σ measured engine compute time (`submit`/`clear` only). **Wall-clock; non-deterministic**, and the numerator/denominator populations don't match — a rough gauge, not a precise rate. |
-| `avg_clearing_latency_micros` | U | 2.3 | Mean per-event engine compute time — per `submit` for CDA, per `clear` for FBA (the two are not the same operation). **Wall-clock; non-deterministic.** |
+| `throughput_orders_per_sec` | U | 2.3 | Wall-clock, non-deterministic — see `METRICS.md` for the numerator/denominator caveat. |
+| `avg_clearing_latency_micros` | U | 2.3 | Wall-clock, non-deterministic — per-`submit` for CDA, per-`clear` for FBA. |
 | `unexecuted_residual_share` | F | 2.3 | `|demand − supply| / max(demand, supply)` from the batch clear. |
 
-### 5.1 `kyle_lambda` in detail
-
-Per interval, the OLS slope through the origin `λ = Σ(x·y) / Σ(x·x)` — two
-running sums, `O(1)` per observation, no retained vectors. Units: **bps of
-relative mid/clearing-price move per SOL of signed order flow**.
-
-- **CDA** — contemporaneous, one observation per taker *sweep* (a marketable
-  order crossing several price levels is one observation, since its fills
-  share `ts`, side and pre-trade mid). `x` = net signed executed quantity
-  (`+` for an aggressor buy), `y` = `(mid_{ts+5s} − mid_pre)/mid_pre·1e4`
-  (5s markout, reusing the realized-spread lookup machinery). On real data
-  this is **positive-skewed** — buy sweeps lift the mid.
-- **FBA** — contemporaneous, one observation per priced batch. `x` =
-  `net_order_flow` = Σ(submitted buy qty) − Σ(submitted sell qty) for the
-  batch, *before* price selection (`BatchClearedEvent.net_order_flow`). `y` =
-  `(cp_k − cp_{k-1})/cp_{k-1}·1e4`. On real 1-second data this comes out
-  **near zero** — the volume-maximizing + anchor-to-last-clear price rule
-  makes the clearing price nearly impervious to flow imbalance. That is a
-  genuine finding (FBA ≈ zero flow-driven price impact), not a defect; it is
-  the point of the CDA-vs-FBA comparison. The two constructions share units
-  and sign convention but not method, so compare them in spirit, not level —
-  same caveat as `quoted_spread_bps` being computed differently per engine.
-
-The exposé's RQ2.1 lists "Kyle's λ" without a formula; this is the canonical
-Kyle (1985) call-auction operationalization.
+Every formula above is checked against a hand-computed value by the runtime
+`test engine metrics` checklist — see [`TESTING.md`](TESTING.md) for the full case catalogue.
 
 ---
 
 ## 6. Running & testing
+
+**For the full testing reference — every one of the 80 `cargo test` functions, every one of
+the 37 runtime `test engine` checklist cases, and exactly how to run each in the terminal —
+see [`TESTING.md`](TESTING.md). This section is just the quick-reference command list.**
 
 ```
 cd src

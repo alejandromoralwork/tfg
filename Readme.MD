@@ -17,8 +17,7 @@ price bounds; volume that cannot be matched at that price simply remains unexecu
 (rolled over or cancelled per time-in-force) — no external liquidity source (e.g. an
 AMM) is used to fill it. Both engines trade a single fixed pair, SOL/USD.
 
-The full research design, research questions, metric catalogue, and methodology are
-written up in [`docs/expose.tex`](docs/expose.tex).
+
 
 ## Repository layout
 
@@ -40,35 +39,31 @@ src/                              Rust crate `market_sim` — both matching engi
     download_cmd.rs                `download`/`extract` commands: fetch BTC/ETH/SOL data from Zenodo via curl + tar
     update_cmd.rs                  `update` command: pulls this repo's latest source (no git needed), rebuilds, relaunches
     progress.rs                    Shared live progress-bar machinery for the long-running commands above
-    test_suite.rs                  Built-in engine checklist (`test engine <continuous|batch>`)
+    test_suite.rs                  Built-in engine checklist (`test engine <continuous|cda|batch|fba|metrics|all>`)
   metrics/
     stats.rs                      On-demand metrics for the interactive `metrics`/`orderbook` commands
     timeseries.rs                  Full RQ2.1/2.2/2.3 + engine-performance time-series metric catalogue
-  docs/                            Engine design notes, dataset schema copy, build/run walkthrough (see below)
+  docs/                            Full documentation set — see Documentation below and src/docs/README.md
   data/                            Per-coin archives fetched by `download` (git-ignored, created on demand)
   output/                          `simulate`'s time-series CSVs + summary report (git-ignored, created on demand)
 
 data/                              Top-level Hyperliquid L4 dataset tree (mostly git-ignored — see Data below)
-  SCHEMA.md, read_data.py          Dataset documentation + the dataset's own reference Python reader
+  SCHEMA.md                        Dataset documentation (field-by-field schema)
+  download_data.sh                 Bootstrap script: downloads + extracts SOL order/rejected data + mapdir
   sample/                          Small, git-tracked previews of the data (a few hundred rows/lines)
-
-download_data.sh                   Bootstrap script: downloads + extracts SOL order/rejected data + mapdir
-
-old/thesis-market-models/          Archived first-draft implementation (multi-crate workspace) — superseded
-                                    by src/, kept only for reference; not built or tested
 ```
 
 ## Data
 
 Real order flow can be fetched two ways, feeding two separate locations:
 
-**1. `download_data.sh` (repo root)** — the original bootstrap script, fetches SOL
+**1. `data/download_data.sh`** — the original bootstrap script, fetches SOL
 order-status data **and** its rejected counterpart **and** the `mapdir` lookup tables
 into the top-level `data/` tree:
 
 ```bash
-./download_data.sh                   # downloads + extracts, deletes archives afterwards
-./download_data.sh --keep-archives   # keeps the downloaded .tar.xz files too
+./data/download_data.sh                   # downloads + extracts, deletes archives afterwards
+./data/download_data.sh --keep-archives   # keeps the downloaded .tar.xz files too
 ```
 
 This is what originally populated `data/order_statuses/` and `data/mapdir/`, and is
@@ -140,7 +135,7 @@ list):
 | `log` | Chronological ledger of every executed trade (both engines) |
 | `metrics` | Point-in-time metrics for both engines |
 | `orderbook` (alias `ob`) | Active engine's order book state + its own metrics, in one view |
-| `test engine <continuous\|batch>` | Run the built-in correctness checklist against a fresh instance of that engine |
+| `test engine <continuous\|cda\|batch\|fba\|metrics\|all>` | Run the built-in correctness checklist against a fresh instance of that engine (or the full time-series metrics catalogue, or everything) |
 | `help` / `exit` | |
 
 ## Engine internals
@@ -153,14 +148,41 @@ each module from submission to settlement, see
 
 ```bash
 cd src
-cargo test                     # unit tests (parsers, decoders, metric math, ...)
-cargo test -- --ignored        # + the real-sample-data integration test
+cargo test                     # unit tests (parsers, decoders, metric math, ...) — 80 tests
+cargo test -- --ignored        # + the tests that need real sample data / external tools
 ```
 
 Run `cargo test` from `src/`. For a live, end-to-end correctness check of either
-matching engine against a fresh instance, use the in-app checklist instead:
+matching engine (or the whole metrics catalogue) against a fresh instance, use the
+built-in checklist instead — it needs no Rust toolchain, so it also runs inside the
+Docker image:
 
 ```
 sim [FBA]> test engine batch
 sim [FBA]> test engine continuous
+sim [FBA]> test engine metrics
+sim [FBA]> test engine all
 ```
+
+See [`src/docs/TESTING.md`](src/docs/TESTING.md) for the full reference: every one of
+the 80 `cargo test` functions and every one of the 37 runtime checklist cases, what
+each proves, and which system to reach for when.
+
+## Documentation
+
+The full documentation set lives in [`src/docs/`](src/docs/README.md) — start at
+[`src/docs/README.md`](src/docs/README.md) for the index, or jump straight to:
+
+| Doc | Covers |
+|---|---|
+| [`ARCHITECTURE.md`](src/docs/ARCHITECTURE.md) | The whole-project map: module boundaries, the order lifecycle, the `simulate` pipeline end to end. |
+| [`ENGINE_DESIGN.md`](src/docs/ENGINE_DESIGN.md) | How the FBA clearing price is computed, with a worked example. |
+| [`METRICS.md`](src/docs/METRICS.md) | How every one of the 35 time-series metrics is calculated, formula by formula. |
+| [`TESTING.md`](src/docs/TESTING.md) | How every test is run — `cargo test` and the runtime `test engine` checklist — and what each proves. |
+| [`REFERENCE.md`](src/docs/REFERENCE.md) | The exhaustive, file-by-file function/struct API reference. |
+| [`SCHEMA.md`](src/docs/SCHEMA.md) | The 54-byte binary order-status record format and the `mapdir` lookup tables. |
+| [`Cancellations.md`](src/docs/Cancellations.md) | Why cancellations are replayed but fills are not, and the unenforced-TIF limitation. |
+| [`init.md`](src/docs/init.md) | Toolchain prerequisites and how to build/run. |
+| [`DEPLOY.md`](src/docs/DEPLOY.md) | The Docker image and a full Google Cloud Batch deployment walkthrough. |
+| [`DATASET.md`](src/docs/DATASET.md) | The upstream Hyperliquid dataset itself (not this project's own code). |
+

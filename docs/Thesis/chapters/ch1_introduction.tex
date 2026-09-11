@@ -1,0 +1,240 @@
+\chapter{Introduction}
+\label{ch:introduction}
+
+\section{Motivation}
+\label{sec:motivation}
+
+Almost every major securities and derivatives exchange in the world
+organises trading as a continuous double auction (CDA), implemented as a
+continuous limit order book (CLOB). Orders arrive over a network, are
+placed in a queue, and are processed one at a time in the order in which
+the exchange received them. Whenever an incoming order crosses the
+opposite side of the book, a trade is executed immediately at the
+resting limit price. The rule is simple, it is easy to explain to
+participants, and it has the appealing property that a trader who is
+willing to pay the current best price never has to wait.
+
+The same rule has a structural consequence that is far less benign.
+Because execution is serial and instantaneous, the economic value of a
+trading opportunity accrues entirely to whoever reaches the matching
+engine first. When public information changes the fair value of an
+asset, the stale quotes resting in the book become mispriced for a short
+interval, and the first participant to act either takes the stale quote
+or cancels it. Nothing about the informational content of the event
+determines who wins; only relative speed does. This turns a mechanism
+that was designed to allocate goods according to willingness to pay into
+one that partly allocates them according to willingness to invest in
+latency reduction \citep{budish2015hft}.
+
+The resulting competition is not costless. Microwave and hollow-core
+fibre links, co-location, custom hardware, and kernel-bypass networking
+absorb real resources without improving the informational efficiency of
+prices in any first-order way. More importantly for the participants who
+are not in the race, the risk of being picked off is priced into
+quotes. A market maker who knows that a fraction of its fills will occur
+precisely at the moment its quote has become stale must widen its spread
+to break even on the remainder. 
+\citet{aquilina2022quantifying} exploit
+message-level data from the London Stock Exchange to measure this cost
+directly. They identify the races themselves in the raw message stream,
+show that they are extremely frequent and extremely short, and quantify
+the transfer as an implicit tax on liquidity demanders. Their central
+estimate implies that a meaningful share of the effective spread on a
+liquid instrument is compensation for latency-driven adverse selection
+rather than for inventory risk or order processing cost.
+
+The frequent batch auction (FBA) is the market design response proposed
+by \citet{budish2015hft}. Instead of processing orders one by one as they
+arrive, the engine collects all orders that arrive within a short
+discrete interval $\tau$, and at the end of the interval clears them
+simultaneously against each other at a single uniform price. Two things
+change at once. First, arrival order inside the interval no longer
+matters: an order submitted one microsecond after the interval opens and
+an order submitted one microsecond before it closes are treated
+identically. Second, all trades in the interval settle at the same
+price, so a participant cannot capture a better price simply by being
+earlier in the queue. Speed retains value only across intervals, and the
+marginal return to shaving another nanosecond off a network path
+collapses to approximately zero. Competition is redirected from latency
+to price.
+
+The idea is not exotic. Almost every equity exchange already runs
+uniform-price call auctions at the open and the close, and several
+markets have used them intraday. What is new in the FBA proposal is the
+frequency: an auction every few hundred milliseconds, or faster, so that
+the delay imposed on ordinary traders is small enough to be irrelevant
+while still being long enough to swamp the speed differences that fund
+the arms race. In decentralised finance the argument arrives from a
+different direction but converges on the same mechanism. Blockchain
+settlement is already discrete, transaction ordering inside a block is
+economically contestable, and batch clearing with a uniform price
+removes the ordering rent that would otherwise be extracted by block
+producers \citep{gong2023fbadex,walther2021multitoken}. Several deployed
+systems, among them CoW Protocol, Loopring, and SPEEDEX, are
+uniform-price batch auctions in all but name
+\citep{dutta2025cow,wang2018loopring,ramsay2023speedex}.
+
+\section{The Design Problem behind the Idea}
+\label{sec:designproblem}
+
+Stating that orders should be batched and cleared at a uniform price
+does not yet specify a matching engine. It specifies a family of
+matching engines. An exchange operator who sets out to implement one
+immediately faces a series of decisions that the theoretical proposal
+leaves open, and each of these decisions changes the strategic problem
+that participants face.
+
+How long should the interval be, and should its end be predictable? A
+fixed 100~millisecond interval is simple to reason about and easy to
+integrate with existing systems, but its boundary is a schedule, and a
+schedule can be attacked: a sufficiently fast participant can wait until
+the last possible moment, observe as much information as possible, and
+submit or cancel just before the gate closes. Randomising the closing
+time removes the target but complicates order management for everyone
+else.
+
+What should participants see while the auction is collecting orders? An
+open book during the accumulation phase helps the market converge on a
+sensible clearing price and gives participants the information they need
+to compete, but it also broadcasts intent and invites the interval
+equivalent of front-running. A sealed-bid design eliminates that
+exposure entirely, at the price of clearing an auction in which nobody
+knows what anybody else has done, which classical auction theory
+predicts will lead to more conservative bidding
+\citep{vickrey1961counterspeculation,klemperer1999auction}.
+
+Should all order flow meet in a single pool? Retail flow is on average
+uninformed, institutional flow on average is not, and a market maker who
+cannot distinguish them must quote a price that reflects the mixture
+\citep{glosten1985bid}. Segregating flow allows tighter quotes against
+the benign part of it. Jump Trading's Dual Flow Batch Auction takes this
+further by partitioning each batch into maker and taker intent groups
+and running two independent auctions per interval, so that liquidity
+providers never trade against each other.
+
+What happens when the two sides do not match exactly at the clearing
+price? Uniform-price clearing determines the price and the total
+quantity, but not who among the participants on the long side of the
+market gets filled. The rationing rule that resolves this is not a
+technicality. Pro-rata allocation invites participants to inflate their
+order sizes; time priority inside the batch reintroduces a micro-scale
+speed race through the back door; random allocation is strategically
+clean but unpredictable for participants who need certainty of
+execution. \citet{haynes2020precedence} document how sensitive
+participant behaviour is to precedence rules in existing derivatives
+markets.
+
+None of these questions has a single correct answer. Each represents a
+trade-off, and the purpose of the theoretical part of this thesis is to
+make those trade-offs explicit and to derive, from auction theory and
+market microstructure theory, which behaviour each option should be
+expected to induce.
+
+\section{Problem Statement and Research Gap}
+\label{sec:gap}
+
+Two gaps motivate this work, one conceptual and one empirical.
+
+\paragraph{The design space is discussed piecemeal.}
+The literature on frequent batch auctions is largely a literature about
+whether batching is a good idea, not about how a batching engine should
+be built. \citet{budish2015hft} establish the equilibrium argument,
+\citet{aquilina2022quantifying} quantify what the alternative costs,
+\citet{zoican2021speed} and \citet{eibelshauser2022fba} study how
+information and speed interact inside auctions, and
+\citet{aldrich2020experiments} compare the two institutions in the
+laboratory. Individual design dimensions appear in isolation: rationing
+rules in the derivatives microstructure literature, disclosure in the
+transparency literature \citep{madhavan1996transparency}, and clearing
+formulations in the decentralised exchange literature
+\citep{walther2021multitoken,ramsay2023speedex}. What is missing is a
+consolidated treatment that decomposes the engine into its architectural
+blocks, sets out the options for each, and traces each option to the
+strategic behaviour it induces. Two further points inside this space are
+particularly underdeveloped. First, in continuous markets the
+maker--taker distinction is defined by arrival timing relative to book
+state, but in a batch that clears simultaneously at one price that
+definition dissolves, which means fee and rebate schemes must be
+redefined rather than transplanted. Second, uniform-price clearing
+mechanically produces price improvement relative to the submitted limit
+price for every executed order except the marginal one, and the size and
+distribution of that improvement depend directly on the clearing and
+rationing rules chosen.
+
+\paragraph{Field comparisons cannot hold order flow constant.}
+The empirical literature comparing batch and continuous trading is
+forced to compare different venues, different assets, or different time
+periods. \citet{lee2026taiwan} exploit the Taiwan Stock Exchange's
+transition from intraday call auctions to continuous trading, which is
+about as clean as a natural experiment in this area can be, and yet the
+participant population, the order submission strategies, and the
+information environment all adjust together with the mechanism. This is
+not a shortcoming of the studies; it is a property of the object. An
+order stream exists only under the mechanism that produced it, so a
+strictly like-for-like comparison in which one and the same stream is
+executed once continuously and once in batches cannot be obtained from
+field data at all. Simulation with two interchangeable engines is the
+only design that holds the flow fixed and varies the mechanism.
+
+\section{Research Questions}
+\label{sec:rqs}
+
+The thesis is organised around two research questions, one for each
+part.
+
+\begin{quote}
+\textbf{RQ1 (theoretical).} How is a frequent batch auction engine
+designed, and which design options exist for each of its architectural
+components?
+\end{quote}
+
+RQ1 is answered by decomposing the engine into five design blocks ---
+the batch interval, the information disclosure regime, order flow
+segregation, the matching and rationing rule, and settlement and
+residual handling --- by enumerating the options available within each
+block, and by deriving from theory the strategic behaviour that each
+option induces. The output is a structured description of the design
+space together with a trade-off matrix.
+
+\begin{quote}
+\textbf{RQ2 (empirical).} How do a continuous double auction and a
+frequent batch auction differ when both engines are fed with the same
+order flow?
+\end{quote}
+
+RQ2 is decomposed into three measurable dimensions:
+
+\begin{itemize}
+  \item \textbf{RQ2.1 Liquidity and transaction costs.} Which mechanism
+  lets participants trade at a lower cost and with more depth
+  available?
+  \item \textbf{RQ2.2 Price discovery and market quality.} Which
+  mechanism produces a more stable, less dispersed price series?
+  \item \textbf{RQ2.3 Execution, allocation and order-arrival timing.}
+  Who gets filled, at what cost, and how does the batch mechanism
+  reshape execution outcomes for the same unchanged order flow?
+\end{itemize}
+
+Each dimension is operationalised by a set of metrics defined in
+\cref{sec:metrics}, and every metric is tagged with the minimum order
+book data level it requires.
+
+\section{Contribution}
+\label{sec:contribution}
+
+The thesis makes three contributions. It consolidates the FBA design
+space into five blocks and links each available option to a theoretical
+prediction about induced behaviour, which turns a scattered discussion
+into a checklist an exchange operator can work through. It implements
+two matching engines behind a single shared interface, so that the
+mechanism is the only treatment variable and every internal quantity ---
+including submitted limit prices of orders that never execute, the exact
+rationing outcome, and the residual left unmatched after each batch ---
+is directly observable rather than inferred. And it applies this
+apparatus to a recently released Level~4 order book dataset from the
+Hyperliquid exchange \citep{albers2026openbook}, which carries
+participant attribution at nanosecond precision and therefore supports
+per-participant allocation metrics that conventional Level~2 or Level~3
+feeds cannot.
+
+

@@ -1,0 +1,122 @@
+%----------------------------------------------------------------------
+%  Front matter
+%----------------------------------------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{1.0cm}
+
+{\large \textsc{International University of Applied Sciences}}\\[0.3cm]
+
+
+{\LARGE\bfseries Frequent Batch Auction Engine}\\[0.6cm]
+{\Large A Design Analysis and Simulation-Based Comparison\\ against Continuous Trading}\\[2.5cm]
+
+{\large Bachelor Thesis}\\[0.4cm]
+{\normalsize submitted in partial fulfilment of the requirements\\ for the degree of Bachelor of Science}\\[2.5cm]
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{Screenshot 2026-09-05 124118.png}
+\end{figure}
+
+
+\begin{tabular}{rl}
+\textbf{Author:} & Alejandro Moral Aranda\\
+\textbf{Matriculation number:} & 92132071\\
+\textbf{Programme:} & B.Sc.Data Science\\
+\textbf{Supervisor:} & Prof.\ Dr.\ rer.\ nat.\ \Supervisor Hartwig Mayer\\
+\textbf{Second examiner:} & Prof.\ Dr.\ Second Examiner\\
+\textbf{Submission date:} & \today\\
+\end{tabular}
+
+\vfill
+\end{titlepage}
+
+%----------------------------------------------------------------------
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+\markboth{Abstract}{Abstract}
+
+Continuous limit order books process orders serially, in the sequence in
+which they arrive. This single architectural property creates a
+mechanical incentive to compete on speed rather than on price, and the
+resulting latency arms race imposes a measurable cost on liquidity
+demanders. The frequent batch auction (FBA) has been proposed as a
+market design response: orders are collected over a short discrete
+interval and cleared simultaneously at a single uniform price, which
+removes the value of a marginal speed advantage inside the interval.
+
+This thesis studies the FBA from two directions. The theoretical part
+decomposes an FBA matching engine into five design blocks --- the batch
+interval, the information disclosure regime, order flow segregation,
+the matching and rationing rule, and settlement and residual handling
+---  it enumerates the options available for each block, and derives from
+auction theory and market microstructure theory which strategic
+behaviour each option induces. The result is a structured design space
+and a trade-off matrix that makes explicit which incentive an exchange
+operator buys and which one it sells with every architectural choice.
+
+The empirical part turns that design space into code. Two matching
+engines, a continuous double auction and a frequent batch auction, are
+implemented in Rust behind one shared matching interface and driven by
+the same replayed Level~4 order flow from the Hyperliquid exchange for the token Solana (SOL). The comparison covers liquidity and transaction costs,price discovery and market quality, and execution, allocation and
+order-arrival timing.
+
+\vspace{0.6em}
+\noindent\textbf{Keywords:} market microstructure; frequent batch
+auction; matching engine; latency arbitrage; uniform-price clearing;
+Level~4 order book data.
+
+%----------------------------------------------------------------------
+\chapter*{Declaration of Authorship}
+\addcontentsline{toc}{chapter}{Declaration of Authorship}
+\markboth{Declaration of Authorship}{Declaration of Authorship}
+
+I hereby declare that this thesis is my own work and that I have used no
+sources or aids other than those indicated. All passages taken
+literally or in substance from published or unpublished sources are
+identified as such. This thesis has not been submitted, in the same or
+a similar form, to any other examination authority.
+
+\vspace{2.5cm}
+\noindent\rule{6cm}{0.4pt}\hspace{2cm}\rule{6cm}{0.4pt}\\
+\noindent Place, Date \hspace{7.2cm} Signature
+
+%----------------------------------------------------------------------
+\cleardoublepage
+\tableofcontents
+\cleardoublepage
+\addcontentsline{toc}{chapter}{List of Figures}
+\listoffigures
+\cleardoublepage
+\addcontentsline{toc}{chapter}{List of Tables}
+\listoftables
+
+%----------------------------------------------------------------------
+\cleardoublepage
+\chapter*{List of Abbreviations}
+\addcontentsline{toc}{chapter}{List of Abbreviations}
+\markboth{List of Abbreviations}{List of Abbreviations}
+
+\begin{tabular}{ll}
+\toprule
+AMM   & Automated Market Maker\\
+BBO   & Best Bid and Offer\\
+CDA   & Continuous Double Auction\\
+CLOB  & Continuous Limit Order Book\\
+CME   & Chicago Mercantile Exchange\\
+CoW   & Coincidence of Wants\\
+DEX   & Decentralised Exchange\\
+DFBA  & Dual Flow Batch Auction\\
+FBA   & Frequent Batch Auction\\
+HFT   & High-Frequency Trading\\
+L1--L4& Order book data levels one to four\\
+LP    & Liquidity Provider / Linear Program (as indicated in context)\\
+MEV   & Maximal Extractable Value\\
+PnL   & Profit and Loss\\
+RQ    & Research Question\\
+TIF   & Time in Force\\
+TWSE  & Taiwan Stock Exchange\\
+VWAP  & Volume-Weighted Average Price\\
+\bottomrule
+\end{tabular}

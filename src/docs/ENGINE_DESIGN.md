@@ -41,7 +41,7 @@ are step functions that only change value at a submitted limit price, so the
 volume-maximizing price is always achievable at one of them. Market orders
 never contribute a candidate (they carry no price).
 
-**Step 2 — Evaluate every candidate** (`select_price` + `aggregate_volume`)
+**Step 2 — Evaluate every candidate** (`select_price` + `demand_supply_evaluators`)
 
 For each candidate price `P`:
 

@@ -847,7 +847,7 @@ fn fba_tie_with_history_picks_closest_price() -> TestCase {
 //
 // A separate code path from the engine getters above: these drive the
 // streaming aggregator `simulate` uses, with hand-built events, and check each
-// of the ~32 CSV columns against an independently hand-computed value. Uses
+// of the 35 CSV columns against an independently hand-computed value. Uses
 // `finish` (not the `#[cfg(test)]`-only `finalize`) so it runs in the release
 // binary / the container.
 

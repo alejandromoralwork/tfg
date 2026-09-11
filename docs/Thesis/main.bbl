@@ -1,0 +1,158 @@
+\begin{thebibliography}{}
+
+\bibitem[Albers et~al., 2026]{albers2026openbook}
+Albers, J., Cucuringu, M., Howison, S., and Shestopaloff, A.~Y. (2026).
+\newblock An open book: {L}evel 4 order book data from the {H}yperliquid
+  exchange.
+\newblock {\em SSRN Working Paper}.
+\newblock Dataset: \url{https://zenodo.org/records/18184441}.
+
+\bibitem[Aldrich and L{\'o}pez~Vargas, 2020]{aldrich2020experiments}
+Aldrich, E.~M. and L{\'o}pez~Vargas, K. (2020).
+\newblock Experiments in high-frequency trading: Comparing two market
+  institutions.
+\newblock {\em Experimental Economics}, 23(2):322--352.
+
+\bibitem[Amihud, 2002]{amihud2002illiquidity}
+Amihud, Y. (2002).
+\newblock Illiquidity and stock returns: Cross-section and time-series effects.
+\newblock {\em Journal of Financial Markets}, 5(1):31--56.
+
+\bibitem[Aquilina et~al., 2022]{aquilina2022quantifying}
+Aquilina, M., Budish, E., and O'Neill, P. (2022).
+\newblock Quantifying the high-frequency trading ``arms race''.
+\newblock {\em The Quarterly Journal of Economics}, 137(1):493--564.
+
+\bibitem[Bishara and Moallemi, 2024]{bishara2024intent}
+Bishara, A. and Moallemi, C.~C. (2024).
+\newblock An analysis of intent-based markets.
+\newblock arXiv preprint arXiv:2403.02525.
+
+\bibitem[Budish et~al., 2015]{budish2015hft}
+Budish, E., Cramton, P., and Shim, J. (2015).
+\newblock The high-frequency trading arms race: Frequent batch auctions as a
+  market design response.
+\newblock {\em The Quarterly Journal of Economics}, 130(4):1547--1621.
+
+\bibitem[Canidio and Henneke, 2026]{canidio2026fair}
+Canidio, A. and Henneke, F. (2026).
+\newblock Fair combinatorial auctions: Endogenous best execution in blockchain
+  trade-intent markets.
+\newblock arXiv preprint arXiv:2408.12225.
+
+\bibitem[Dutta and Team, 2025]{dutta2025cow}
+Dutta, A. and Team, C. (2025).
+\newblock A coincidence of wants mechanism for swap trade execution in
+  decentralized exchanges.
+\newblock arXiv preprint arXiv:2507.10149.
+
+\bibitem[Eibelsh{\"a}user and Smetak, 2022]{eibelshauser2022fba}
+Eibelsh{\"a}user, S. and Smetak, F. (2022).
+\newblock Frequent batch auctions and informed trading.
+\newblock SAFE Working Paper 344, Leibniz Institute for Financial Research
+  SAFE.
+
+\bibitem[Glosten and Milgrom, 1985]{glosten1985bid}
+Glosten, L.~R. and Milgrom, P.~R. (1985).
+\newblock Bid, ask and transaction prices in a specialist market with
+  heterogeneously informed traders.
+\newblock {\em Journal of Financial Economics}, 14(1):71--100.
+
+\bibitem[Gode and Sunder, 1993]{gode1993allocative}
+Gode, D.~K. and Sunder, S. (1993).
+\newblock Allocative efficiency of markets with zero-intelligence traders:
+  Market as a partial substitute for individual rationality.
+\newblock {\em Journal of Political Economy}, 101(1):119--137.
+
+\bibitem[Gong et~al., 2023]{gong2023fbadex}
+Gong, T., Liu, Z., and Kate, A. (2023).
+\newblock The case of {FBA} as a {DEX} processing model.
+\newblock arXiv preprint arXiv:2302.01177.
+
+\bibitem[Harrison and Pardo-Guerra, 2025]{harrison2025hybrid}
+Harrison, B. and Pardo-Guerra, J.~P. (2025).
+\newblock Hybrid genetic algorithm for optimal user order routing:
+  Multi-objective solver optimization in {CoW} protocol batch auctions.
+\newblock arXiv preprint arXiv:2510.21647.
+
+\bibitem[Hasbrouck, 1993]{hasbrouck1993assessing}
+Hasbrouck, J. (1993).
+\newblock Assessing the quality of a security market: A new approach to
+  transaction-cost measurement.
+\newblock {\em The Review of Financial Studies}, 6(1):191--212.
+
+\bibitem[Hasbrouck, 1995]{hasbrouck1995onesecurity}
+Hasbrouck, J. (1995).
+\newblock One security, many markets: Determining the contributions to price
+  discovery.
+\newblock {\em The Journal of Finance}, 50(4):1175--1199.
+
+\bibitem[Haynes and Onur, 2020]{haynes2020precedence}
+Haynes, R. and Onur, E. (2020).
+\newblock Precedence rules in matching algorithms.
+\newblock {\em Journal of Commodity Markets}, 19:100106.
+
+\bibitem[Hendershott et~al., 2011]{hendershott2011algorithmic}
+Hendershott, T., Jones, C.~M., and Menkveld, A.~J. (2011).
+\newblock Does algorithmic trading improve liquidity?
+\newblock {\em The Journal of Finance}, 66(1):1--33.
+
+\bibitem[Klemperer, 1999]{klemperer1999auction}
+Klemperer, P. (1999).
+\newblock Auction theory: A guide to the literature.
+\newblock {\em Journal of Economic Surveys}, 13(3):227--286.
+
+\bibitem[Kyle, 1985]{kyle1985continuous}
+Kyle, A.~S. (1985).
+\newblock Continuous auctions and insider trading.
+\newblock {\em Econometrica}, 53(6):1315--1335.
+
+\bibitem[LeBaron, 2006]{lebaron2006agent}
+LeBaron, B. (2006).
+\newblock Agent-based computational finance.
+\newblock In Tesfatsion, L. and Judd, K.~L., editors, {\em Handbook of
+  Computational Economics}, volume~2, pages 1187--1233. Elsevier.
+
+\bibitem[Lee et~al., 2026]{lee2026taiwan}
+Lee, Y.-T., Wang, K., and Ricc{\`o}, R. (2026).
+\newblock Frequent batch auctions vs. continuous trading: Evidence from
+  {T}aiwan.
+\newblock {\em Journal of Financial Markets}, page 101082.
+
+\bibitem[Madhavan, 1996]{madhavan1996transparency}
+Madhavan, A. (1996).
+\newblock Market transparency.
+\newblock {\em Journal of Financial Intermediation}, 5(3):255--283.
+
+\bibitem[O'Hara, 1995]{ohara1995microstructure}
+O'Hara, M. (1995).
+\newblock {\em Market Microstructure Theory}.
+\newblock Blackwell Publishers, Cambridge, MA.
+
+\bibitem[Ramsay et~al., 2023]{ramsay2023speedex}
+Ramsay, G., Goel, A., and Mazi{\`e}res, D. (2023).
+\newblock {SPEEDEX}: A high-throughput, arbitrage-free decentralized exchange.
+\newblock arXiv preprint arXiv:2111.02719.
+
+\bibitem[Vickrey, 1961]{vickrey1961counterspeculation}
+Vickrey, W. (1961).
+\newblock Counterspeculation, auctions, and competitive sealed tenders.
+\newblock {\em The Journal of Finance}, 16(1):8--37.
+
+\bibitem[Walther, 2021]{walther2021multitoken}
+Walther, T. (2021).
+\newblock Multi-token batch auctions with uniform clearing prices: Features and
+  models.
+\newblock Technical report, Gnosis DEX Research.
+
+\bibitem[Wang et~al., 2018]{wang2018loopring}
+Wang, D.~N., Zhou, J., Wang, A., and Finestone, M. (2018).
+\newblock Loopring: A decentralized token exchange protocol.
+\newblock Loopring Foundation Whitepaper.
+
+\bibitem[Zoican et~al., 2021]{zoican2021speed}
+Zoican, M., Haas, M., and Khapko, M. (2021).
+\newblock Speed and learning in high-frequency auctions.
+\newblock {\em Journal of Financial Markets}, 54:100583.
+
+\end{thebibliography}

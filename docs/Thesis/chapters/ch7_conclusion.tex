@@ -1,0 +1,115 @@
+\chapter{Conclusion}
+\label{ch:conclusion}
+
+\section{Answers to the Research Questions}
+
+\paragraph{RQ1.} A frequent batch auction engine is fully specified by
+five design blocks: the batch interval, the disclosure regime during
+accumulation, the order flow segregation architecture, the clearing and
+rationing rule, and settlement and residual handling. These are not
+optional extras layered onto the mechanism; they are decisions that a
+continuous engine also makes but makes implicitly, and that become
+visible and contestable only once serial processing is abandoned.
+\Cref{ch:design} enumerated the options within each block and derived
+the behaviour each induces, consolidating the result in the trade-off
+matrix of \Cref{tab:tradeoff}.
+
+Three findings stand out from that analysis. First, the only unambiguous
+structural gain in the space is the combination of discrete accumulation
+and uniform pricing; every other choice trades one distortion for
+another, and the design question is which distortion the venue prefers
+rather than which option is undistorted. Second, the blocks interact, so
+they cannot be optimised independently: disclosure determines how much
+pressure falls on the interval boundary, interval length interacts with
+instrument liquidity, and the residual policy determines whether an
+order can accrue persistence across batches. Third, a venue can
+implement frequent batch auctions exactly as proposed and still have a
+speed race, because price-time rationing inside the batch reintroduces
+one through the allocation rule. This last point is the sharpest
+practical implication of the chapter.
+
+Two questions in the space have no settled answer and were developed
+here as contributions rather than summaries. The maker--taker
+distinction dissolves under simultaneous uniform-price clearing, and
+four candidate redefinitions were set out, of which persistence across
+batches has the strongest economic claim. And the price improvement that
+uniform clearing produces relative to submitted limits is not a fixed
+property of the mechanism but a quantity whose magnitude and
+distribution depend on the clearing and rationing rules chosen.
+
+\paragraph{RQ2.} \Cref{ch:results} reports the paired comparison of the
+two engines on identical order flow across liquidity and transaction
+costs, price discovery, and execution and allocation, together with the
+interval sweep and the rationing comparison.
+\ph[summary of measured findings to be inserted once the simulation
+results are populated]
+
+\section{Limitations}
+\label{sec:limitations}
+
+The central limitation is intrinsic to the design rather than incidental
+to its execution. A replay simulation holds order flow constant, which
+is exactly what makes the comparison clean, and by the same token it
+prevents participants from responding to the mechanism. The orders
+replayed here were submitted under a continuous engine: their sizes were
+not chosen against a pro rata rationing rule, their arrival times were
+not chosen against a batch boundary, and their limit prices were not
+chosen under uncertainty about a clearing price. Every equilibrium
+prediction of the FBA literature --- narrower quoted spreads, size
+inflation, boundary concentration, bid shading --- is therefore out of
+reach, and what the simulation delivers is the mechanical baseline
+against which such responses would have to be measured.
+
+Four further limitations qualify the results. The data come from a
+single venue and a limited number of sessions, so magnitudes should not
+be transported to other asset classes. Several metrics require
+adaptation to a batch setting, and the adapted quantity is not always
+the same object as the original, most notably the quoted spread and the
+pre-trade midpoint reference. The engines are per-pair, so the
+multi-asset clearing problem developed in \Cref{sec:clearing} is part of
+the design analysis but not of the measurement. And the dataset reflects
+what one non-validating node observed, which is not necessarily what the
+venue's own engine processed.
+
+\section{Future Work}
+\label{sec:futurework}
+
+\paragraph{Strategic agent populations.} The natural extension is to
+replace replayed flow with agents that respond to the mechanism. A
+population containing liquidity providers who requote when their quote
+becomes stale, informed traders in the sense of \citet{kyle1985continuous},
+and uninformed liquidity demanders would make the equilibrium
+predictions P3, P5, P6, and P7 testable
+\citep{lebaron2006agent}. The obvious cost is that results would then
+depend on the behavioural assumptions built into the agents rather than
+on observed behaviour, which is why the two designs are complements: the
+replay establishes what the mechanism does mechanically, and the agent
+model establishes what it does in equilibrium under stated assumptions.
+A hybrid in which historical flow supplies the background and a small
+set of strategic agents is layered on top would preserve much of the
+realism of the former while permitting adaptation at the margin.
+
+\paragraph{Hybrid architectures.} The comparison here is binary, but the
+design space is not. A venue could run continuous matching with periodic
+batch clearings for the marginal order set, batch only during volatile
+periods, or batch only some instruments. Each of these is a point
+between the two poles and can be evaluated with exactly the harness
+built for this thesis, since the engine is substitutable at one
+interface.
+
+\paragraph{The multi-asset case.} Implementing the multi-asset clearing
+problem of \eqref{eq:multiflow} and measuring how much cross-pair
+arbitrage rent coherent clearing actually removes on real flow would
+connect the microstructure framing of this thesis with the decentralised
+exchange literature it draws on. This is a well-defined empirical
+question that the present engines cannot answer because they clear one
+pair at a time.
+
+\paragraph{Fee design under batching.} Finally, the maker--taker problem
+identified in \Cref{sec:segregation} could be studied directly by
+implementing each of the four candidate definitions in the engine and
+measuring how the resulting fee incidence is distributed across
+participant types on the same flow. This is mechanical rather than
+behavioural, which means it is within reach of the design used here, and
+it addresses a question every venue considering batching will have to
+answer.
