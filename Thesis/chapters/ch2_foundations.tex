@@ -10,7 +10,7 @@ all. \Cref{sec:transparency} covers market transparency theory, which
 governs the disclosure block of the design space.
 \Cref{sec:auctiontheory} covers uniform-price auction theory, which
 governs clearing and rationing. \Cref{sec:quality} covers the
-measurement framework that turns all of this into numbers.\Cref{sec:priceimprovement} covers the price improvement effect and latency boundary arbitrage problem of Frequent Batch Auctions.
+measurement framework that turns all of this into numbers.\Cref{sec:priceimprovement} covers the price improvement effect and latency boundary arbitrage problem of FBA.
 
 
 \section{Discrete-Time Market Design}
@@ -108,7 +108,7 @@ theory of that loss predates high-frequency trading by three decades and
 is what makes the spread a meaningful economic object in the first
 place.
 
-\subsection{Glosten and Milgrom: The Spread as an Information Premium}
+\subsection{The Spread as an Information Premium}
 
 \citet{glosten1985bid} model a market maker who faces a mixed population
 of informed and uninformed traders and who cannot tell them apart. The
@@ -128,7 +128,7 @@ segregation: if benign flow can be separated from potentially informed
 flow, a liquidity provider can quote a tighter price against the benign
 subset without cross-subsidising losses on the other.
 
-\subsection{Kyle: Strategic Informed Trading and Market Depth}
+\subsection{Strategic Informed Trading and Market Depth}
 
 \citet{kyle1985continuous} approaches the same problem from the side of
 the informed trader. A single informed agent chooses how much to trade,
@@ -319,16 +319,12 @@ resting price, would in general have accrued differently. Aggregating
 this quantity across executed orders gives the realised trader surplus
 metric used in \Cref{sec:metrics}.
 
-\subsection{The Clearing Problem}
-
-The clearing price is not chosen by convention; it is the solution to an
-optimisation problem. In the single-asset case, the standard rule
-selects the price that maximises executed volume, with tie-breaking
-rules for the case where an interval of prices achieves the same
-maximum. The formal statement, including the multi-asset extension with
-coherent cross-rates that
-\citet{walther2021multitoken} and \citet{ramsay2023speedex} develop for
-decentralised exchanges, is given in \Cref{sec:clearing}.
+%\subsection{The Clearing Problem}
+%The clearing price is not chosen by convention; it is the solution to an optimisation problem. In the single-asset case, the standard rule selects the price that maximises executed volume, with tie-breaking rules for the case where an interval of prices achieves the same maximum. 
+%The formal statement, including the multi-asset extension with
+%coherent cross-rates that
+%\citet{walther2021multitoken} and \citet{ramsay2023speedex} develop for
+%decentralised exchanges, is given in \Cref{sec:clearing}.
 
 \subsection{Rationing and Induced Behaviour}
 
@@ -389,7 +385,8 @@ agent-based alternative, in which trader behaviour is modelled and
 allowed to adapt; \Cref{sec:limitations} discusses why replay is the
 appropriate choice here and what it gives up.
 
-\section{Price Improvement as a Distributive Artifact and the Boundary
+\newpage
+\section{Price Improvement produces the Boundary
 Repricing Race}
 \label{sec:priceimprovement}
 
@@ -417,70 +414,69 @@ welfare quantity but a transfer, and the rule that determines its size
 is manipulable by the timing of order submission. The consequence is
 that the FBA does not remove the incentive to compete on speed; it
 converts a race for priority into a race for proximity to the batch
-boundary. The argument is developed formally below and then bounded:
-it is a qualification of the Budish, Cramton and Shim mechanism, not a
-refutation of it.
+boundary.
 
 \subsection{Setup}
 
 Consider a single batch collecting orders over the window $[0,\tau]$.
-Let $\mathcal{B}$ and $\mathcal{S}$ denote the sets of buy and sell
-orders submitted in the window, each order $k$ characterised by a limit
-price $\pi_k$, a quantity $q_k$, and a submission time $t_k$. Define the
-aggregate schedules
+Let $\mathbb{B}$ and $\mathbb{A}$ denote the sets of bids and asks
+submitted in the window, each order $k$ characterised by a limit price
+$\pi_k$, a quantity $q_k$, and a
+submission time $t_k$. We define the aggregate demand and supply schedules:
 \begin{equation}
-  D(p) = \sum_{k \in \mathcal{B}} q_k \mathbf{1}\{\pi_k \ge p\},
+  \label{eq:demandsupply}
+  D(p) = \sum_{k \in \mathbb{B}} q_k \mathbf{1}\{\pi_k \ge p\},
   \qquad
-  S(p) = \sum_{k \in \mathcal{S}} q_k \mathbf{1}\{\pi_k \le p\},
+  S(p) = \sum_{k \in \mathbb{A}} q_k \mathbf{1}\{\pi_k \le p\},
 \end{equation}
 and the executable volume $V(p) = \min\{D(p), S(p)\}$. The clearing rule
 selects a price from the volume-maximising set
 \begin{equation}
-  \mathcal{P}^{*} = \arg\max_{p} V(p),
-  \qquad V^{*} = \max_p V(p),
+  \mathbb{P}^{*} = \argmax_{p \in \mathbb{R}_{+}} V(p),
+  \qquad V^{*} = \max_{p} V(p),
 \end{equation}
 which, since $D$ is non-increasing and $S$ non-decreasing, is a closed
-interval $[\underline{p}, \overline{p}]$ whenever the book crosses. When
-this interval is non-degenerate the clearing rule is not fully
-determined by the volume objective, and a secondary selection rule
-$\sigma : \mathcal{P}^{*} \to \mathbb{R}$ must be specified. Real
-auctions resolve the indeterminacy by minimising the residual imbalance
-and then by proximity to a reference price
+interval $[\underline{p}, \overline{p}]$ whenever the book crosses
+($V^{*} > 0$). When this interval is non-degenerate the clearing price is
+not determined by the volume objective alone, and a secondary selection
+rule $\sigma$ with $p^{*} = \sigma(\mathbb{P}^{*}) \in \mathbb{P}^{*}$
+must be specified. Real auctions resolve the indeterminacy by minimising
+the residual imbalance and then by proximity to a reference price
 \citep{haynes2020precedence}. Let $x_k \ge 0$ denote the executed
 quantity of order $k$ under a volume-maximising allocation, so that
-$\sum_{\mathcal{B}} x_k = \sum_{\mathcal{S}} x_k = V^{*}$.
+$\sum_{k \in \mathbb{B}} x_k = \sum_{k \in \mathbb{A}} x_k = V^{*}$.
 
 \subsection{Price Improvement Is a Transfer}
 
 Write the realised surplus of the two sides at clearing price $p$ as
 \begin{equation}
-  \mathrm{PI}^{\mathcal{B}}(p)
-    = \sum_{k \in \mathcal{B}} (\pi_k - p)\, x_k,
+  \mathrm{PI}^{\mathbb{B}}(p)
+    = \sum_{k \in \mathbb{B}} (\pi_k - p)\, x_k,
   \qquad
-  \mathrm{PI}^{\mathcal{S}}(p)
-    = \sum_{k \in \mathcal{S}} (p - \pi_k)\, x_k .
+  \mathrm{PI}^{\mathbb{A}}(p)
+    = \sum_{k \in \mathbb{A}} (p - \pi_k)\, x_k .
 \end{equation}
 
 \begin{lemma}[Invariance of total surplus]
 \label{lem:invariance}
-For any $p \in \mathcal{P}^{*}$ with allocation $x$ held fixed,
+For any $p \in \mathbb{P}^{*}$ with allocation $x$ held fixed,
 \begin{equation}
-  W = \mathrm{PI}^{\mathcal{B}}(p) + \mathrm{PI}^{\mathcal{S}}(p)
-    = \sum_{k \in \mathcal{B}} \pi_k x_k
-      - \sum_{k \in \mathcal{S}} \pi_k x_k ,
+  W = \mathrm{PI}^{\mathbb{B}}(p) + \mathrm{PI}^{\mathbb{A}}(p)
+    = \sum_{k \in \mathbb{B}} \pi_k x_k
+      - \sum_{k \in \mathbb{A}} \pi_k x_k ,
 \end{equation}
 which does not depend on $p$.
 \end{lemma}
 
 
 Expanding the two sums, the terms in $p$ enter as
-$p\left(\sum_{\mathcal{S}} x_k - \sum_{\mathcal{B}} x_k\right)$, which
+$p\left(\sum_{\mathbb{A}} x_k - \sum_{\mathbb{B}} x_k\right)$, which
 vanishes by flow conservation.
 
 
 Two consequences follow immediately. First,
-$\partial \mathrm{PI}^{\mathcal{B}} / \partial p = -V^{*}$ and
-$\partial \mathrm{PI}^{\mathcal{S}} / \partial p = +V^{*}$: every unit of price improvement conferred on
+$\partial \mathrm{PI}^{\mathbb{B}} / \partial p = -V^{*}$ and
+$\partial \mathrm{PI}^{\mathbb{A}} / \partial p = +V^{*}$: every unit of price improvement conferred on
 one side is subtracted from the other. Second, and consequently, a
 measured increase in buy-side price improvement is not evidence that the
 mechanism created value. Total gains from trade are fixed by the
@@ -489,10 +485,10 @@ reported in \Cref{sec:metrics} must therefore be read as a distributive
 statistic, and reported for both sides jointly rather than for one.
 
 This reframing is what motivates the rest of the section. If
-$\mathcal{P}^{*}$ were a singleton, the division would be pinned down by
+$\mathbb{P}^{*}$ were a singleton, the division would be pinned down by
 the submitted limits and there would be nothing to contest. Because it
 is generically an interval, the surplus split depends on a rule, and any
-participant able to influence the position of $\mathcal{P}^{*}$ or of
+participant able to influence the position of $\mathbb{P}^{*}$ or of
 $\sigma$ within it has an incentive to do so.
 
 \subsection{The Last-Mover Advantage}
@@ -503,26 +499,45 @@ observes the schedules formed by all orders with $t_k < t$.
 
 \begin{proposition}[Late submission weakly dominates]
 \label{prop:lastmover}
-Let a participant observe the residual schedule it faces and let
-$\sigma$ be weakly monotone in submitted limit prices. Then the
-participant's optimal limit is the one that moves $\sigma(\mathcal{P}^{*})$
-to the boundary of $\mathcal{P}^{*}$ most favourable to it subject to
-remaining executed, and its realised surplus is weakly increasing in the
-information available at submission. Submitting later therefore weakly
-dominates submitting earlier.
+Suppose a participant can see the orders already submitted by others,
+and hence the residual supply or demand it faces. Suppose also that the
+selection rule $\sigma$ responds monotonically to submitted limit prices,
+so that a participant can shift the clearing price within
+$\mathbb{P}^{*}$ by adjusting its own limit. Then the participant's best
+response is to set its limit so that the clearing price moves to the edge
+of $\mathbb{P}^{*}$ most favourable to it (the lowest price for a buyer,
+the highest for a seller), while still keeping its order executed.
+Because this manoeuvre requires knowing the other orders, a participant's
+surplus can only grow with the information it has when it submits.
+Submitting later is therefore never worse than submitting earlier, and
+it is strictly better whenever the extra information changes the
+participant's optimal limit.
 \end{proposition}
 
 The argument is the standard one for sequential-move bargaining over a
 fixed surplus, applied here to the division established in
 \Cref{lem:invariance}. A seller who observes a resting buy limit of
-$\pi_{\mathcal{B}}$ knows that any ask weakly below it will execute, and
-therefore submits just below $\pi_{\mathcal{B}}$ rather than at its own
+$\pi_{\mathbb{B}}$ knows that any ask weakly below it will execute, and
+therefore submits just below $\pi_{\mathbb{B}}$ rather than at its own
 valuation, capturing the interval. The truthfulness property of
 \Cref{sec:auctiontheory} is not violated in its own terms, since it is
 stated for a participant that cannot move the clearing price; what
-disclosure does is make the boundaries of $\mathcal{P}^{*}$ computable,
+disclosure does is make the boundaries of $\mathbb{P}^{*}$ computable,
 and hence make deviation actionable for any participant whose order is
 large enough to reach them.
+
+
+\begin{remark}
+The proposition identifies the source of the incentive to wait. When
+several prices clear the same maximum volume, the choice among them is
+not neutral: it transfers surplus between buyers and sellers. Under a
+monotone $\sigma$, the participant who moves last can capture this
+transfer by pushing the price to the boundary of $\mathbb{P}^{*}$ in
+its own favour. The prize goes to whoever submits closest to the
+deadline with the fullest view of the book. This is the
+\emph{boundary latency arbitrage}: a reward for speed and timing
+rather than for providing liquidity or information.
+\end{remark}
 
 Two conditions therefore expose a participant to being the donating side
 of the transfer: submitting without observing the accumulated batch, as
@@ -586,10 +601,7 @@ early submission and therefore strengthens the incentive identified in
 \Cref{prop:lastmover}. Third, the channel is disclosure-conditional: the
 informational component of the last-mover advantage requires that the
 accumulating batch be observable, and it is absent under a sealed-bid
-regime. What survives sealed bidding is only the incentive to submit
-late in order to condition on external information, which is the
-boundary-sniping problem already identified by
-\citet{budish2015high}.
+regime.
 
 \subsection{Equilibrium Implication and Design Responses}
 
@@ -613,10 +625,10 @@ component of \Cref{prop:lastmover} while leaving bid shading, so the
 choice is between the two costs rather than between one cost and none.
 Finally, and least discussed in the literature, the selection rule
 $\sigma$ can be made insensitive to the marginal submitted limits, for
-instance by choosing the point of $\mathcal{P}^{*}$ closest to an
+instance by choosing the point of $\mathbb{P}^{*}$ closest to an
 external reference price rather than a function of the interval
 endpoints. This removes the lever without altering the allocation, since
-by \Cref{lem:invariance} the allocation is invariant on $\mathcal{P}^{*}$
+by \Cref{lem:invariance} the allocation is invariant on $\mathbb{P}^{*}$
 in any case.
 
 

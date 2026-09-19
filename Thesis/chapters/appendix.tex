@@ -1,0 +1,416 @@
+\chapter{Batch Clearing Algorithm}
+\label{app:algorithm}
+
+The clearing routine implements \eqref{eq:demandsupply} and
+\eqref{eq:clearing} by a search over the admissible price grid, followed
+by the tie-break cascade and the rationing step of
+\Cref{sec:rationing}.
+
+\begin{lstlisting}[language=,caption={Batch clearing, single asset
+pair.},label={lst:clearing}]
+INPUT : buys B = {(pi_i, q_i)}, sells S = {(pi_j, q_j)},
+        tick grid P, tie-break cascade C, rationing rule R,
+        previous clearing price p_prev
+OUTPUT: clearing price p*, fills F, residual E
+
+1  candidates <- distinct limit prices in B and S, snapped to P
+2  for each p in candidates:
+3      D(p) <- sum of q_i over buys with pi_i >= p
+4      S(p) <- sum of q_j over sells with pi_j <= p
+5      V(p) <- min(D(p), S(p))
+6  Vmax  <- max over p of V(p)
+7  M     <- { p : V(p) = Vmax }              // maximising set
+8  if Vmax = 0: return (no clearing, all orders roll over)
+9  M     <- argmin over p in M of |D(p) - S(p)|        // cascade 1
+10 if |M| > 1: M <- argmin over p in M of |p - p_prev|  // cascade 2
+11 if |M| > 1: M <- argmin over p in M of p             // cascade 3
+12 p*    <- unique element of M
+13 fill all buys with pi_i > p* completely            // inframarginal
+14 fill all sells with pi_j < p* completely
+15 marginal <- orders with pi = p* on the long side
+16 allocate Vmax - (filled inframarginal) among marginal using R
+17 E     <- unmatched quantity on the long side
+18 apply time-in-force to E: roll over, or cancel
+19 return (p*, F, E)
+\end{lstlisting}
+
+Steps 1--7 are the line search; the unimodality of $V$ noted in
+\Cref{sec:clearing} guarantees that the maximising set is an interval on
+the grid. Steps 9--11 are the tie-break cascade: minimise the residual
+imbalance, then minimise distance from the auction's own previous
+clearing price $p_{\mathrm{prev}}$ (not an external reference — the FBA
+has no oracle input, see \Cref{app:config}), then take the lowest price
+as a final deterministic tie-break. Step 16 is the only place where the
+rationing rule enters, which is why the rule can be swapped without
+touching the price computation.
+
+\chapter{Engine Configuration Parameters}
+\label{app:config}
+
+\begin{table}[htbp]
+\centering
+\caption[Engine configuration]{The engines' fixed configuration and
+behaviour, as actually implemented. This thesis used one configuration
+throughout --- most rows below are not runtime-adjustable in the current
+codebase, which the Meaning column states plainly rather than presenting
+a wider configuration surface than exists.}
+\label{tab:config}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.2cm} L p{3.2cm}@{}}
+\toprule
+\textbf{Parameter} & \textbf{Meaning} & \textbf{Value}\\
+\midrule
+\texttt{engine}            & CDA or FBA & both, paired\\
+\texttt{tau\_ns}           & Batch interval, in nanoseconds; the same
+value also sets the metrics CSV's bucket width (\Cref{sec:environment})
+& 1{,}000{,}000{,}000 (1\,s)\\
+\texttt{boundary}          & Batch-close timing & fixed only --- no
+randomised-boundary code path exists\\
+\texttt{rationing}         & Allocation of the marginal quantity at
+$\clr$ & fixed: price-time-within-the-batch (rank by aggressiveness,
+then submission time, then order id) --- not pro rata, not a runtime
+choice\\
+\texttt{tie\_break}        & Cascade for selecting $\clr$ from the
+volume-maximising set & fixed: (1)~maximise matched volume, (2)~minimise
+residual imbalance, (3)~minimise distance from the auction's own
+previous clearing price, (4)~lowest price\\
+\texttt{residual\_policy}  & Disposition of unmatched quantity at $\clr$
+& fixed: always rolled into the next batch --- no cancel-on-no-clear
+path exists\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Four rows present in an earlier draft of this table --- a seed for a
+randomised boundary, a $\kappa$ parameter for a size/pro-rata hybrid
+rationing rule, a self-trade-prevention policy, and a warm-up period
+excluded from metrics --- have been removed rather than marked
+\texttt{n/a}: none of the four has any basis in the current codebase
+(no randomised boundary, no hybrid rationing rule, no self-trade
+prevention, and no warm-up exclusion are implemented), and a table row
+implies a real, if unused, feature that keeping them here would have
+been misleading. Self-trade prevention's absence in particular is a
+genuine limitation, not a controlled-for policy shared by both engines
+--- it is stated as such in \Cref{sec:experiments}.
+
+\chapter{Reproducibility}
+\label{app:repro}
+
+Every run's checkpoint file records the configuration of
+\Cref{tab:config} together with the input source path, the interval
+$\tau$, and per-engine running totals, so that a resumed run can be
+checked against the run it continues. A per-file input hash and a code
+commit hash embedded in the run's own output --- which would let a
+result be tied unambiguously to the exact code and data that produced
+it, beyond what the configuration and file list already establish ---
+are not currently written by the checkpoint format; this is listed here
+as a gap worth closing, not implied to already exist. Given identical
+input and configuration, an uninterrupted run reproduces byte-identical
+output (\Cref{sec:experiments}). The analysis pipeline reads only the
+logged CSV output and is shared by both engines, so no metric is
+computed by engine-specific code.
+
+\ph[repository URL, dataset DOI and commit hash to be inserted before
+submission]
+
+\chapter{Metric Formulas}
+\label{app:formulas}
+
+This appendix gives the exact, implementation-level formula behind every
+column of the logged output that \Cref{sec:metrics} summarises, and
+behind the handful of further diagnostic columns computed alongside them
+but not tabulated in \Cref{tab:metrics1,tab:metrics2,tab:metrics3}. Each
+entry carries a scope tag: \textbf{U}niversal (both engines),
+\textbf{C}DA-only, \textbf{F}BA-only, or \textbf{X} (defined but always
+empty --- the dataset lacks what it would need). A metric marked
+\textbf{X} is kept in the catalogue rather than silently dropped, so
+that its absence from every result in \Cref{ch:results} is a documented
+property of the data, not an omission.
+
+\section{Bucketing and Notation}
+
+Every column is aggregated into fixed-width time buckets:
+\begin{equation}
+  \mathrm{bucket}(t) = \mathrm{anchor} + \left\lfloor \frac{t -
+  \mathrm{anchor}}{\tau} \right\rfloor \tau,
+\end{equation}
+where $\mathrm{anchor}$ is the timestamp of the first record of the run
+and $\tau$ is the interval (1\,second throughout this thesis,
+\Cref{app:config}). Buckets are contiguous and empty-row-inclusive: a
+bucket with no qualifying observation still produces a row, so a quiet
+period is a gap in the data, not a gap in the file.
+
+A missing value (\emph{None}, an empty CSV field) and an actual zero are
+kept distinct and mean different things: \emph{None} is ``no qualifying
+observation this bucket,'' zero is ``there were observations and the
+value is genuinely zero.'' Every metric below follows this convention
+with one deliberate exception, the intra-interval price dispersion
+entry of \Cref{sec:formularq22} below. Price- and notional-denominated raw
+values are stored in a fixed-point integer scale,
+$\mathrm{PRICE\_SCALE} = 10^{6}$; bps and ratio metrics are already
+unit-free and are \emph{not} rescaled.
+
+\section{RQ2.1: Liquidity and Transaction Cost Metrics}
+
+\paragraph{Quoted spread (U).} CDA: for every book snapshot in the
+bucket with both sides present and $a_t + b_t > 0$,
+$\mathrm{spread}_{\mathrm{bps}} = (a_t - b_t)/\midp \cdot 10^{4}$,
+averaged over qualifying snapshots. FBA: for every batch with both a
+best unfilled buy and a best unfilled sell and $\clr > 0$,
+$(\text{unfilled sell} - \text{unfilled buy})/\clr \cdot 10^{4}$,
+averaged over qualifying batches. A snapshot or batch that fails its own
+gate is excluded from the mean, not counted as zero.
+
+\paragraph{Depth at best (U).} CDA: mean of (best bid size $+$ best ask
+size)$/2$ across snapshots --- touch only, not the whole book. FBA: mean
+of (demand at $\clr$ $+$ supply at $\clr$)$/2$ across batches.
+
+\paragraph{Depth within $x$ bps (U), $x \in \{10, 50, 100\}$.} For every
+resting order, $\mathrm{bps\_away} = |p - \mathrm{ref}| \cdot
+10^{4}/\mathrm{ref}$ against the snapshot midpoint or batch clearing
+price; its quantity accumulates into every threshold with
+$\mathrm{bps\_away} \le x$ --- the three columns are cumulative, so a
+level within 10\,bps also counts toward the 50 and 100\,bps columns.
+
+\paragraph{Book imbalance (C).} $(V^{bid} - V^{ask})/(V^{bid}+V^{ask})$
+at the top of book, averaged over snapshots with nonzero touch depth.
+Never set on an FBA row --- no code path computes an FBA analogue.
+
+\paragraph{Total book depth (C).} Mean of (bid depth $+$ ask
+depth)$/2$ across the \emph{whole} book, every price level both sides
+--- contrast with depth at best's touch-only figure.
+
+\paragraph{Effective spread (U).}
+\begin{equation}
+  \mathrm{dev}_{\mathrm{bps}}(p_k, m_k, D_k) =
+  \begin{cases}
+    2(p_k - m_k)/m_k \cdot 10^{4} & D_k = \text{buy}\\
+    -2(p_k - m_k)/m_k \cdot 10^{4} & D_k = \text{sell}\\
+    2|p_k - m_k|/m_k \cdot 10^{4} & D_k \text{ unknown (FBA)}
+  \end{cases}
+\end{equation}
+quantity-weighted per bucket, $m_k$ the pre-trade reference price (CDA:
+book midpoint; FBA: the batch's own clearing price). \emph{None} if no
+trade in the bucket had a usable reference price. The FBA has no
+taker/maker distinction in a uniform-price batch, hence the third case.
+
+\textbf{This third case is not a cosmetic detail.} Every FBA trade uses
+the unsigned branch, so \emph{every} FBA contribution to this metric is
+$\ge 0$ by construction, while a CDA contribution can be negative (a fill
+better than the reference price). The two engines' means are therefore
+not the same statistic: CDA's is a genuine signed average that can
+partly cancel across trades; FBA's is a mean absolute deviation, which
+cannot cancel and is mechanically at least as large as what a signed
+average of the same underlying moves would show. Comparing the two
+levels directly, as \Cref{ch:results} does, is still informative but
+should not be read as isolating a pure mechanism effect on cost --- part
+of any gap is this measurement asymmetry, not necessarily the trading
+cost participants faced.
+
+\paragraph{Realized spread (U), $\Delta \in \{1,5,30\}$\,s.} Same trades
+and gate as effective spread, but against the reference price at
+$t_k+\Delta$ instead of before the trade, found by a binary search over
+the combined, time-sorted series of CDA midpoints and FBA clearing
+prices (a book snapshot wins a tie against a batch at the identical
+timestamp). \emph{None} for a horizon with no trade whose markout
+falls within the retained window. The signed/unsigned asymmetry above
+matters more here than for effective spread: because $D_k$ is
+\emph{always} unknown for the FBA, its realized spread is a mean
+\emph{absolute} price displacement over the next $\Delta$ seconds, not a
+directional markout. For a price process that moves diffusively, the
+expected absolute displacement grows roughly with $\sqrt{\Delta}$, so an
+FBA realized spread that roughly doubles from $\Delta=1$s to $5$s and
+roughly quintuples by $30$s (as \Cref{ch:results} reports) is consistent
+with ordinary price diffusion over the markout window, not with a
+mechanism-specific effect on adverse selection --- the CDA's signed
+version, by contrast, can and does go negative, which is the
+economically distinct claim that liquidity providers are on average
+losing to informed flow after the fact. Reading the two as directly
+comparable adverse-selection measures is the most likely place to
+over-interpret this chapter's numbers.
+
+\paragraph{Price impact (U), $\Delta \in \{1,5,30\}$\,s.} Effective
+spread minus realized spread at the matching horizon --- the
+adverse-selection component of the effective spread \emph{for the CDA,
+where both terms are signed}; for the FBA this difference inherits the
+mean-absolute-deviation character of both its inputs, so a negative FBA
+value at a longer horizon means the mean absolute price move outgrew the
+mean absolute submission-time deviation, not that adverse selection
+reversed sign. Assigned only if
+both terms are computable for that bucket and horizon.
+
+\paragraph{Amihud illiquidity (U).} From the same combined reference-price
+series, $\mathrm{close}$ is the last price observed in a bucket, carried
+forward across empty buckets. For a bucket with a close and a computable
+prior close $>0$:
+\begin{equation}
+  \mathrm{ret} = \frac{\mathrm{close}-\mathrm{prev\_close}}{\mathrm{prev\_close}},
+  \qquad
+  \mathrm{amihud} = \frac{|\mathrm{ret}|}{\mathrm{dollar\_volume}} \cdot 10^{6}
+\end{equation}
+if the bucket traded nonzero volume, else \emph{None} --- a real price
+move on zero volume reports \emph{None}, not $\infty$.
+
+\section{RQ2.2: Price Discovery Metrics}
+\label{sec:formularq22}
+
+\paragraph{Realized volatility (U).} From the reference-price series,
+per bucket, consecutive-pair returns $r_i = (p_{i+1}-p_i)/p_i$
+(a pair with a non-positive base price is skipped); the reported value
+is $\sqrt{\sum_i r_i^2}$ --- the root sum of squares, the standard
+realized-variance estimator, deliberately \emph{not} a standard
+deviation about the mean. A single return in the bucket reports
+$|r|$ directly. \emph{None} with fewer than two usable points.
+
+\paragraph{Intra-interval price dispersion (U).}
+From bucketed trade prices, $\mathrm{disp} =
+\mathrm{stddev}(\{p_k\})/\mathrm{mean}(\{p_k\}) \cdot 10^{4}$ (population
+standard deviation). This is the one column that departs from the
+\emph{None}-versus-zero convention stated in \Cref{app:formulas}'s first
+section: it reports $0.0$, not \emph{None}, whenever the bucket had at
+least one trade but the mean price was non-positive. \emph{None} only
+when the bucket had no trades at all. Approximately zero for the FBA by
+construction (one clearing price per batch): empirically, exactly $0.00$
+in the large majority but not literally all FBA-side buckets
+(\Cref{ch:results} reports the exact share for the run behind this
+thesis) --- a bucket occasionally contains trades from more than one
+batch clear, most plausibly around a checkpoint-resumed run's seam
+(\Cref{sec:experiments}), which this appendix states rather than
+asserting a stronger guarantee than the implementation actually gives.
+
+\paragraph{Kyle's lambda (U, but built differently per engine).} Per
+bucket, the OLS slope through the origin, $\lambda = \sum_i x_i
+y_i/\sum_i x_i^2$, in bps per unit of the base asset (not
+$\mathrm{PRICE\_SCALE}$-denominated). CDA: one observation per
+\emph{sweep} (same-timestamp trades sharing a side and a pre-trade
+midpoint, grouped in timestamp order); $x$ is the net signed executed
+quantity of the sweep, $y = (m_{\mathrm{post}}-m_{\mathrm{pre}})/
+m_{\mathrm{pre}} \cdot 10^{4}$ with $m_{\mathrm{post}}$ the midpoint
+5\,s after the sweep --- a fixed horizon, independent of the three
+realized-spread horizons above. FBA: one observation per priced batch,
+walked in strictly ascending order; $x$ is the batch's net order flow
+(submitted buy quantity minus submitted sell quantity, captured before
+price selection), $y$ the percentage change in $\clr$ from the previous
+priced batch. \emph{None} if $\sum_i x_i^2 = 0$ for the bucket. On this
+dataset the CDA value is positive-skewed (buy-side sweeps lift the
+midpoint, on average); the FBA value clusters near zero --- a
+consequence of the price-selection rule described in
+\Cref{sec:environment}, which anchors to the previous clearing price and
+is close to impervious to a single batch's flow imbalance, not a defect
+in the estimator. \Cref{ch:results} reports both.
+
+\paragraph{Pricing error (X, always empty in this dataset).}
+$|\clr - p^{\mathrm{ref}}|$ or $|\midp - p^{\mathrm{ref}}|$ against an
+external reference price, in bps. No code path in this codebase ever
+assigns this column a value: the December~2025 SOL order-status archive
+used here carries no oracle or mark-price feed, and none is
+reconstructed elsewhere in the pipeline. Every row of both timeseries
+CSVs has this field empty, for the entire month, on both engines --- a
+documented, structural gap rather than a result of zero.
+
+\section{RQ2.3 and Engine-Control Metrics}
+
+\paragraph{Executed volume, executed notional (U).} Plain running sums
+over the trade stream: quantity, and quantity $\times$ price in raw
+$\mathrm{PRICE\_SCALE}$ units (summed before any division).
+
+\paragraph{VWAP (U).} $\mathrm{executed\_notional}/\mathrm{executed\_volume}$
+if the bucket executed nonzero volume, else \emph{None}.
+
+\paragraph{Trade count (U).} A plain count, not \emph{None}-valued,
+incremented once per trade.
+
+\paragraph{Fill rate (U).} Bucketed by \emph{each order's own submission
+bucket}, not the trade's bucket: $\sum \mathrm{filled\_qty} / \sum
+\mathrm{orig\_qty}$ over orders first seen in that bucket. \emph{None} if
+no order was first seen in the bucket. Because this thesis's interval is
+1\,second and most orders take longer than that to reach their eventual
+fill state, this bucketing choice --- not a low overall fill propensity
+--- is the main driver of a low average value; \Cref{ch:results} reports
+it alongside average time to execution, below, for that reason.
+
+\paragraph{Average time to execution (U).}
+For every order with a first fill, $(\text{first\_fill\_ts} -
+\text{first\_seen\_ts})/10^{9}$ seconds, bucketed by first-seen time;
+mean per bucket, \emph{None} if no order first seen in the bucket ever
+received a fill.
+
+\paragraph{Trader surplus (U, a plain value, not \emph{None}-valued).}
+Accumulated per trade and per side independently: the buy side (when its
+limit price is known) contributes $\max(0, \pi - p_k) \cdot q_k$, the
+sell side $\max(0, p_k - \pi) \cdot q_k$ --- clipped at zero, so an
+adverse fill never contributes a negative amount. This is realized
+price improvement against each side's own submitted limit, in raw
+$\mathrm{PRICE\_SCALE}$ units.
+
+\paragraph{Order size inflation (U).} Bucketed by first-seen time,
+aggregated per (bucket, participant) as (submitted total, filled total);
+a participant contributes $\mathrm{submitted}/\mathrm{filled}$ to the
+bucket's mean only when both are strictly positive --- an order that
+never filled at all is excluded, deliberately, rather than folded in
+through a floor on the denominator, which would let never-traded orders
+dominate the statistic rather than genuinely oversized ones.
+\emph{None} if no participant in the bucket had a computable ratio.
+
+\paragraph{Order-to-trade ratio (U).} $\mathrm{bucket\_message\_count} /
+\mathrm{trade\_count}$; the numerator counts \emph{every} message,
+accepted and rejected, so its population does not line up one-to-one
+with fill rate's. \emph{None} if the bucket executed no trades.
+
+\paragraph{Boundary concentration (F).} Share of order arrivals landing
+in the final 10\% of an FBA batch's own window; a zero-width window
+contributes nothing. Numerator and denominator accumulate across every
+batch closing in the bucket before dividing. \emph{None} if the bucket
+had zero total messages across its batches.
+
+\paragraph{Throughput, clearing latency (U, wall-clock and
+non-deterministic across runs and machines).} Throughput:
+$\mathrm{bucket\_message\_count} / \sum(\text{measured compute time})$.
+Clearing latency: $\sum(\text{measured compute time})/\mathrm{count}$,
+where the count is \emph{per submission} for the CDA (one book snapshot,
+one timing, per actionable record) but \emph{per batch clear} for the
+FBA (one timing per batch) --- the same column name measures two
+different granularities of operation depending on engine, a caveat that
+matters when \Cref{ch:results} compares the two directly. Neither column
+is a claim about market quality; both exist to rule out ``one engine is
+just slower'' as an alternative explanation for a measured difference
+elsewhere.
+
+\paragraph{Unexecuted residual share (F).} Summed across every batch
+closing in the bucket: numerator $\sum |\,\mathrm{demand}(\clr) -
+\mathrm{supply}(\clr)\,|$, denominator $\sum
+\max(\mathrm{demand}(\clr),\mathrm{supply}(\clr))$. This is the
+structural one-sidedness of the schedule \emph{at the clearing price}
+within a batch, not the complement of fill rate and not ``the share of
+submitted volume left unfilled'' in the everyday sense --- a batch can
+match every unit it possibly can ($\min(\mathrm{demand},\mathrm{supply})$
+executed in full) and still report a high value here if demand and
+supply were far apart in size at $\clr$, which is common when $\tau$ is
+short and a batch contains few orders. \emph{None} if the denominator is
+zero.
+
+\section{Known Gaps}
+
+\begin{itemize}
+  \item \textbf{Pricing error} is always empty for the reason stated
+  above --- no oracle or mark-price feed in this dataset.
+  \item \textbf{Throughput and clearing latency} are wall-clock and vary
+  run to run and machine to machine; clearing latency additionally
+  compares different operation granularities across engines (per
+  submission for the CDA, per batch for the FBA).
+  \item \textbf{Price impact} combines two separately quantity-weighted
+  trade populations (effective spread's and realized spread's), which
+  can differ for trades near the end of the retained window --- harmless
+  in a full run, where every flushed bucket's markouts already exist by
+  the time it is computed.
+  \item \textbf{Kyle's lambda}'s differing CDA/FBA construction and its
+  fixed 5\,s CDA horizon (independent of the three realized-spread
+  horizons) are deliberate methodological choices, not a defect; the
+  near-zero FBA result is itself a finding about the price-selection
+  rule's insensitivity to flow imbalance, not noise.
+  \item \textbf{Not computed in this codebase}: comparison of simulated
+  CDA output against the trades Hyperliquid's own engine actually
+  produced from the same flow, and the $\tau \to 0$ degenerate-parameter
+  convergence check --- both require infrastructure or a parameter sweep
+  this thesis did not build or run (\Cref{sec:validation}).
+\end{itemize}

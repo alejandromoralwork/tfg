@@ -12,6 +12,7 @@ data/*.tar
 data/*.tar.xz
 data/*.log
 data/__pycache__/
+data/results/
 
 cloud_results/
 
@@ -28,6 +29,17 @@ target/
 
 # --- `simulate` command output (generated, can be large) ---
 output/
+
+# --- Full-month simulation output used by the thesis analysis
+# (results/sol/{fba,cda}_timeseries.csv are 600MB+ each -- far over
+# GitHub's 100MB hard limit). Regenerate via `simulate sol 1` (see
+# src/docs/DEPLOY.md) or pull from the GCS output bucket; never meant
+# to be committed. ---
+results/
+
+# --- analysis/ pipeline's own generated/derived output (regenerate via
+# `python analysis/run_all.py`) ---
+analysis/output/
 
 # --- Python cache ---
 __pycache__/

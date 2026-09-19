@@ -1,0 +1,97 @@
+Simulation summary
+===================
+Generated:               20260912_104126 (UTC)
+Source:                  data/order_statuses/sol
+Files processed:         744
+Files skipped (not order-status data): 0
+Records seen:            640176812
+Records skipped:         16985954
+Wall-clock duration:     161297.3s (cumulative across runs)
+Markout guard:           35s (forward-mid lag before a bucket is flushed; flush cadence is per input file)
+Late events dropped:     0 (FBA) / 2075 (CDA)
+
+FBA intervals:           2678400
+CDA intervals:           2678400
+
+FBA totals:  trades=3530770  volume=156347666.00 SOL  notional=$20308937215.80
+CDA totals:  trades=3481516  volume=155574710.00 SOL  notional=$20200362171.01
+
+FBA stats (avg/min/max across intervals where computable; n = computable/total intervals):
+  quoted_spread_bps                avg=0.8691       min=0.6810       max=26.7254      (n=2677996/2678400)
+  depth_at_best                    avg=412.7739     min=0.5000       max=96751.5000   (n=2677996/2678400)
+  depth_within_10bps               avg=31575.1973   min=118.5000     max=117169.0000  (n=2677996/2678400)
+  depth_within_50bps               avg=156721.7531  min=132.5000     max=453444.5000  (n=2677996/2678400)
+  depth_within_100bps              avg=261767.7953  min=132.5000     max=768788.0000  (n=2677996/2678400)
+  book_imbalance                   n/a — CDA-only (no resting book to measure in FBA's uniform-price batch)
+  total_book_depth                 n/a — CDA-only (no resting book to measure in FBA's uniform-price batch)
+  effective_spread_bps             avg=2.6340       min=0.0000       max=108.8847     (n=626117/2678400)
+  realized_spread_bps_1s           avg=1.9251       min=0.0000       max=102.7422     (n=626117/2678400)
+  realized_spread_bps_5s           avg=4.4113       min=0.0000       max=244.2571     (n=626117/2678400)
+  realized_spread_bps_30s          avg=11.2471      min=0.0000       max=310.5183     (n=626115/2678400)
+  price_impact_bps_1s              avg=0.7089       min=-91.1656     max=94.1890      (n=626117/2678400)
+  price_impact_bps_5s              avg=-1.7773      min=-235.5336    max=94.1890      (n=626117/2678400)
+  price_impact_bps_30s             avg=-8.6131      min=-307.6026    max=94.1890      (n=626115/2678400)
+  amihud_illiquidity               avg=0.1063       min=0.0000       max=12.3955      (n=626128/2678400)
+  kyle_lambda                      avg=-0.0000      min=-3.4688      max=1.5063       (n=2677983/2678400)
+  realized_volatility              avg=0.0000       min=0.0000       max=0.0000       (n=1/2678400)
+  intra_interval_price_dispersion  avg=0.0235       min=0.0000       max=11.6204      (n=626129/2678400)
+  pricing_error_bps                n/a — requires an external oracle/mark-price feed; not in this dataset (see IntervalMetrics::pricing_error_bps)
+  executed_volume                  avg=58.3735      min=0.0000       max=96023.0000   (n=2678400/2678400)
+  executed_notional                avg=7582488506.4964 min=0.0000       max=12086415010000.0000 (n=2678400/2678400)
+  vwap                             avg=130060711.2408 min=116840000.0000 max=146830000.0000 (n=626129/2678400)
+  trader_surplus                   avg=37507933.2124 min=0.0000       max=470467480000.0000 (n=2678400/2678400)
+  fill_rate                        avg=0.0030       min=0.0000       max=1.5000       (n=2654250/2678400)
+  avg_time_to_execution_secs       avg=22.3420      min=0.0000       max=4813.9815    (n=951795/2678400)
+  order_size_inflation             avg=39.2610      min=0.5000       max=69298.0000   (n=951795/2678400)
+  order_to_trade_ratio             avg=190.6027     min=0.0762       max=3508.0000    (n=626129/2678400)
+  boundary_concentration           avg=0.1014       min=0.0000       max=1.0000       (n=2654665/2678400)
+  throughput_orders_per_sec        avg=255139.7968  min=164.6236     max=40472997.6838 (n=2655207/2678400)
+  avg_clearing_latency_micros      avg=1922.5621    min=5.0000       max=39330.0000   (n=2677996/2678400)
+  unexecuted_residual_share        avg=0.9618       min=0.0000       max=1.0000       (n=2677996/2678400)
+
+CDA stats (avg/min/max across intervals where computable; n = computable/total intervals):
+  quoted_spread_bps                avg=0.8422       min=0.6810       max=24.8716      (n=2655218/2678400)
+  depth_at_best                    avg=133.4038     min=1.0000       max=45383.0000   (n=2655219/2678400)
+  depth_within_10bps               avg=32681.7981   min=0.0000       max=124500.7896  (n=2655219/2678400)
+  depth_within_50bps               avg=158345.8670  min=6.0000       max=642314.7342  (n=2655219/2678400)
+  depth_within_100bps              avg=268435.8705  min=6.0000       max=976252.9973  (n=2655219/2678400)
+  book_imbalance                   avg=0.0199       min=-1.0000      max=0.9999       (n=2655219/2678400)
+  total_book_depth                 avg=720058.5305  min=6.0000       max=1934235.4936 (n=2655219/2678400)
+  effective_spread_bps             avg=1.0016       min=0.6811       max=31.9954      (n=633935/2678400)
+  realized_spread_bps_1s           avg=-0.3501      min=-116.5521    max=52.9601      (n=633935/2678400)
+  realized_spread_bps_5s           avg=-0.5511      min=-238.8741    max=136.4434     (n=633935/2678400)
+  realized_spread_bps_30s          avg=-0.6854      min=-276.0070    max=305.1545     (n=633933/2678400)
+  price_impact_bps_1s              avg=1.3517       min=-52.2035     max=117.3521     (n=633935/2678400)
+  price_impact_bps_5s              avg=1.5527       min=-131.4226    max=241.1448     (n=633935/2678400)
+  price_impact_bps_30s             avg=1.6870       min=-304.4255    max=277.1919     (n=633933/2678400)
+  amihud_illiquidity               avg=0.0915       min=0.0000       max=9.9518       (n=633935/2678400)
+  kyle_lambda                      avg=0.0853       min=-37.9303     max=33.7220      (n=633634/2678400)
+  realized_volatility              avg=0.0000       min=0.0000       max=0.0553       (n=2654966/2678400)
+  intra_interval_price_dispersion  avg=0.1711       min=0.0000       max=47.2474      (n=633935/2678400)
+  pricing_error_bps                n/a — requires an external oracle/mark-price feed; not in this dataset (see IntervalMetrics::pricing_error_bps)
+  executed_volume                  avg=58.0849      min=0.0000       max=112658.0000  (n=2678400/2678400)
+  executed_notional                avg=7541951228.7224 min=0.0000       max=13997313230000.0000 (n=2678400/2678400)
+  vwap                             avg=130097835.3859 min=116830000.0000 max=146821125.8278 (n=633935/2678400)
+  trader_surplus                   avg=37024683.9729 min=0.0000       max=470486470000.0000 (n=2678400/2678400)
+  fill_rate                        avg=0.0029       min=0.0000       max=1.5000       (n=2654250/2678400)
+  avg_time_to_execution_secs       avg=19.2687      min=0.0000       max=4813.3109    (n=950201/2678400)
+  order_size_inflation             avg=48.0558      min=0.5000       max=90384.7727   (n=950201/2678400)
+  order_to_trade_ratio             avg=210.9503     min=0.0762       max=3096.0000    (n=633935/2678400)
+  boundary_concentration           n/a — FBA-only (no batch window in a CDA)
+  throughput_orders_per_sec        avg=960056.1134  min=6190.6146    max=33333333.3333 (n=2655219/2678400)
+  avg_clearing_latency_micros      avg=1.2500       min=0.0000       max=161.5000     (n=2655219/2678400)
+  unexecuted_residual_share        n/a — FBA-only (no batch window in a CDA)
+
+Note: *_timeseries.csv's own `executed_notional`/price-bps columns
+keep the raw PRICE_SCALE (1e6) fixed-point convention used
+internally throughout this crate — divide price-denominated values
+by 1,000,000 for real USD (already done for the dollar figures
+above). Quantities (volume, depth) are already whole SOL units.
+`kyle_lambda` is a slope in bps-of-mid-move per SOL of signed order
+flow — NOT a price, so it is NOT PRICE_SCALE-denominated.
+
+"avg" below means the mean across only the intervals where that
+metric was actually computable (see IntervalMetrics' doc comment —
+`None` always means "not computable from what was recorded," never
+a silent zero, so intervals with no value for a given metric are
+excluded from its average rather than pulling it toward zero).

@@ -69,10 +69,12 @@ different direction but converges on the same mechanism. Blockchain
 settlement is already discrete, transaction ordering inside a block is
 economically contestable, and batch clearing with a uniform price
 removes the ordering rent that would otherwise be extracted by block
-producers \citep{gong2023fbadex,walther2021multitoken}. Several deployed
-systems, among them CoW Protocol, Loopring, and SPEEDEX, are
-uniform-price batch auctions in all but name
-\citep{dutta2025cow,wang2018loopring,ramsay2023speedex}.
+producers \citep{gong2023fbadex,walther2021multitoken}.
+ 
+ %Several deployed
+%systems, among them CoW Protocol, Loopring, and SPEEDEX, are
+%uniform-price batch auctions in all but name
+%\citep{dutta2025cow,wang2018loopring,ramsay2023speedex}.
 
 \section{The Design Problem behind the Idea}
 \label{sec:designproblem}
@@ -137,8 +139,7 @@ Two gaps motivate this work, one conceptual and one empirical.
 
 \paragraph{The design space is discussed piecemeal.}
 The literature on frequent batch auctions is largely a literature about
-whether batching is a good idea, not about how a batching engine should
-be built. \citet{budish2015hft} establish the equilibrium argument,
+whether batching is a good idea, not about how a batching engine are built. \citet{budish2015hft} establish the equilibrium argument,
 \citet{aquilina2022quantifying} quantify what the alternative costs,
 \citet{zoican2021speed} and \citet{eibelshauser2022fba} study how
 information and speed interact inside auctions, and
@@ -193,8 +194,7 @@ the batch interval, the information disclosure regime, order flow
 segregation, the matching and rationing rule, and settlement and
 residual handling --- by enumerating the options available within each
 block, and by deriving from theory the strategic behaviour that each
-option induces. The output is a structured description of the design
-space together with a trade-off matrix.
+option induces. 
 
 \begin{quote}
 \textbf{RQ2 (empirical).} How do a continuous double auction and a
@@ -205,14 +205,17 @@ order flow?
 RQ2 is decomposed into three measurable dimensions:
 
 \begin{itemize}
-  \item \textbf{RQ2.1 Liquidity and transaction costs.} Which mechanism
-  lets participants trade at a lower cost and with more depth
-  available?
-  \item \textbf{RQ2.2 Price discovery and market quality.} Which
-  mechanism produces a more stable, less dispersed price series?
-  \item \textbf{RQ2.3 Execution, allocation and order-arrival timing.}
-  Who gets filled, at what cost, and how does the batch mechanism
-  reshape execution outcomes for the same unchanged order flow?
+
+\item \textbf{to be done later.}
+
+%  \item \textbf{RQ2.1 Liquidity and transaction costs.} Which mechanism
+ % lets participants trade at a lower cost and with more depth
+  %available?
+ % \item \textbf{RQ2.2 Price discovery and market quality.} Which
+  %mechanism produces a more stable, less dispersed price series?
+  %\item \textbf{RQ2.3 Execution, allocation and order-arrival timing.}
+  %Who gets filled, at what cost, and how does the batch mechanism
+  %reshape execution outcomes for the same unchanged order flow?
 \end{itemize}
 
 Each dimension is operationalised by a set of metrics defined in
@@ -222,19 +225,15 @@ book data level it requires.
 \section{Contribution}
 \label{sec:contribution}
 
-The thesis makes three contributions. It consolidates the FBA design
+The thesis makes twp contributions, one conceptual,one methodological. It consolidates the FBA design
 space into five blocks and links each available option to a theoretical
 prediction about induced behaviour, which turns a scattered discussion
 into a checklist an exchange operator can work through. It implements
 two matching engines behind a single shared interface, so that the
-mechanism is the only treatment variable and every internal quantity ---
-including submitted limit prices of orders that never execute, the exact
-rationing outcome, and the residual left unmatched after each batch ---
-is directly observable rather than inferred. And it applies this
-apparatus to a recently released Level~4 order book dataset from the
-Hyperliquid exchange \citep{albers2026openbook}, which carries
-participant attribution at nanosecond precision and therefore supports
-per-participant allocation metrics that conventional Level~2 or Level~3
-feeds cannot.
+mechanism is the only treatment variable and every internal quantity , the exact
+rationing outcome, and the residual left unmatched after each batch
+is directly observable rather than inferred. 
+
+%And it applies this apparatus to a recently released Level~4 order book dataset from the Hyperliquid exchange \citep{albers2026openbook}, which carries participant attribution at nanosecond precision and therefore supports per-participant allocation metrics that conventional Level~2 or Level~3 feeds cannot.
 
 
