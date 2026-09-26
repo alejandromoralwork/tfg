@@ -6,6 +6,8 @@ dumping all ~30 metrics:
   fig_latencycontrol.png -- engine-control finding: clearing/match latency
   fig_kylelambda.png      -- headline finding: Kyle's lambda + the FBA
                              intra-interval-dispersion uniform-pricing check
+  fig_matchedvol.png       -- matched-timestamp volatility by calendar day
+                             (RQ2.2), plus matched-return coverage per day
   fig_spreaddecomp.png     -- effective spread decomposed into realized
                              spread + price impact, both engines
   fig_pricepaths.png       -- CDA vs FBA price path (VWAP proxy) over the
@@ -28,6 +30,8 @@ import pandas as pd
 
 import config
 import load
+import matched_volatility
+import signed_fba_spread
 
 CDA_COLOR = "#1b9e77"
 FBA_COLOR = "#d95f02"
@@ -110,20 +114,20 @@ def fig_kylelambda(m):
     _save(fig, "fig_kylelambda")
 
 
-def fig_spreaddecomp(m):
+def fig_spreaddecomp(m, signed_df):
     labels = ["Effective", "Realized 1s", "Realized 5s", "Realized 30s",
               "Impact 1s", "Impact 5s", "Impact 30s"]
     cols = ["effective_spread_bps", "realized_spread_bps_1s", "realized_spread_bps_5s",
             "realized_spread_bps_30s", "price_impact_bps_1s", "price_impact_bps_5s",
             "price_impact_bps_30s"]
     cda_vals = [m[f"{c}_cda"].mean() for c in cols]
-    fba_vals = [m[f"{c}_fba"].mean() for c in cols]
+    fba_vals = [signed_df[f"{c}_fba"].mean() for c in cols]
 
     x = np.arange(len(labels))
     width = 0.35
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.bar(x - width/2, cda_vals, width, color=CDA_COLOR, label="CDA (signed)")
-    ax.bar(x + width/2, fba_vals, width, color=FBA_COLOR, label="FBA (unsigned, see caption)")
+    ax.bar(x + width/2, fba_vals, width, color=FBA_COLOR, label="FBA (CDA-tick-signed, see caption)")
     ax.axhline(0, color="black", linewidth=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha="right")
@@ -215,15 +219,20 @@ def fig_depthcompare(m):
     _save(fig, "fig_depthcompare")
 
 
-def fig_dailytrend(m, ts, day):
+def fig_dailytrend(signed_df, complete_days):
     """Daily mean effective spread across the whole month -- a coherence
     check as much as a result: shows whether the headline RQ2.1 gap holds
-    throughout the month or is driven by a handful of days."""
-    d = m.assign(_day=day)
+    throughout the month or is driven by a handful of days. Built from the
+    matched, CDA-tick-signed FBA series (analysis/signed_fba_spread.py) so
+    both sides are aggregated over the identical set of buckets each day.
+    `complete_days` are the calendar days with a near-complete underlying
+    record grid (>=80% of 86,400 one-second buckets), computed from the
+    full replay so a partial anchor day cannot skew a mean."""
+    sday = pd.to_datetime(signed_df["interval_start_ns"], unit="ns").dt.date
+    d = signed_df.assign(_day=sday)
     daily_cda = d.groupby("_day")["effective_spread_bps_cda"].mean()
     daily_fba = d.groupby("_day")["effective_spread_bps_fba"].mean()
-    counts = d.groupby("_day").size()
-    complete = counts[counts >= 0.8 * 86400].index
+    complete = daily_cda.index.intersection(complete_days)
     daily_cda, daily_fba = daily_cda.loc[complete], daily_fba.loc[complete]
 
     fig, ax = plt.subplots(figsize=(9, 3.6))
@@ -262,20 +271,70 @@ def fig_residualshare(m):
     _save(fig, "fig_residualshare")
 
 
+def fig_matchedvol(window_df, min_count, intraday_df):
+    """Matched-timestamp volatility, both granularities together: daily RMS
+    by calendar day (top), the intraday per-return distribution the daily
+    RMS is summarising over (middle), and, since the daily figure's
+    credibility depends on it, the per-day matched-return count against
+    the exclusion threshold (bottom)."""
+    fig, (ax1, ax2, ax3) = plt.subplots(
+        3, 1, figsize=(9, 7.6),
+        gridspec_kw={"height_ratios": [2, 1.6, 1]},
+    )
+
+    ax1.plot(window_df.index, window_df["vol_cda_bps"], color=CDA_COLOR,
+             marker="o", markersize=3, linewidth=1, label="CDA")
+    ax1.plot(window_df.index, window_df["vol_fba_bps"], color=FBA_COLOR,
+             marker="o", markersize=3, linewidth=1, label="FBA")
+    ax1.set_ylabel("Daily RMS\nlog-return (bps)")
+    ax1.set_title("Matched-timestamp volatility by calendar day, both mechanisms")
+    ax1.legend(frameon=False)
+    ax1.tick_params(axis="x", rotation=30)
+
+    intraday_ts = pd.to_datetime(intraday_df["interval_start_ns"], unit="ns")
+    intraday_indexed = intraday_df.set_index(intraday_ts).sort_index()
+    rolling_cda = intraday_indexed["vol_cda_bps"].rolling("6H", min_periods=1).mean()
+    rolling_fba = intraday_indexed["vol_fba_bps"].rolling("6H", min_periods=1).mean()
+    ax2.plot(rolling_cda.index, rolling_cda.to_numpy(), color=CDA_COLOR,
+             linewidth=0.8, label="CDA")
+    ax2.plot(rolling_fba.index, rolling_fba.to_numpy(), color=FBA_COLOR,
+             linewidth=0.8, label="FBA")
+    ax2.set_ylabel("6h rolling mean\n$|r|$ (bps)")
+    ax2.set_title("Intraday variant: every matched return, 6-hour rolling mean over the month")
+    ax2.legend(frameon=False)
+    ax2.tick_params(axis="x", rotation=30)
+
+    ax3.bar(window_df.index, window_df["n_returns"], color=DIFF_COLOR, alpha=0.7)
+    ax3.axhline(min_count, color="black", linewidth=0.8, linestyle="--",
+                label=f"min. {min_count} returns/day")
+    ax3.set_ylabel("matched returns\nper day")
+    ax3.legend(frameon=False, fontsize=8)
+    ax3.tick_params(axis="x", rotation=30)
+
+    fig.tight_layout()
+    _save(fig, "fig_matchedvol")
+
+
 def main():
     print("loading merged timeseries for figures...")
     m = load.load_merged()
     ts = pd.to_datetime(m["interval_start_ns"], unit="ns")
     day = ts.dt.date
     busiest_day = select_busiest_day(m, ts, day)
+    counts = m.assign(_day=day).groupby("_day").size()
+    complete_days = counts[counts >= 0.8 * 86400].index
+
+    signed = signed_fba_spread.compute(m)
 
     fig_latencycontrol(m)
     fig_kylelambda(m)
-    fig_spreaddecomp(m)
+    mv = matched_volatility.compute(m)
+    fig_matchedvol(mv["window_df"], mv["min_count"], mv["intraday_df"])
+    fig_spreaddecomp(m, signed["signed_df"])
     fig_pricepaths(m, ts, day, busiest_day)
     diffinfo = fig_pricediff(m, ts, day, busiest_day)
     fig_depthcompare(m)
-    fig_dailytrend(m, ts, day)
+    fig_dailytrend(signed["signed_df"], complete_days)
     fig_residualshare(m)
 
     return {"pricepaths_day": str(busiest_day), **diffinfo}

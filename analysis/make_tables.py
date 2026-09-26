@@ -17,7 +17,9 @@ import pandas as pd
 
 import config
 import load
+import matched_volatility
 import paired_stats
+import signed_fba_spread
 
 # metric column (base name, without _fba/_cda suffix) -> macro-name stem.
 # Digit-free by construction (LaTeX \newcommand names are letters only).
@@ -37,6 +39,8 @@ METRIC_STEM = {
     "amihud_illiquidity": "Amihud",
     "kyle_lambda": "KyleLambda",
     "realized_volatility": "RealizedVol",
+    "matched_volatility": "MatchedVol",
+    "matched_volatility_intraday": "MatchedVolIntraday",
     "intra_interval_price_dispersion": "Dispersion",
     "executed_volume": "ExecVolume",
     "executed_notional": "ExecNotional",
@@ -128,6 +132,19 @@ def main(extra_macros=None):
         stats = paired_stats.paired_diff(merged[f"{metric}_fba"], merged[f"{metric}_cda"])
         macros_for_paired(macros, dump["paired"], metric, stats)
 
+    # replace the unsigned FBA effective/realized spread and price impact
+    # (computed above via the generic loop, using the mean-absolute-deviation
+    # branch the FBA's missing taker/maker flag forces) with a CDA-tick-signed
+    # version -- see analysis/signed_fba_spread.py for why the CDA's own tick,
+    # not the FBA's, is what avoids a circular construction. CDA-side values
+    # are unchanged throughout.
+    print("computing signed FBA spread (CDA tick rule)...")
+    signed = signed_fba_spread.compute(merged)
+    for metric, stats in signed["stats"].items():
+        macros_for_paired(macros, dump["paired"], metric, stats)
+    macros["SignedFbaSpreadNMatched"] = f"{signed['n_matched']:,}"
+    macros["SignedFbaSpreadNSigned"] = f"{signed['n_signed']:,}"
+
     print("computing one-sided stats for CDA-only / FBA-only metrics...")
     for metric in config.CDA_ONLY_METRICS:
         stats = paired_stats.one_sided_stats(merged[f"{metric}_cda"])
@@ -135,6 +152,19 @@ def main(extra_macros=None):
     for metric in config.FBA_ONLY_METRICS:
         stats = paired_stats.one_sided_stats(merged[f"{metric}_fba"])
         macros_for_onesided(macros, dump["one_sided"], metric, "Fba", stats)
+
+    # what drives the price-difference spikes in fig_pricediff -- checked
+    # empirically rather than asserted: correlate |FBA-CDA VWAP diff| against
+    # realized volatility (a fast-move proxy) and against min(trade_count)
+    # on both sides (a thin-sample proxy), pooled over the whole month.
+    diff_bps = pd.Series(np.nan, index=merged.index)
+    diffmask = merged["vwap_fba"].notna() & merged["vwap_cda"].notna() & (merged["vwap_cda"] > 0)
+    diff_bps.loc[diffmask] = (merged.loc[diffmask, "vwap_fba"] - merged.loc[diffmask, "vwap_cda"]) \
+        / merged.loc[diffmask, "vwap_cda"] * 1e4
+    abs_diff = diff_bps.abs()
+    vol_corr = abs_diff.corr(merged["realized_volatility_cda"])
+    macros["PriceDiffVolCorr"] = f"{vol_corr:.2f}"
+    dump["price_diff_vs_volatility_corr"] = float(vol_corr)
 
     # FBA intra-interval dispersion is not *exactly* zero in every interval
     # -- METRICS.md itself hedges with "~0", not "0" -- record the real share.
@@ -151,6 +181,28 @@ def main(extra_macros=None):
     empty_share = float((merged["trade_count_fba"] == 0).mean())
     macros["FbaEmptyBatchShare"] = f"{empty_share*100:.2f}"
     dump["fba_empty_batch_share"] = empty_share
+
+    # matched-timestamp volatility -- the paired RQ2.2 volatility comparison
+    # that realized_volatility can't supply for the FBA (see
+    # analysis/matched_volatility.py and appendix.tex's formula entry).
+    print("computing matched-timestamp volatility...")
+    mv = matched_volatility.compute(merged)
+    macros_for_paired(macros, dump["paired"], "matched_volatility", mv["stats"])
+    macros["ResMatchedVolIntersectionN"] = f"{mv['intersection_n']:,}"
+    macros["ResMatchedVolIntersectionPct"] = f"{mv['intersection_pct']:.2f}"
+    macros["ResMatchedVolIndependenceBaselinePct"] = f"{mv['independence_baseline_pct']:.2f}"
+    macros["ResMatchedVolReturnsN"] = f"{mv['returns_n']:,}"
+    macros["ResMatchedVolWindowsExcluded"] = f"{mv['windows_excluded']:,}"
+    dump["matched_volatility"] = {k: v for k, v in mv.items()
+                                   if k not in ("stats", "window_df",
+                                                "intraday_stats", "intraday_df")}
+
+    # same matched-timestamp construction, but un-aggregated: one paired
+    # observation per matched consecutive-pair return (n in the hundreds
+    # of thousands) instead of one per calendar day (n=31). Keeps both
+    # granularities in the thesis rather than replacing one with the other.
+    macros_for_paired(macros, dump["paired"], "matched_volatility_intraday",
+                       mv["intraday_stats"])
 
     # p99 of per-bucket average clearing/match latency -- a genuinely
     # computable distributional fact (99th pct across the 2.68M per-bucket
@@ -176,7 +228,7 @@ def main(extra_macros=None):
     macros["SampleCancellations"] = f"{scan_stats['cancellations']:,}"
     macros["SampleOtherEvents"] = f"{scan_stats['other_events']:,}"
     macros["SampleSkipped"] = f"{records_skipped:,}"
-    macros["SampleSkippedPct"] = f"{100*records_skipped/(records_seen+records_skipped):.2f}"
+    macros["SampleSkippedPct"] = f"{100*records_skipped/records_seen:.2f}"
     macros["SampleFbaTrades"] = f"{int(merged['trade_count_fba'].sum()):,}"
     macros["SampleCdaTrades"] = f"{int(merged['trade_count_cda'].sum()):,}"
     macros["SampleFbaNotional"] = f"{merged['executed_notional_fba'].sum():,.2f}"
@@ -204,8 +256,8 @@ def main(extra_macros=None):
     # cargo test / test engine all results confirmed by direct run (see
     # implementation log / TESTING.md); hardcoded here since they come from
     # a separate toolchain invocation, not this Python pipeline.
-    macros["ValCargoTestsPassed"] = "80"
-    macros["ValCargoTestsTotal"] = "80"
+    macros["ValCargoTestsPassed"] = "83"
+    macros["ValCargoTestsTotal"] = "83"
     macros["ValChecklistPassed"] = "37"
     macros["ValChecklistTotal"] = "37"
     macros["ValInvariantViolations"] = "0"

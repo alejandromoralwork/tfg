@@ -52,14 +52,12 @@ interval, the information disclosure regime, order flow segregation,
 the matching and rationing rule, and settlement and residual handling
 ---  it enumerates the options available for each block, and derives from
 auction theory and market microstructure theory which strategic
-behaviour each option induces. The result is a structured design space
-and a trade-off matrix that makes explicit which incentive an exchange
-operator buys and which one it sells with every architectural choice.
+behaviour each option induces. 
 
 The empirical part turns that design space into code. Two matching
 engines, a continuous double auction and a frequent batch auction, are
-implemented in Rust behind one shared matching interface and driven by
-the same replayed Level~4 order flow from the Hyperliquid exchange for the token Solana (SOL). The comparison covers liquidity and transaction costs,price discovery and market quality, and execution, allocation and
+implemented in Rust and fed with
+the same replayed Level~4 order flow from the Hyperliquid exchange for the token Solana (SOL) during on month of trading. The comparison covers liquidity and transaction costs,price discovery and market quality, and execution, allocation and
 order-arrival timing.
 
 \vspace{0.6em}

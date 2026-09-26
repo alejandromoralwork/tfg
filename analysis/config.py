@@ -73,5 +73,16 @@ FBA_ONLY_METRICS = ["boundary_concentration", "unexecuted_residual_share"]
 # Excluded from every table; documented once in Appendix D.
 STRUCTURALLY_EMPTY_METRICS = ["pricing_error_bps"]
 
+# Matched-timestamp volatility (analysis/matched_volatility.py): window to
+# aggregate matched consecutive-pair returns into before the paired test.
+# "D" = calendar day (~31 windows, default -- matches fig_dailytrend's
+# granularity). "H" = hour (~744 windows) is a documented alternative: more
+# windows means more power in the final Newey-West test, but each window has
+# far fewer matched returns, so the per-window RMS is noisier.
+MATCHED_VOL_WINDOW = "D"
+# A window with fewer matched returns than this gets NaN volatility for both
+# engines (symmetric exclusion) rather than a near-meaningless noisy RMS.
+MATCHED_VOL_MIN_RETURNS = 5
+
 for d in (OUTPUT_DIR, FIGURES_DIR, DATA_DIR):
     d.mkdir(parents=True, exist_ok=True)

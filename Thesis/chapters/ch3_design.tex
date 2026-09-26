@@ -1,42 +1,31 @@
 \chapter{Design of a Frequent Batch Auction Engine}
 \label{ch:design}
 
-This chapter answers RQ1. It decomposes the engine into five design
-blocks, enumerates the options available within each block, and derives
-from the theory of \Cref{ch:foundations} the strategic behaviour each
-option should be expected to induce. \Cref{sec:tradeoff} consolidates
-the result into a trade-off matrix and \Cref{sec:casestudies} tests the
-taxonomy against systems that have actually been deployed.
+This chapter breaks a batch auction engine into five design blocks, lists the
+options available in each block, and explains from theory how participants
+should be expected to behave under each option.
 
 \section{The Engine as a Set of Design Blocks}
 \label{sec:blocks}
 
-A matching engine is a deterministic function from a stream of
-timestamped messages to a stream of trades and book states. A continuous
-engine applies that function incrementally: every message is processed
-to completion before the next is read. A batch engine interposes an
-accumulation phase, so the function is applied once per interval to a
-set of messages rather than once per message.
-
-That single change forces five decisions that a continuous engine never
-has to make, because in a continuous engine each of them is implied by
-serial processing.
+A matching engine takes a stream of timestamped messages and produces trades.
+A continuous engine handles each message completely before reading the next.
+A batch engine first collects messages for a while, then processes the whole
+set at once. This one change forces five decisions that a continuous engine
+never has to make, because serial processing settles them automatically:
 
 \begin{enumerate}
-  \item \textbf{The batch interval $\tau$.} How long the accumulation
-  phase lasts and whether its end is predictable.
-  \item \textbf{Information disclosure.} What participants observe
-  during accumulation.
-  \item \textbf{Order flow segregation.} Whether all orders compete in
-  one pool.
-  \item \textbf{Matching, clearing and rationing.} How the clearing
-  price is computed and how the long side is allocated.
-  \item \textbf{Settlement and residual handling.} How the cleared batch
-  is settled and what happens to what did not clear.
+  \item how long the collection period $\tau$ lasts, and whether its end can be
+  predicted;
+  \item what participants can see while orders are being collected;
+  \item whether all orders compete in one pool;
+  \item how the trading price is computed and how the orders on the longer
+  side are served;
+  \item how the trades are settled and what happens to orders that did not
+  trade.
 \end{enumerate}
 
-\Cref{fig:pipeline} shows how the blocks compose into a single batch
-cycle. The remainder of the chapter treats each block in turn.
+\Cref{fig:pipeline} shows how these blocks fit together in one batch cycle.
 
 \begin{figure}[htbp]
 \centering
@@ -72,100 +61,82 @@ frequent batch auction engine, annotated with the design block that
 governs each stage.}
 \label{fig:pipeline}
 \end{figure}
+
 \section{Block 1: The Batch Interval}
 \label{sec:interval}
 
 \subsection{The Length of \texorpdfstring{$\tau$}{tau}}
 
-The interval length is the parameter that determines how much of the
-speed advantage the mechanism neutralises. Its effect is
-straightforward: a speed differential of $\delta$ between two
-participants matters only if it changes which batch their orders land
-in, which happens only if their submission decisions fall within
-$\delta$ of a boundary. For a uniformly distributed submission time the
-probability of this is $\delta/\tau$. With $\delta$ on the order of
-microseconds, which is the scale at which the races documented by
-\citet{aquilina2022quantifying} are decided, and $\tau$ on the order of
-100~milliseconds, the probability is on the order of $10^{-4}$ to
-$10^{-5}$. Speed has not been prohibited; it has been made almost
-worthless.
+The interval length decides how much of the speed advantage disappears. A
+speed difference of $\delta$ between two participants only matters if it
+changes which batch their orders land in. If orders arrive at random times,
+this happens with probability $\delta/\tau$. With $\delta$ of a few
+microseconds --- the time scale on which the races of
+\citet{aquilina2022quantifying} are decided --- and $\tau$ around
+100~milliseconds, the probability is only $10^{-4}$ to $10^{-5}$. Speed is not
+banned; it simply stops paying.
 
-The cost is delay. Every participant waits, in expectation, $\tau/2$
-before its order can execute, and $\tau$ in the worst case. For an
-investor with a horizon of minutes this is negligible. For a market
-maker managing inventory against a moving reference price it is a real
-exposure, because the price can move during the interval while the
-submitted order cannot be withdrawn in time to avoid the resulting
-clearing.
-
-The choice of the batch interval $\tau$ involves a trade-off: it must be
-long enough to neutralise speed differences, but short enough to keep
-prices current. Its appropriate value also depends on the liquidity of
-the instrument.
+The price is delay. Every participant waits on average $\tau/2$ before its
+order can trade, and up to $\tau$ in the worst case. This is harmless for an
+investor thinking in minutes, but it hurts a market maker holding inventory,
+because the price can move during the interval and the order cannot be
+withdrawn in time. The interval should therefore be long enough to remove
+speed differences and short enough to keep prices current. The right value
+depends on the instrument:
 
 \begin{itemize}
-  \item \textbf{Lower bound:} $\tau$ must be comfortably larger than the
-  differences in network latency across participants. Otherwise, faster
-  participants will be more likely to reach the current batch in time,
-  and the speed race will persist, only in a weaker form.
-  \item \textbf{Upper bound:} $\tau$ must be short enough that new
-  information is quickly reflected in prices. \citet{zoican2021speed}
-  show that auction frequency does not improve market quality
-  monotonically: very long intervals allow orders to become stale and
-  raise the risk that the auction clears at a price the market has
-  already moved away from.
-  \item \textbf{Dependence on liquidity:} the right $\tau$ also depends
-  on how much trading interest arrives in each batch. For a thinly
-  traded instrument, a short interval may collect no matching buy and
-  sell orders, leaving batches empty; the mechanism then behaves like a
-  continuous market with a delay. The interval length should therefore
-  be set together with the liquidity of the instrument, not
-  independently of it.
+  \item \textbf{Lower bound:} $\tau$ must be clearly longer than the
+  differences in network delay between participants. Otherwise faster
+  participants still reach the current batch more often and a weaker speed
+  race remains.
+  \item \textbf{Upper bound:} $\tau$ must be short enough for new information
+  to reach prices quickly. \citet{zoican2021speed} show that more frequent
+  auctions do not always improve market quality, and that very long intervals
+  let orders become stale.
+  \item \textbf{Liquidity:} in a thinly traded instrument a short interval may
+  collect no matching orders at all, leaving batches empty, so the market
+  behaves like a continuous one with an added delay.
 \end{itemize}
 
 \subsection{Fixed versus Randomised Closing}
 
-If the closing time is known in advance, it becomes a coordination
-point. A fast participant can hold its decision until the last feasible
-moment, observe the maximum amount of information, and then submit or
-cancel. This is boundary sniping, and it is the interval-scale
-reappearance of the continuous-time race, with one difference: the
-prize is not a single stale quote but participation in a batch whose
-composition is now partly known.
+If everyone knows when the batch closes, that moment becomes a target. A fast
+participant can wait until the last possible moment, see as much information
+as possible, and only then submit or cancel. This is \emph{boundary sniping}.
+It is the same speed race as in continuous trading, moved to the end of the
+interval; what is won is a place in a batch whose contents are now partly
+known, rather than a single stale quote.
 
 \begin{itemize}
-  \item \textbf{Fixed deterministic boundary.} Simple, auditable,
-  trivially schedulable by participants, and compatible with
-  wall-clock-aligned reporting. Maximally exposed to boundary sniping.
-  \item \textbf{Randomised closing time.} The gate closes at a random
-  time drawn from a distribution announced in advance, for example
-  uniform on $[\tau_{\min}, \tau_{\max}]$. Waiting until the last
-  moment now risks missing the batch entirely, which converts a
-  dominant strategy into a gamble. The cost is that participants can no
-  longer plan submission precisely, and that the randomisation source
-  must be verifiable, which is a non-trivial requirement in a
-  decentralised setting.
-  \item \textbf{Volume- or event-triggered closing.} The auction closes
-  when accumulated volume crosses a threshold, or on a market event.
-  This adapts the interval to activity, which addresses the thin
-  instrument problem, but makes the closing time endogenous to
-  participant behaviour and therefore manipulable: a participant can
-  trigger the auction by submitting volume.
-  \item \textbf{Randomised extension.} A deterministic nominal close
-  followed by a short random extension if late activity is detected.
-  This is the design used in several equity closing auctions and is a
-  compromise: predictable in the normal case, unpredictable exactly when
-  predictability would be exploited.
+  \item \textbf{Fixed closing time.} Simple, easy to audit, and compatible with
+  clock-aligned reporting, but easy for participants to plan around and fully
+  exposed to boundary sniping.
+  \item \textbf{Random closing time.} The batch closes at a time drawn from a
+  publicly announced range, for example uniformly between $\tau_{\min}$ and
+  $\tau_{\max}$. Waiting until the last moment now risks missing the batch,
+  so it becomes a gamble instead of the best strategy. The drawbacks are that
+  participants cannot time their orders precisely and that the random draw
+  must be verifiable, which is hard in a decentralised setting.
+  \item \textbf{Closing triggered by volume or events.} The batch closes when
+  enough volume has accumulated or a market event occurs. This adapts the
+  interval to activity, but because the closing depends on what participants
+  do, it can be manipulated: a participant can trigger the close by
+  submitting volume.
+  \item \textbf{Random extension.} A fixed nominal closing time, followed by a
+  short random extension if late activity is detected, as in several equity
+  closing auctions. It is predictable in normal conditions and unpredictable
+  exactly when predictability would be exploited.
 \end{itemize}
-
-
 
 \section{Block 2: Information Disclosure}
 \label{sec:disclosure}
 
-The disclosure regime determines what participants can condition on when
-they submit. \Cref{tab:disclosure} sets out the four regimes introduced
-in \Cref{sec:transparency} together with the behaviour each induces.
+The disclosure regime decides what participants can see when they submit.
+There are four regimes, from publishing everything to publishing nothing
+(\Cref{tab:disclosure}). More secrecy protects submitted orders from being
+exploited, but gives participants less price information and encourages
+\emph{bid shading}, meaning deliberately submitting a less aggressive price
+than one's true valuation.
 
 \begin{table}[htbp]
 \centering
@@ -198,285 +169,210 @@ volume\\
 \end{tabularx}
 \end{table}
 
-Two points deserve emphasis because they are easy to miss.
-
-First, disclosure and interval design are not independent. An open book
-during accumulation strengthens the incentive to submit late, because
-information accrues over the interval and a late submitter conditions on
-more of it. An open book therefore raises the value of a randomised
-close, whereas a sealed-bid design removes most of the informational
-motive for waiting and makes a fixed boundary more defensible.
-
-Second, opacity does not eliminate information leakage; it relocates it.
-Under sealed bidding, the clearing price and volume of batch $n$ are
-published before batch $n+1$ closes, so participants learn about
-aggregate interest with a one-batch lag. As $\tau$ shrinks, the sequence
-of published clearing prices approaches a continuous price signal, and
-the difference between a sealed-bid FBA and a transparent one narrows in
-informational terms even though it remains sharp within any single
-batch.
+Disclosure and interval design are linked. An open book gives participants a
+reason to submit late, which makes a random closing time more valuable. A
+sealed-bid design removes most of that reason and makes a fixed closing time
+easier to defend. Secrecy also does not remove information leakage; it only
+moves it. Under sealed bidding, the price and volume of batch $n$ become
+public before batch $n+1$ closes, and as $\tau$ gets shorter this sequence of
+published prices approaches a continuous price signal.
 
 \section{Block 3: Order Flow Segregation}
 \label{sec:segregation}
 
-\subsection{The Unified Pool}
+\subsection{The Unified Pool and Segregation by Participant Class}
 
-In the default design, all orders enter one auction. This maximises the
-set of potential counterparties and is the simplest to reason about and
-to regulate. Its cost follows directly from \citet{glosten1985bid}: a
-liquidity provider that cannot distinguish informed from uninformed flow
-must quote a price reflecting the average information content of the
-pool, so uninformed participants cross-subsidise the losses that
-informed participants inflict.
-
-\subsection{Segregation by Participant Class}
-
-Splitting flow by participant class, typically retail against
-institutional, allows a liquidity provider to quote a tighter price
-against the subset it believes to be uninformed. This is the economic
-logic behind retail wholesaling arrangements in equity markets, and it
-transfers cleanly to a batch setting: run one auction per segment, or
-one auction with segment-conditional eligibility.
-
-The design questions it raises are mostly about classification. The
-segmentation is only as good as the label, labels can be gamed by
-routing institutional flow through retail channels, and segregation
-raises fairness and best-execution questions because participants in
-different segments receive different prices for the same asset at the
-same instant. 
+In the default design all orders enter one auction. This is the simplest
+design to understand and regulate. Its drawback is that a liquidity provider
+who cannot tell informed from uninformed traders must quote a price that
+reflects the average of the pool, so uninformed participants end up paying for
+the losses that informed participants cause. Splitting flow by participant
+class, typically retail against institutional, lets the provider quote a
+tighter price to the group it believes is uninformed. This is the logic
+behind retail wholesaling in equity markets, and it carries over to batches
+through one auction per group, or through eligibility rules for each group.
+The difficulty is classification. The split is only as good as the label,
+labels can be gamed by sending institutional orders through retail channels,
+and participants in different groups get different prices for the same asset
+at the same moment, which raises fairness and best-execution concerns.
 
 \subsection{Intent-Based Segregation: The Dual Flow Batch Auction}
 
-Jump Trading's Dual Flow Batch Auction (DFBA) introduced by \citep{jump2025dfba} proposes partitions by
-\emph{intent} rather than by participant identity. Every order is
-labelled as maker flow, meaning liquidity supply, or taker flow, meaning
-executable demand. Within each batch the engine then runs two
-independent auctions:
+Jump Trading's Dual Flow Batch Auction (DFBA) \citep{jump2025dfba} splits
+orders by \emph{intent} rather than by who submits them. Every order is
+labelled either maker flow (supplying liquidity) or taker flow (demanding
+it). Each batch then runs two separate auctions, maker buys against taker
+sells and maker sells against taker buys, both at one uniform price. Market
+makers never trade against each other, which removes trades between two
+liquidity providers that add volume but give liquidity to nobody who wanted
+it. A fast participant also cannot use taker orders to pick off maker orders
+inside the batch, because there is no queue to win.
 
-\begin{itemize}
-  \item maker buys against taker sells, and
-  \item maker sells against taker buys,
-\end{itemize}
-
-both settled at a single uniform clearing price. Two structural
-consequences follow. Market makers never trade against each other,
-which removes the inter-maker crossing that in a unified pool produces
-volume without providing liquidity to anyone who wanted it. And a fast
-participant cannot use taker flow to pick off maker flow inside the
-batch, because the batch clears simultaneously at one price and there is
-no queue to win.
-
-The design carries its own costs. Splitting the pool splits the
-liquidity, so each of the two auctions clears against a thinner book
-than a unified auction would. Intent labelling must be enforced rather
-than declared, since a participant that can label itself a maker in one
-batch and a taker in the next captures the benefits of both. And the
-partition presumes that maker and taker are meaningful categories, which
-in a mechanism that clears everything simultaneously is a stipulation
-imposed by the engine rather than a fact about arrival timing.
+The design has its own costs. Splitting the pool splits the liquidity, so each
+auction clears against a thinner book. Intent labels must be enforced and not
+merely declared, otherwise a participant could label itself a maker in one
+batch and a taker in the next and collect the benefits of both. And the split
+assumes that ``maker'' and ``taker'' mean something, which in a mechanism that
+clears everything at the same instant is a rule imposed by the engine, not a
+fact about who arrived first.
 
 \subsection{The Maker--Taker Distinction and Fee Design}
 
-This last point generalises into a problem the FBA literature has not
-resolved. In a continuous book, maker and taker are defined by arrival
-timing relative to book state: the resting order is the maker, the
-crossing order is the taker. That definition is unavailable in a
-mechanism where all matched orders arrive during the same interval and
-execute at the same instant at the same price. Yet fee schedules,
-rebates, and a substantial part of exchange revenue depend on the
-distinction.
-
-Four ways to redefine it are available, none of them fully
-satisfactory:
+This last point leads to a problem the literature on batch auctions has not
+solved. In a continuous book the maker is the resting order and the taker is
+the order that crosses it, so the distinction depends on arrival order. That
+definition is not available when all matched orders arrive in the same
+interval and trade at the same time and price. Yet fees, rebates and a large
+part of exchange revenue depend on it. There are four ways to redefine it,
+none fully satisfactory:
 
 \begin{enumerate}
-  \item \textbf{By declared intent}, as in DFBA. Operationally simple,
-  but self-declared unless enforced by a separate eligibility regime.
-  \item \textbf{By limit price aggressiveness.} Orders whose limit is
-  far from the clearing price on the passive side are makers; orders
-  that would have crossed a wide range of prices are takers. This is
-  observable and hard to game without changing economic exposure, but it
-  taxes participants for demanding certainty of execution.
-  \item \textbf{By marginality.} The orders that set the clearing price
-  are takers; inframarginal orders are makers. Theoretically appealing,
-  because it is exactly the marginal order that determines the price,
-  but it makes the fee a participant pays depend on the actions of
-  everyone else in the batch, which is unpredictable ex ante.
-  \item \textbf{By persistence across batches.} An order that has rested
-  through several batches is a maker; a new order is a taker. This
-  rewards standing liquidity, which is the economic function the rebate
-  is supposed to compensate, and it is the only one of the four that
-  measures something continuous rather than instantaneous.
+  \item \textbf{By declared intent}, as in the DFBA. Simple to operate, but
+  self-declared unless a separate eligibility rule enforces it.
+  \item \textbf{By price aggressiveness.} Orders whose limit price is far from
+  the clearing price on the passive side are makers; orders that would have
+  crossed a wide range of prices are takers. This can be observed and is hard
+  to game without changing one's real exposure, but it penalises participants
+  for wanting certainty of execution.
+  \item \textbf{By marginality.} The orders that set the clearing price are
+  takers; orders priced strictly better than it are makers. This is
+  attractive in theory, since the marginal order determines the price, but the
+  fee a participant pays then depends on what everyone else does in the
+  batch, so it cannot be known in advance.
+  \item \textbf{By persistence across batches.} An order that has waited
+  through several batches is a maker; a new order is a taker. This rewards
+  liquidity that stays available, which is what the rebate is supposed to pay
+  for, and it is the only one of the four that measures something lasting
+  rather than a single moment.
 \end{enumerate}
 
-The choice is not merely accounting. A rebate schedule is an incentive,
-and whichever definition the engine adopts becomes the behaviour it
-subsidises.
-
-
+The choice matters beyond accounting. A rebate is an incentive, so whichever
+definition the engine adopts is the behaviour it ends up paying for.
 
 \section{Block 4: Matching, Clearing and Rationing}
 \label{sec:clearing}
 
-This section turns the clearing problem of \Cref{sec:priceimprovement}
-into an engine specification. It answers three questions left open
-there: how the tie-breaking rule $\sigma$ works in practice, why every
-order in a batch trades at the same price, and who is filled when the
-two sides do not match exactly.
-
 \subsection{Implementing the Clearing Rule}
 
-In practice, prices can only take values on the tick grid, so the set
-of volume-maximising prices $\mathcal{P}^{*}$ is a short run of
-consecutive ticks. The engine finds it in a single pass over the
-submitted limit prices, and then picks one of them:
+Prices can only take values on a fixed grid of allowed steps, so the set
+$\mathcal{P}^{*}$ of prices that maximise traded volume is a short run of
+neighbouring steps. The engine finds it in one pass over the submitted limit
+prices and then picks one of them:
 \begin{equation}
   \clr = \sigma\bigl(\mathcal{P}^{*}\bigr).
   \label{eq:clearing}
 \end{equation}
-Exchanges implement $\sigma$ as a fixed sequence of tie-breakers:
+Exchanges implement the selection rule $\sigma$ as a fixed sequence of
+tie-breaking steps:
 
 \begin{enumerate}
   \item choose the price that leaves the smallest unmatched quantity;
   \item if still tied, choose the price on the side of the remaining
-  imbalance, so that excess buying or selling pressure shows in the
-  price;
-  \item if still tied, choose the price closest to a reference, such as
-  the previous clearing price or an external price feed.
+  imbalance, so that excess buying or selling pressure shows in the price;
+  \item if still tied, choose the price closest to a reference, such as the
+  previous clearing price or an external price feed.
 \end{enumerate}
 
-The order of these steps matters. The first two depend on the limit
-prices that participants submit, so they are exactly the lever that a
-late participant uses in \Cref{prop:lastmover}. Only the third step is
-independent of submitted orders. Placing it first would implement the
-design response proposed in \Cref{sec:priceimprovement}: it removes the
-lever without changing who trades or how much (\Cref{lem:invariance}).
+The order of these steps matters. The first two depend on the limit prices
+participants submit, so they are exactly the lever that a late participant
+exploits in \Cref{prop:lastmover}. Only the third does not depend on
+submitted orders. Putting it first would remove that lever without changing
+who trades or how much (\Cref{lem:invariance}).
 
 \subsection{Why the Price Is Uniform}
 
-Clearing can also be viewed as an optimisation problem: choose how much
-of each order to execute so as to maximise total gains from trade,
-subject to the requirement that the quantity bought equals the quantity
-sold. In this formulation the uniform price is not an extra rule but
-the value of that balance requirement, the price of one additional unit
-of the asset in the batch. Every executed order therefore trades at the
-same price.
-
-Two consequences follow. First, the optimisation fixes who trades, but
-not always the price: several prices can support the same trades, and
-this range is precisely $\mathcal{P}^{*}$. The indeterminacy analysed
-in \Cref{sec:priceimprovement} is therefore built into the problem, and
-the choice within it is exactly what $\sigma$ adds. Second, the fill
-logic is simple. Buyers whose limit is above the clearing price and
-sellers whose limit is below it are filled in full, and orders on the
-wrong side are not filled. Only orders exactly at the clearing price
-can be partly filled, and they are the ones subject to rationing.
-
+Clearing can also be seen as an optimisation problem: choose how much of each
+order to execute so that total gains from trade are as large as possible,
+subject to buying and selling the same quantity. The uniform price is then not
+an extra rule; it is the price of one additional unit in the batch that
+comes out of this balance requirement, so every executed order trades at the
+same price. Two things follow. First, the optimisation decides who trades but
+not always at what price: several prices can support the same trades, and
+that range is exactly $\mathcal{P}^{*}$. The price ambiguity is therefore
+built into the problem, and $\sigma$ is what resolves it. Second, the
+filling rule is simple. Buyers whose limit price is above the clearing price
+and sellers whose limit price is below it are filled completely, orders on the
+wrong side are not filled, and only orders priced exactly at the clearing
+price can be partly filled. Those are the orders that must be rationed.
 
 \subsection{Rationing Rules}
 \label{sec:rationing}
 
-At $\clr$ the two sides are in general not equal, $D(\clr) \neq
-S(\clr)$, so the orders on the long side with $\pi_k = \clr$ must be
-rationed. The rule chosen determines what participants do to improve
-their allocation.
+At the clearing price the two sides are usually not equal, $D(\clr) \neq
+S(\clr)$, so the orders on the longer side priced exactly at $\clr$ cannot all
+be filled and must be rationed. The rule chosen determines what participants
+do to get a bigger share. Any rule that gives more to those who increase some
+variable they control encourages them to inflate that variable
+\citep{haynes2020precedence}.
 
 \begin{description}
-  \item[Price-time priority within the batch.] Orders at $\clr$ are
-  filled in submission order. This preserves continuity with continuous
-  market conventions and is easy to explain. It also reintroduces a
-  speed race at interval scale: if being early inside the batch
-  improves expected fill, participants invest in being early, which is
-  precisely the incentive the mechanism was built to remove. In the
-  terms of \Cref{prop:latency}, it restores a priority payoff to speed
-  alongside the deadline payoff that batching already leaves in place.
-  \item[Pro rata.] Each order at $\clr$ receives a fill proportional to
-  its size; this is the rule adopted, after price priority, in the Dual
-  Flow Batch Auction \citep{jump2025dfba}. It is neutral with respect to
-  timing, which preserves the core property, but creates a different
-  distortion: because allocation increases with submitted size,
-  participants submit more than they intend to trade, and the
-  equilibrium involves inflated orders that participants expect to be
-  scaled down. This is order stuffing, and it degrades the informational
-  content of displayed size \citep{haynes2020precedence}.
-  \item[Size priority or maximal fill.] Larger orders are filled first,
-  or the allocation maximises the number of completely filled orders.
-  This favours block liquidity, which may be the intended policy, but
-  turns the size-inflation incentive of pro rata into a discrete
-  threshold effect.
-  \item[Random allocation.] Fills are assigned by lottery among orders
-  at $\clr$. This removes both the timing and the size channel, and is
-  the only rule under which submitted size is an unbiased statement of
-  desired quantity. The cost is execution uncertainty that participants
-  cannot manage, which matters for anyone hedging, and the need for a
-  randomness source that participants can verify.
-  \item[Hybrid rules.] Production systems mix these. The CME's
-  K-algorithm family allocates part of the volume by time priority and
-  the remainder pro rata, with configurable weights, which lets the
-  venue trade off the two distortions rather than choosing one. A
-  batch-native analogue would allocate a share $\kappa$ pro rata and
-  $1 - \kappa$ randomly, tuning $\kappa$ to balance predictability
-  against size inflation.
+  \item[Price-time priority within the batch.] Orders at $\clr$ are filled in
+  order of submission, which keeps continuity with continuous markets but
+  brings back a speed race at the scale of the interval: if being early
+  inside the batch improves the fill, participants pay to be early, which is
+  the incentive the mechanism was built to remove.
+  \item[Pro rata.] Each order at $\clr$ receives a share proportional to its
+  size, the rule the DFBA uses after price priority. It ignores timing, but
+  because a bigger order gets a bigger fill, participants submit more than they
+  want to trade. This \emph{order stuffing} makes displayed sizes less
+  informative.
+  \item[Size priority or maximal fill.] Larger orders are filled first, or the
+  number of completely filled orders is maximised. This favours large
+  ``block'' orders, which may be intended, but turns pro rata's incentive to
+  inflate size into a threshold effect.
+  \item[Random allocation.] Fills are drawn by lottery among the orders at
+  $\clr$. This removes both the timing and the size incentive and makes
+  submitted size an honest statement of what the participant wants. The cost is
+  an uncertainty about execution that participants cannot manage, which
+  matters to anyone hedging, and the need for a random draw that participants
+  can verify.
+  \item[Hybrid rules.] The CME's K-algorithm family gives part of the volume by
+  time priority and the rest pro rata, balancing the two distortions. A
+  batch version could give a share $\kappa$ pro rata and the remaining
+  $1 - \kappa$ by lottery.
 \end{description}
 
- No rule is neutral: every rule makes
-allocation a function of some variable, and whichever variable that is
-becomes the one participants compete on. The design question is
-therefore not which rule is undistorted but which distortion the venue
-prefers.
-
-% (table unchanged)
-
+No rule is neutral. Every rule ties the allocation to some variable, and that
+variable becomes the thing participants compete on. The question is not which
+rule has no distortion, but which distortion the venue prefers.
 
 \section{Block 5: Settlement and Residual Handling}
 \label{sec:settlement}
 
 \subsection{Gross versus Net Settlement}
 
-Once the batch has cleared, the transfers must be executed. Gross
-settlement moves each matched pair separately, which is simple and
-gives an unambiguous audit trail per fill. Net settlement computes each
-participant's net position change and moves only that, which reduces the
-number of non-zero transfers, sometimes dramatically when many
-participants both buy and sell within the batch. In a decentralised
-setting, where each transfer costs gas, the reduction is a direct cost
-saving and is one of the main practical arguments for batching
-\citep{wang2018loopring,gong2023fbadex}. In a centralised venue the
-saving is smaller but the reconciliation burden is still lower. The
-trade-off is that netting obscures the correspondence between individual
-orders and individual transfers, which complicates per-fill reporting
-and any fee schedule levied per execution.
+Gross settlement moves each matched pair separately, which is simple and
+leaves a clear record of every fill. Net settlement moves only each
+participant's net change in position, which reduces the number of transfers,
+sometimes greatly when many participants both buy and sell in the same batch.
+Where every transfer costs a fee, as on a blockchain, this is a direct saving
+and one of the main practical arguments for batching
+\citep{wang2018loopring,gong2023fbadex}. In a centralised venue the saving is
+smaller, but reconciliation is still easier. The drawback is that netting
+hides which order led to which transfer, which complicates per-fill reporting
+and any fee charged per execution.
 
 \subsection{The Residual}
 
-The volume on the heavier side that cannot be matched at $\clr$ does not
-disappear and is not filled from anywhere else. The design question is
-what happens to it, and there are exactly three answers, selected by the
-order's time-in-force:
+The volume on the longer side that cannot be matched at $\clr$ does not
+disappear, and it is not filled from any other source. What happens to it is
+set by the order's time-in-force, and there are three possibilities:
 
 \begin{enumerate}
-  \item \textbf{Roll over.} The unmatched remainder is carried into the
-  next batch with its original limit price and, where relevant, its
-  original submission timestamp. This is the natural default for
-  resting limit orders and is the behaviour implemented in this thesis.
-  \item \textbf{Cancel.} The remainder is discarded at the end of the
-  batch, which is the batch analogue of an immediate-or-cancel order.
-  \item \textbf{Cancel the whole order if not fully filled}, the analogue
-  of fill-or-kill, which requires the constraint to be imposed inside
-  the clearing problem rather than applied afterwards, because an
-  all-or-nothing order makes \eqref{eq:lpobj} an integer program.
+  \item \textbf{Roll over.} The unmatched remainder moves to the next batch
+  with its original limit price and, where relevant, its original submission
+  time. This is the natural default for resting limit orders and is what this
+  thesis implements.
+  \item \textbf{Cancel.} The remainder is dropped at the end of the batch, the
+  equivalent of an immediate-or-cancel order.
+  \item \textbf{Cancel the whole order unless fully filled}, the equivalent of a
+  fill-or-kill order. This has to be built into the clearing problem itself
+  and cannot be applied afterwards.
 \end{enumerate}
 
-The third option is worth pausing on, because it shows where the clean
-linear structure of the clearing problem breaks. All-or-nothing
-constraints turn a problem solvable by a line search over the price grid
-into a combinatorial one, which is why venues that support them impose
-size limits, and why decentralised batch exchanges that support rich
-order types run solver competitions rather than a single deterministic
-algorithm \citep{harrison2025hybrid}.
-
-Crucially, no external liquidity source is used to absorb the residual.
-The engines compared in \Cref{ch:simulation} can only execute against
-order flow that was actually submitted, which is what makes the
-comparison like-for-like: neither engine has access to liquidity the
-other lacks.
+The third option shows where the clean structure of the clearing problem
+breaks down. All-or-nothing conditions turn a problem that a simple search
+over the price grid can solve into one that must test many combinations of
+orders. That is why venues supporting them limit order sizes, and why
+decentralised batch exchanges with rich order types use competitions between
+solvers instead of one fixed algorithm \citep{harrison2025hybrid}.

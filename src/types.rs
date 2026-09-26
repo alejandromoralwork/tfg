@@ -258,3 +258,39 @@ pub struct Trade {
     pub trade_tx_hash: Option<String>,
     pub chain_id: Option<u64>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_status(status_id: u8, is_trigger: bool) -> Order {
+        let mut o = Order::limit(1, "u", Side::Buy, 100, 1, 0);
+        o.status_id = status_id;
+        o.is_trigger = is_trigger;
+        o
+    }
+
+    /// statuses.csv has 18 codes (0-17). Exactly eight are cancellations; every
+    /// other code (rejections, fills, open, triggered) must not remove an order.
+    #[test]
+    fn cancellation_codes_are_exactly_the_eight_documented() {
+        let cancels = [2u8, 7, 10, 11, 12, 13, 14, 16];
+        for code in 0..=17u8 {
+            assert_eq!(with_status(code, false).is_cancellation(), cancels.contains(&code), "status {code}");
+        }
+    }
+
+    /// An order becomes live only through `open` (not for a conditional order,
+    /// which is still pending) or `triggered`; no other code, and no cancel code,
+    /// may create an order.
+    #[test]
+    fn live_order_rule_covers_every_status_code() {
+        for code in 0..=17u8 {
+            let plain = with_status(code, false).is_new_live_order();
+            let conditional = with_status(code, true).is_new_live_order();
+            assert_eq!(plain, code == 1 || code == 9, "status {code}, plain order");
+            assert_eq!(conditional, code == 9, "status {code}, conditional order");
+            assert!(!(with_status(code, false).is_cancellation() && plain), "status {code} is both");
+        }
+    }
+}

@@ -51,8 +51,8 @@ touching the price computation.
 \centering
 \caption[Engine configuration]{The engines' fixed configuration and
 behaviour, as actually implemented. This thesis used one configuration
-throughout --- most rows below are not runtime-adjustable in the current
-codebase, which the Meaning column states plainly rather than presenting
+throughout --- most rows below are not runtime-adjustable in this
+implementation, which the Meaning column states plainly rather than presenting
 a wider configuration surface than exists.}
 \label{tab:config}
 \small
@@ -85,7 +85,7 @@ Four rows present in an earlier draft of this table --- a seed for a
 randomised boundary, a $\kappa$ parameter for a size/pro-rata hybrid
 rationing rule, a self-trade-prevention policy, and a warm-up period
 excluded from metrics --- have been removed rather than marked
-\texttt{n/a}: none of the four has any basis in the current codebase
+\texttt{n/a}: none of the four has any basis in the engines used here
 (no randomised boundary, no hybrid rationing rule, no self-trade
 prevention, and no warm-up exclusion are implemented), and a table row
 implies a real, if unused, feature that keeping them here would have
@@ -113,14 +113,505 @@ computed by engine-specific code.
 \ph[repository URL, dataset DOI and commit hash to be inserted before
 submission]
 
+\chapter{Testing and Verification}
+\label{app:testing}
+
+This appendix lists every check performed on the data, the two matching
+engines, the metrics code and the analysis results, and states what each
+check does and does not prove. Verification has five layers, each answering
+a different question (\Cref{tab:testlayers}). The layers are deliberately
+independent: an error would have to escape all of them, in the same
+direction, to reach the reported numbers.
+
+\begin{table}[htbp]
+\centering
+\caption[Verification layers]{The five verification layers and their
+results.}
+\label{tab:testlayers}
+\small
+\begin{tabularx}{\textwidth}{@{}p{2.6cm} L p{3.6cm}@{}}
+\toprule
+\textbf{Layer} & \textbf{Question it answers} & \textbf{Result}\\
+\midrule
+Data decoding and ingestion & Are the binary records read correctly, and is
+every record accounted for? & 11 decoder tests, 8 parser tests, 4
+real-data tests, 3 independent whole-month record counts agree\\
+Engine behaviour & Do the CDA and FBA match, price and ration as specified?
+& 9 automatic tests, 29 hand-computed scenarios, 1 live structural
+invariant\\
+Metric computation & Does every metric formula return the value worked out
+by hand? & 17 automatic tests, 8 hand-computed scenarios covering the whole
+metric catalogue\\
+Replay infrastructure & Do checkpoints, streaming output, command parsing
+and date arithmetic behave correctly? & 31 automatic tests\\
+Results consistency & Do the reported numbers reproduce when recomputed
+independently, and do they satisfy relations that must hold? & 22
+column-level recomputations agree, plus the structural checks of
+\Cref{sec:testresults}\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two separate test systems back the middle layers. The first is a suite of
+80 automatic unit and differential tests, written in Rust, that runs with the
+standard toolchain. The second is a checklist of 37 hand-built scenarios
+that is compiled into the simulator program itself, so it can be run on the
+finished executable and inside the container used for the cloud run without
+any development tools. Neither replaces the other: the automatic tests never
+run a multi-order matching scenario end to end, and the checklist never
+exercises the file decoders or the checkpoint format.
+
+\section{Data Verification}
+\label{sec:testdata}
+
+\subsection{Binary Record Decoder}
+
+The order-status archive is stored in a packed binary format of 54 bytes per
+record. Eleven tests check the decoder against the format specification and
+against real data:
+
+\begin{itemize}
+  \item the worked example printed in the dataset's own schema document
+  decodes to the expected fixed-point value;
+  \item prices decode correctly for every number of decimal places present in
+  the data (0, 6 and 7), including round-half-up when the source carries one
+  more digit than the internal scale holds;
+  \item the sign bit of signed prices is honoured: the same magnitude decodes
+  to opposite signs when the bit is set and unset;
+  \item quantities round to whole units (39.35 to 39, 39.5 to 40);
+  \item a hand-assembled record decodes field by field, and the first 54 bytes
+  of the real December file are decoded and compared field by field with the
+  known-correct row of the dataset's own CSV preview;
+  \item a record whose size rounds to zero is discarded rather than passed on;
+  \item a plausibility validator accepts a well-formed record and rejects an
+  all-zero buffer (timestamp in 1970), timestamps outside the 2020--2035
+  window, and status, order-type or time-in-force codes one step beyond their
+  documented maximum.
+\end{itemize}
+
+\subsection{Text Parser and File Discovery}
+
+A second reader handles the CSV form of the dataset. Eight tests check that
+fixed-point prices (\texttt{126.67}, \texttt{127}, \texttt{0.000001}) and
+quantities are scaled and rounded correctly, that two known date--time strings
+convert to the correct nanosecond epoch, and that one complete real-shaped row
+yields the right order id, user id, status, side, price and remaining size.
+They also check that a peek at the first timestamp of a file reads only the
+first row and rejects a file with the wrong number of columns, and that file
+discovery on a directory tree built out of order returns files in
+chronological order, with accepted files before rejected files within an hour,
+ignores a stray documentation file and unsupported extensions, and accepts a
+single file path.
+
+\subsection{Tests on Real Data}
+\label{sec:testrealdata}
+
+Four further tests need the real sample files or system tools and are
+therefore run separately from the default suite. All four pass.
+
+\begin{itemize}
+  \item Streaming a real compressed sample file end to end produces a sensible
+  number of bytes, at least six figures of records, an exact accounting
+  identity (records seen equal records produced plus records skipped), and a
+  first decoded order that matches the first row of the dataset's CSV preview.
+  \item The first-timestamp shortcut agrees with the first record of the full
+  stream on the same file.
+  \item The scan command reproduces the exact totals of an earlier real run over
+  the sample directory (3,630,216 records seen, 54,179 skipped, 2 files
+  processed), and its three record categories are mutually exclusive and
+  exhaustive.
+  \item Archive extraction, run against a real compressed archive built with the
+  system \texttt{tar} and \texttt{xz} tools, restores the expected files with
+  their contents and sizes and deletes the archive afterwards.
+\end{itemize}
+
+\subsection{Whole-Month Consistency}
+\label{sec:testconsistency}
+
+The full December~2025 SOL archive was counted three times by independent
+programs, and all three agree exactly (\Cref{tab:testcounts}): the dedicated
+scan command, the running totals written by the simulation, and the
+Python dataset statistics that decode the raw files again from scratch. The
+categories also add up without remainder, so no record is lost or counted
+twice:
+\[
+  283{,}797{,}135 + 281{,}778{,}306 + 57{,}615{,}417 + 16{,}985{,}954
+  = 640{,}176{,}812 .
+\]
+Records classified as new live orders, cancellations and other events are
+those the engines act on; the 16,985,954 skipped records (2.65\% of the total)
+are those whose size rounds to zero and which no engine processes.
+
+\begin{table}[htbp]
+\centering
+\caption[Independent record counts]{Record counts for the December 2025 SOL
+archive from three independent passes.}
+\label{tab:testcounts}
+\small
+\begin{tabularx}{\textwidth}{@{}L r r r@{}}
+\toprule
+\textbf{Quantity} & \textbf{Scan command} & \textbf{Simulation} &
+\textbf{Python decode}\\
+\midrule
+Hourly files processed & 744 & 744 & 744\\
+Files skipped & --- & 0 & ---\\
+Total records seen & 640,176,812 & 640,176,812 & 640,176,812\\
+Skipped (zero size after rounding) & 16,985,954 & 16,985,954 & ---\\
+Distinct participants & --- & --- & 37,027\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Time Grid and Coverage}
+
+Coverage is the whole month with no gap: 744 hourly files, first record on
+30~November 2025 at 23:59:59.87 UTC and last record on 31~December at
+23:59:59.48 UTC. Both engines write one output row for every one-second bucket
+from the first record on, empty buckets included, giving exactly
+$2{,}678{,}400 = 31 \times 86{,}400$ rows each. The analysis merges the two
+files one to one on the bucket start time and stops with an error if the row
+counts differ or a row is lost or duplicated in the merge; it never did.
+
+Late events are accounted for rather than ignored. A metric event that refers
+to a bucket that has already been written cannot be stored, so it is counted:
+none for the FBA and 2,075 for the CDA out of more than 640 million records
+(about 3 in a million), a negligible effect. The count is reported so that the
+number of discarded events is known.
+
+\subsection{Data-Quality Observations}
+
+Two properties of the data were examined because they could indicate a
+decoding error, and neither does. First, 96.0\% of consecutive records carry an
+identical nanosecond timestamp, so the median inter-arrival time is exactly
+zero. This is consistent with the node writing several events of one match,
+such as both counterparties' fills, as one atomic write, and it is the reason
+the mean (4.16\,ms) and the 99th percentile (126.6\,ms) are reported alongside
+the median. Second, the mix of records (283.8 million new live orders against 281.8
+million cancellations) is what an active order book produces, and no status,
+order-type or time-in-force code outside the documented lookup tables occurs;
+the plausibility validator above would reject one.
+
+\section{Engine Verification}
+\label{sec:testengines}
+
+\subsection{Structural Invariant}
+
+One condition is checked live during every run: a price level is never left in
+the CDA book with no orders. It is what the matching loop relies on when it
+reads the front of a level, and it is enforced at the point of use. If it were
+ever broken, the run would stop at once instead of writing a wrong row. The
+run completed without stopping. Financial properties (quantity conservation,
+no execution beyond a limit price, no duplicated fill) are not asserted during
+the run; they are established by the tests below.
+
+\subsection{Automatic Tests of the Engines}
+
+Six tests concern the CDA book:
+
+\begin{itemize}
+  \item bid and ask depth against a hand-computed sequence of resting orders, a
+  partial cross, a non-crossing sell, a cancellation and a cancellation of an
+  order that does not exist, each step also checked against a naive full scan of
+  the book;
+  \item price priority first and time priority second, across and within price
+  levels, when a market buy sweeps three resting asks;
+  \item two same-price orders submitted out of timestamp order are still filled
+  by timestamp;
+  \item cancelling an order that has already been fully filled is a harmless
+  no-op;
+  \item a fully filled or fully cancelled price level leaves no empty entry
+  behind;
+  \item a randomised 500-step sequence of submissions and cancellations, with
+  every book accessor (depths, order counts, best bid and ask) compared with an
+  independent naive scan after every step.
+\end{itemize}
+
+Three tests concern the FBA's demand and supply schedules, which are evaluated
+by prefix sums and binary search for speed: agreement with a linear-scan
+reference exactly at boundary prices for a mixed batch of limit and market
+orders; correct behaviour for an empty batch and for an all-market batch, at
+the lowest and highest possible price; and a randomised comparison over 200
+batches with 20 query prices each. These are differential tests: they show
+that the fast implementation equals a simple one, which is the correct way to
+verify an optimisation whose specification is the simple version.
+
+\subsection{Hand-Computed Scenarios: CDA}
+
+Fifteen scenarios, each on a fresh book, are compared with values worked out by
+hand:
+
+\begin{enumerate}
+  \item a resting order with no cross stays in the book;
+  \item a cross of exactly equal quantity;
+  \item a partial fill of a larger resting order;
+  \item a multi-fill sweep that walks two price levels;
+  \item price priority beats time priority;
+  \item time priority (first in, first out) at the same price;
+  \item a market order trades at the resting maker's own price;
+  \item a market order with no liquidity neither trades nor rests;
+  \item a market order that finds only part of its quantity yields a fill rate
+  of 0.8 and not 1.0;
+  \item a status row that is not a live order is filtered out entirely;
+  \item a sell crosses a resting bid only at or below the bid price, never
+  above it;
+  \item a cancellation removes the matching resting order;
+  \item cancelling an unknown order id is harmless;
+  \item a row with status ``filled'' never touches a resting order, because
+  fills are outputs of the matching and are not replayed as input;
+  \item one complete scenario whose quoted spread, book imbalance and fill rate
+  are computed by hand.
+\end{enumerate}
+
+Items 9 and 11 (and, in the command parser, the decimal price and quantity
+test) are regression tests written after real defects were found; each fails
+on the faulty version.
+
+\subsection{Hand-Computed Scenarios: FBA}
+
+Fourteen scenarios, each on a fresh batch engine:
+
+\begin{enumerate}
+  \item clearing an empty batch returns no clearing;
+  \item a simple full match;
+  \item price-time rationing when one side outweighs the other (the worked
+  example of the design chapter, run as a test);
+  \item a market order is only queued when submitted and trades at the clear, at
+  the volume-maximising uniform price;
+  \item a tie with no price history picks the lower candidate price;
+  \item a batch of only market orders with no price history keeps every order
+  instead of losing it;
+  \item a batch of only market orders with stale clearing-price history still
+  rolls over and is not priced from that history;
+  \item a non-live status row is filtered out;
+  \item a cancellation removes the matching pending order;
+  \item cancelling an unknown order id is harmless;
+  \item a ``filled'' row never touches a pending order;
+  \item the residual of a partially filled batch rolls into the next batch;
+  \item a full metrics scenario after a partial clear (unexecuted residual
+  share, fill rate, depth at best, and no quoted spread because the sell side
+  cleared completely);
+  \item a tie with price history correctly moves the winner to the price closer
+  to the previous clearing price.
+\end{enumerate}
+
+Item 6 is another regression test for a real defect. Items 5 and 14 together
+exercise both branches of the third tie-breaking step of the clearing cascade,
+and items 3 and 12 exercise the rationing rule and the roll-over of the
+residual, the two design choices on which the results depend most.
+
+\section{Metric Verification}
+\label{sec:testmetrics}
+
+The metric code is tested at two levels. Seventeen automatic tests each isolate
+one formula or one mechanism:
+
+\begin{itemize}
+  \item \textbf{Boundary concentration:} a hand-computed fraction from six
+  messages and one batch clear; exact inclusive and exclusive behaviour at the
+  edges of the final window; no value for a zero-width batch; and a randomised
+  comparison of 200 trials against a naive nested-loop count.
+  \item \textbf{Reference prices:} when a book snapshot and a batch clear carry
+  the same timestamp the snapshot wins the tie; a markout horizon beyond the last
+  available price gives no value.
+  \item \textbf{Streaming:} a randomised 140-second CDA stream and an equivalent
+  FBA stream, each written incrementally in pieces, produce byte-identical
+  output to writing everything at once, including the values carried from one
+  piece to the next.
+  \item \textbf{Grid and late events:} two snapshots ten buckets apart produce
+  all eleven rows in between, with the empty ones empty; a late event for an
+  already written bucket is counted, not stored, and does not disturb later
+  output.
+  \item \textbf{Kyle's lambda:} engineered observations with a true slope of 2.0
+  are recovered to within $10^{-9}$ on the CDA and observations with a true
+  slope of 125.0 are recovered to within $10^{-6}$ on the FBA; a sweep or batch
+  with no net flow or no clearing price is inert; a missing later midpoint gives
+  no value; and the FBA carries the previous clearing price correctly across a
+  flush.
+  \item \textbf{Volatility, Amihud and dispersion:} realized volatility is the
+  root of the sum of squared returns and not a standard deviation, with a single
+  return reporting its absolute value; Amihud illiquidity has no value in the
+  first bucket and the hand-computed absolute return divided by dollar volume in
+  the second; price dispersion of two trades at 100 and 102 equals the
+  hand-computed relative standard deviation in basis points.
+\end{itemize}
+
+Eight further scenarios drive the recorder directly with synthetic events and
+compare every reported column with a value computed by hand: the CDA liquidity
+and book metrics (spread, depth at best, imbalance, total depth, the three depth
+bands, latency and throughput, fill rate); the CDA effective, realized and
+impact spreads at the 1, 5 and 30 second horizons together with executed volume
+and notional, VWAP, trade count, trader surplus, dispersion and order-to-trade
+ratio; volatility and Amihud across two buckets; execution and allocation
+metrics for orders that fill partly or never (fill rate, time to execution,
+order size inflation); the CDA Kyle's lambda; and the FBA counterparts of the
+liquidity metrics (with boundary concentration present and book imbalance and
+total depth correctly absent), of the spread metrics (using the unsigned
+formulas, since the FBA never sets an aggressor side), and of Kyle's lambda
+from net order flow. Together the 37 hand-built scenarios (15 CDA, 14 FBA, 8
+metrics) cover the entire metric catalogue of \Cref{app:formulas}.
+
+\section{Replay Infrastructure Tests}
+\label{sec:testinfra}
+
+The remaining automatic tests protect the machinery around the engines: file
+writing, the command interface, and date and progress arithmetic.
+
+\begin{itemize}
+  \item \textbf{Checkpoints (4 tests):} a fully populated checkpoint, including
+  its folded metric summary, survives a write and read round trip exactly; a
+  checkpoint with an unknown version is rejected; run names are sanitised; and
+  truncating a partly written output file to the checkpointed row count is
+  correct and idempotent.
+  \item \textbf{Streaming watermark and dates (3 tests):} five scenarios check
+  the point up to which rows may safely be written (no anchor yet, the next
+  file's start, the markout guard, this file's own tail, no next file), so no row
+  is written before its later markout prices are known; date arithmetic recovers
+  known days from day counts; and run timestamps have the expected shape.
+  \item \textbf{Command parsing (15 tests):} every command of the interactive
+  program parses correctly with its aliases and rejects malformed input, unknown
+  commands and a leading byte-order mark, including a regression test for
+  decimal prices and quantities.
+  \item \textbf{Download and progress (8 tests):} the archive URL of each coin,
+  detection of an already populated directory, recursive size counting, and the
+  formatting of sizes, durations and time estimates.
+  \item \textbf{Scan classification (1 test):} orders of every status, trigger and
+  triggered combination fall into the same category the engines would assign
+  them.
+\end{itemize}
+
+\section{Consistency Checks on the Results}
+\label{sec:testresults}
+
+The checks above show that the code is right on constructed cases. The
+following checks examine the actual month-long outputs.
+
+\subsection{Independent Recomputation of the Output Files}
+
+The simulator maintains a running summary of every metric column (count, sum,
+minimum and maximum) while it writes the output files, and saves it in the
+checkpoint. The analysis pipeline reads the same files with completely
+different code. For eleven metric columns and both engines (22 comparisons) the
+row counts, the number of non-empty values, the minima and the maxima agree
+exactly, and the sums agree to a relative error of at most $10^{-8}$, except
+the FBA Kyle's lambda ($2.4\times10^{-4}$, a sum of values that almost cancel
+and are written with limited decimals). The total trade counts also agree
+(3,530,770 for the FBA and 3,481,516 for the CDA). \Cref{tab:testrecompute}
+gives a selection.
+
+\begin{table}[htbp]
+\centering
+\caption[Recomputation against the simulator's running summary]{Selected
+columns recomputed in Python from the output files and compared with the
+running summary written by the simulator. Counts, minima and maxima agree
+exactly for all 22 comparisons.}
+\label{tab:testrecompute}
+\small
+\begin{tabular}{@{}l l r r@{}}
+\toprule
+\textbf{Column} & \textbf{Engine} & \textbf{Non-empty values} &
+\textbf{Relative error of sum}\\
+\midrule
+Quoted spread & FBA & 2,677,996 & $1.4\times10^{-8}$\\
+Quoted spread & CDA & 2,655,218 & $3.3\times10^{-10}$\\
+Effective spread & FBA & 626,117 & $7.2\times10^{-10}$\\
+Effective spread & CDA & 633,935 & $1.5\times10^{-9}$\\
+Depth at best & CDA & 2,655,219 & $4.4\times10^{-13}$\\
+Amihud illiquidity & FBA & 626,128 & $1.5\times10^{-9}$\\
+Kyle's lambda & CDA & 633,634 & $2.7\times10^{-9}$\\
+Intra-interval dispersion & FBA & 626,129 & $3.9\times10^{-9}$\\
+Executed volume & both & 2,678,400 & 0\\
+Executed notional & both & 2,678,400 & 0\\
+VWAP & FBA & 626,129 & $4.8\times10^{-15}$\\
+VWAP & CDA & 633,935 & $9.5\times10^{-15}$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Relations That Must Hold}
+
+\begin{itemize}
+  \item \textbf{Same flow, same volume.} Both engines can only trade against the
+  submitted orders, so total executed volume and notional should be almost equal
+  and they are: 156.35 million SOL and USD~20.31 billion for the FBA against
+  155.57 million SOL and USD~20.20 billion for the CDA (differences of 0.5\%),
+  statistically indistinguishable per interval ($p$~=~0.215 and 0.173).
+  \item \textbf{Uniform pricing.} Every trade of an FBA batch prints at one price,
+  so the FBA's VWAP in a bucket must equal that batch's clearing price and its
+  price dispersion must be zero. Dispersion is exactly zero in 96.58\% of the
+  buckets where it is defined, and the VWAP identity was confirmed by reading the
+  code, where every trade of a clear receives the same price. A bucket that
+  contains trades of more than one batch clear can have nonzero dispersion, which
+  is why the appendix states the FBA value as approximately zero.
+  \item \textbf{Structural emptiness.} Realized volatility, which needs two
+  prices in one bucket, has a value in one FBA bucket out of 2,678,400 (against
+  2,654,966 for the CDA), as expected from an engine that clears at most once
+  per bucket. Metrics that cannot exist for one engine are empty in every row of
+  that engine and only there: book imbalance and total book depth for the FBA,
+  boundary concentration and unexecuted residual share for the CDA. Pricing
+  error is empty in every row of both files, as expected without an oracle.
+  \item \textbf{Grid identity.} Both engines have exactly $31\times86{,}400$
+  rows, and the merged frame has the same number of rows.
+  \item \textbf{Shared activity.} The share of buckets in which both engines trade
+  (20.37\%) is nearly four times what independent activity would give (5.53\%),
+  consistent with both engines reacting to one order flow and a check that the
+  two files are aligned in time.
+  \item \textbf{Sign proxy coverage.} All but one of the 545,573 matched buckets
+  receive a tick sign (the first has no predecessor).
+\end{itemize}
+
+\subsection{Document Consistency}
+
+Every number in the results chapter is generated by the analysis pipeline as a
+named macro, so no figure is typed by hand. A script checks that every macro
+used in the text is defined in the generated file (230 macros, none missing), and
+that every label is unique and every cross-reference resolves. The same
+mechanism found and corrected one error during this verification: the share of
+skipped records was computed against the wrong base and is now 2.65\% of records
+seen.
+
+\section{Coverage, Limits and Reproduction}
+\label{sec:testlimits}
+
+The checks above establish that the data are read completely and correctly,
+that the engines implement the specified rules on all constructed cases and
+behave identically to simple reference implementations on random ones, that
+every metric formula returns its hand-computed value, and that the reported
+outputs reproduce under independent recomputation. They do not establish
+everything, and the gaps are stated here:
+
+\begin{itemize}
+  \item the CDA output was not compared trade for trade with the trades
+  Hyperliquid's own engine produced from the same flow, so agreement with the
+  venue is untested;
+  \item the FBA was not run with $\tau \to 0$ to confirm convergence to the CDA,
+  which needs the interval sweep that was not run;
+  \item determinism follows from the absence of randomness and clocks in the
+  engines but the full-month run was not repeated to compare two outputs byte for byte;
+  \item neither engine prevents self-trades, and time-in-force is read but not
+  enforced, so these behaviours are untested because they are unimplemented;
+  \item the update command of the simulator has no tests.
+\end{itemize}
+
+All the checks can be repeated. The automatic tests run with
+\texttt{cargo test} (76 tests), and the four tests needing real data or system
+tools with \texttt{cargo test -- --ignored}, giving 80 passed tests in total.
+The 37 hand-built scenarios run with \texttt{market\_sim test engine all}, which
+returns exit status 0 only if every scenario passes (15 of 15 CDA, 14 of 14 FBA,
+8 of 8 metrics). The record counts come from \texttt{market\_sim scan sol}, the
+recomputation of \Cref{tab:testrecompute} from \texttt{analysis/crosscheck\_summary.py},
+and the full analysis from \texttt{python analysis/run\_all.py}. All were run for
+this thesis with the results reported above.
+
 \chapter{Metric Formulas}
 \label{app:formulas}
 
 This appendix gives the exact, implementation-level formula behind every
-column of the logged output that \Cref{sec:metrics} summarises, and
-behind the handful of further diagnostic columns computed alongside them
-but not tabulated in \Cref{tab:metrics1,tab:metrics2,tab:metrics3}. Each
-entry carries a scope tag: \textbf{U}niversal (both engines),
+metric \Cref{sec:metrics} summarises, and behind a handful of further
+diagnostic columns computed alongside them but not listed there (notably
+Kyle's lambda). Each of the three sections below opens with the
+at-a-glance table (\Cref{tab:metrics1,tab:metrics2,tab:metrics3}) for
+its group, followed by the full formula. Each entry also carries a scope
+tag: \textbf{U}niversal (both engines),
 \textbf{C}DA-only, \textbf{F}BA-only, or \textbf{X} (defined but always
 empty --- the dataset lacks what it would need). A metric marked
 \textbf{X} is kept in the catalogue rather than silently dropped, so
@@ -152,6 +643,40 @@ unit-free and are \emph{not} rescaled.
 
 \section{RQ2.1: Liquidity and Transaction Cost Metrics}
 
+\begin{table}[htbp]
+\centering
+\caption[Metrics for RQ2.1]{RQ2.1 --- liquidity and transaction cost
+metrics, at a glance. \emph{Data} is the minimum data level required
+(\Cref{tab:levels}); full formulas follow below.}
+\label{tab:metrics1}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.1cm} L p{1.6cm}@{}}
+\toprule
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data}\\
+\midrule
+Quoted spread & $(a_t-b_t)/\midp$, time-weighted per interval; for the
+FBA the implied spread between the marginal unexecuted buy and sell of
+the batch & L1/L2\\
+Depth at best & Displayed volume at the best bid and ask, time-weighted;
+for the FBA the volume at $\clr$ in the batch schedules & L2\\
+Depth within $x$ bps & Cumulative volume within $x$ basis points of
+$\midp$ (or of $\clr$), for several $x$ & L2\\
+Book imbalance & $(V^{bid}-V^{ask})/(V^{bid}+V^{ask})$ at the top $n$
+levels & L2\\
+Effective spread & $2D_k(p_k-m_k)/m_k$, volume-weighted; $m_k$ is the
+pre-trade midpoint for the CDA, the previous batch's clearing price as
+of submission for the FBA & L1 + trades\\
+Realized spread & $2D_k(p_k-m_{k+\Delta})/m_k$ for
+$\Delta \in \{1,5,30\}$ seconds; the part of the spread the liquidity
+provider keeps & L1 + trades\\
+Price impact & Effective spread minus realized spread; the adverse
+selection component & L1 + trades\\
+Amihud illiquidity & $|r_t|/\text{volume}_t$ averaged over intervals &
+L1 + trades\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
 \paragraph{Quoted spread (U).} CDA: for every book snapshot in the
 bucket with both sides present and $a_t + b_t > 0$,
 $\mathrm{spread}_{\mathrm{bps}} = (a_t - b_t)/\midp \cdot 10^{4}$,
@@ -180,7 +705,7 @@ Never set on an FBA row --- no code path computes an FBA analogue.
 depth)$/2$ across the \emph{whole} book, every price level both sides
 --- contrast with depth at best's touch-only figure.
 
-\paragraph{Effective spread (U).}
+\paragraph{Effective spread (U), raw per-bucket value.}
 \begin{equation}
   \mathrm{dev}_{\mathrm{bps}}(p_k, m_k, D_k) =
   \begin{cases}
@@ -192,52 +717,69 @@ depth)$/2$ across the \emph{whole} book, every price level both sides
 quantity-weighted per bucket, $m_k$ the pre-trade reference price (CDA:
 book midpoint; FBA: the batch's own clearing price). \emph{None} if no
 trade in the bucket had a usable reference price. The FBA has no
-taker/maker distinction in a uniform-price batch, hence the third case.
+taker/maker distinction in a uniform-price batch, hence the third case:
+every FBA contribution to this raw column is $\ge 0$ by construction (a
+mean absolute deviation), while a CDA contribution can be negative (a
+fill better than the reference price). This is the value each engine's
+simulator writes to its own timeseries CSV; \Cref{ch:results} does not
+report the FBA side of it directly, for the reason below.
 
-\textbf{This third case is not a cosmetic detail.} Every FBA trade uses
-the unsigned branch, so \emph{every} FBA contribution to this metric is
-$\ge 0$ by construction, while a CDA contribution can be negative (a fill
-better than the reference price). The two engines' means are therefore
-not the same statistic: CDA's is a genuine signed average that can
-partly cancel across trades; FBA's is a mean absolute deviation, which
-cannot cancel and is mechanically at least as large as what a signed
-average of the same underlying moves would show. Comparing the two
-levels directly, as \Cref{ch:results} does, is still informative but
-should not be read as isolating a pure mechanism effect on cost --- part
-of any gap is this measurement asymmetry, not necessarily the trading
-cost participants faced.
+\paragraph{Signed FBA spread: a CDA-tick proxy.} Comparing the raw FBA
+column above to the CDA's genuinely signed one directly would conflate a
+measurement asymmetry with an economic one, so \Cref{sec:res21} instead
+assigns the FBA a proxy direction before reporting it. The natural
+candidate --- classify a batch ``buy'' if its clearing price rose above
+the previous batch's clearing price, ``sell'' if it fell --- turns out to
+be circular: that previous clearing price \emph{is} $m_k$ in the formula
+above, so $\mathrm{sign}(p_k-m_k) \cdot |p_k-m_k| = (p_k-m_k)$, and the
+buy/sell sign flip built into $\mathrm{dev}_{\mathrm{bps}}$ exactly
+cancels the classification that produced it; no information is added
+over the unsigned value. The construction actually used instead ticks
+off the \emph{CDA's} price series --- independent of the FBA's own
+reference price, since the CDA and FBA are the same order flow processed
+two different ways: over the intersection of buckets where both engines
+traded (\Cref{sec:res22} gives the exact count), a Lee--Ready zero-tick
+rule \citep{leeready1991} on consecutive CDA prices classifies that
+second's FBA batch as buy-side if the CDA ticked up, sell-side if it
+ticked down, inheriting the last nonzero tick on a flat CDA price. The
+signed FBA value reported in \Cref{ch:results} is then this tick sign
+times the raw unsigned column above. This is a proxy for the missing
+aggressor flag, not a recovery of it: tick-rule classification is
+commonly 80--85\% accurate against ground-truth trade direction even
+with true trade-level data, and sourcing the tick from the \emph{other}
+engine's price series is a further remove again. It is the best
+construction available without modifying the simulator and re-running
+the replay.
 
 \paragraph{Realized spread (U), $\Delta \in \{1,5,30\}$\,s.} Same trades
 and gate as effective spread, but against the reference price at
 $t_k+\Delta$ instead of before the trade, found by a binary search over
 the combined, time-sorted series of CDA midpoints and FBA clearing
 prices (a book snapshot wins a tie against a batch at the identical
-timestamp). \emph{None} for a horizon with no trade whose markout
-falls within the retained window. The signed/unsigned asymmetry above
-matters more here than for effective spread: because $D_k$ is
-\emph{always} unknown for the FBA, its realized spread is a mean
-\emph{absolute} price displacement over the next $\Delta$ seconds, not a
-directional markout. For a price process that moves diffusively, the
-expected absolute displacement grows roughly with $\sqrt{\Delta}$, so an
-FBA realized spread that roughly doubles from $\Delta=1$s to $5$s and
-roughly quintuples by $30$s (as \Cref{ch:results} reports) is consistent
-with ordinary price diffusion over the markout window, not with a
-mechanism-specific effect on adverse selection --- the CDA's signed
-version, by contrast, can and does go negative, which is the
-economically distinct claim that liquidity providers are on average
-losing to informed flow after the fact. Reading the two as directly
-comparable adverse-selection measures is the most likely place to
-over-interpret this chapter's numbers.
+timestamp). \emph{None} for a horizon with no trade whose markout falls
+within the retained window. The FBA's raw column is, like effective
+spread, a mean absolute price displacement rather than a directional
+markout, and grows with $\Delta$ roughly as $\sqrt{\Delta}$ from ordinary
+price diffusion rather than a widening adverse-selection cost; the same
+CDA-tick construction above is applied to it before
+\Cref{ch:results} reports it, using one tick sign per bucket shared
+across all three horizons. Signed this way, the growth with $\Delta$
+does not appear, consistent with a genuine signed statistic in which
+diffusion cancels across roughly balanced favourable and unfavourable
+moves rather than accumulating.
 
 \paragraph{Price impact (U), $\Delta \in \{1,5,30\}$\,s.} Effective
 spread minus realized spread at the matching horizon --- the
-adverse-selection component of the effective spread \emph{for the CDA,
-where both terms are signed}; for the FBA this difference inherits the
-mean-absolute-deviation character of both its inputs, so a negative FBA
-value at a longer horizon means the mean absolute price move outgrew the
-mean absolute submission-time deviation, not that adverse selection
-reversed sign. Assigned only if
-both terms are computable for that bucket and horizon.
+adverse-selection component of the effective spread. \Cref{ch:results}
+reports this as signed effective spread minus signed realized spread
+(both via the CDA-tick construction above), recomputed rather than
+signing the raw, already-differenced column: the raw FBA price impact
+column inherits the mean-absolute-deviation character of both its
+unsigned inputs and can go negative at longer horizons purely because
+the unsigned realized spread outgrows the roughly constant unsigned
+effective spread, an artefact of the subtraction, not of adverse
+selection reversing sign. Assigned only if both signed terms are
+computable for that bucket and horizon.
 
 \paragraph{Amihud illiquidity (U).} From the same combined reference-price
 series, $\mathrm{close}$ is the last price observed in a bucket, carried
@@ -254,6 +796,35 @@ move on zero volume reports \emph{None}, not $\infty$.
 \section{RQ2.2: Price Discovery Metrics}
 \label{sec:formularq22}
 
+\begin{table}[htbp]
+\centering
+\caption[Metrics for RQ2.2]{RQ2.2 --- price discovery and market quality
+metrics, at a glance.}
+\label{tab:metrics2}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.1cm} L p{1.6cm}@{}}
+\toprule
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data}\\
+\midrule
+Matched-timestamp volatility & Post-hoc, Python-computed: RMS log-return
+per calendar day over buckets where both engines traded, on the
+identical matched timestamps; an intraday variant reports the same
+log-returns individually, unaggregated & L1 + trades\\
+Realized volatility & Standard deviation of interval midpoint or
+clearing price returns; \emph{not reported} --- the FBA clears at most
+once per bucket, leaving essentially no bucket with the second
+within-bucket observation the formula needs (\Cref{sec:res22}) & L1\\
+Intra-interval price dispersion & Standard deviation of execution prices
+within one interval; zero by construction for the FBA, strictly positive
+for the CDA, and therefore a direct measure of the uniform-price
+property & L1 + trades\\
+Pricing error & $|\clr-p^{ref}|$ or $|\midp-p^{ref}|$ against an
+external reference price, in bps; \emph{not computable in this
+dataset} (\Cref{sec:data}) & L1 + ref\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
 \paragraph{Realized volatility (U).} From the reference-price series,
 per bucket, consecutive-pair returns $r_i = (p_{i+1}-p_i)/p_i$
 (a pair with a non-positive base price is skipped); the reported value
@@ -261,6 +832,43 @@ is $\sqrt{\sum_i r_i^2}$ --- the root sum of squares, the standard
 realized-variance estimator, deliberately \emph{not} a standard
 deviation about the mean. A single return in the bucket reports
 $|r|$ directly. \emph{None} with fewer than two usable points.
+
+\paragraph{Matched-timestamp volatility (U).} Unlike the preceding
+per-bucket estimator, this is not a field either simulator exports
+directly: it is computed by the Python analysis pipeline
+(\texttt{analysis/matched\_volatility.py}) from both engines' \texttt{vwap}
+columns jointly, after the fact. Build the intersection $\mathcal{T}$ of
+buckets where both engines report a trade that second (\texttt{vwap}
+non-\emph{None} on both sides); form consecutive-pair log-returns
+$r^{e}_i = \ln\!\big(vwap^{e}_{t_{i+1}}/vwap^{e}_{t_i}\big)$ for
+$e \in \{\text{FBA}, \text{CDA}\}$ over the same $t_i \in \mathcal{T}$ for
+both engines (a pair with a non-positive price on either endpoint of
+either engine is skipped); group by the calendar day of $t_{i+1}$, and
+report $\sqrt{\mathrm{mean}_i(r^{e}_i)^2} \cdot 10^{4}$ per engine per
+day, in bps. This is a root \emph{mean} of squares, deliberately not the
+root \emph{sum} of squares the preceding per-bucket formula uses: a
+day's matched-return count varies with how active trading was that day,
+so an unnormalised sum would conflate a busier day with a more volatile
+one, whereas the mean gives a genuine average-return-magnitude figure
+comparable across days and across engines. A day with fewer than 5
+matched returns is reported as \emph{None} for both engines rather than
+a near-meaningless noisy estimate. Because $\mathcal{T}$ requires a trade
+on \emph{both} sides, this statistic is conditional on joint trading
+activity --- informative for comparing the two engines head to head on
+shared ground, but not an unconditional whole-month volatility estimate
+for either one alone.
+
+\paragraph{Matched-timestamp volatility, intraday variant (U).} The same
+construction through the consecutive-pair log-returns $r^{e}_i$ above,
+without the day-level grouping step: each $r^{e}_i$ is reported directly
+as $|r^{e}_i| \cdot 10^{4}$ bps, one observation per matched
+consecutive-pair return rather than one per calendar day. This mirrors
+the fallback the per-bucket realized volatility formula uses when a
+bucket has exactly one usable return (reports $|r|$ directly rather than
+a root sum of squares over a single term). Trades the daily RMS's
+noise-averaging for full time resolution: $n$ is in the hundreds of
+thousands rather than around 31, at the cost of each individual
+observation being a single return rather than an average over many.
 
 \paragraph{Intra-interval price dispersion (U).}
 From bucketed trade prices, $\mathrm{disp} =
@@ -274,9 +882,8 @@ construction (one clearing price per batch): empirically, exactly $0.00$
 in the large majority but not literally all FBA-side buckets
 (\Cref{ch:results} reports the exact share for the run behind this
 thesis) --- a bucket occasionally contains trades from more than one
-batch clear, most plausibly around a checkpoint-resumed run's seam
-(\Cref{sec:experiments}), which this appendix states rather than
-asserting a stronger guarantee than the implementation actually gives.
+batch clear, a rare edge case this appendix states rather than asserting
+a stronger guarantee than the implementation actually gives.
 
 \paragraph{Kyle's lambda (U, but built differently per engine).} Per
 bucket, the OLS slope through the origin, $\lambda = \sum_i x_i
@@ -301,7 +908,7 @@ in the estimator. \Cref{ch:results} reports both.
 
 \paragraph{Pricing error (X, always empty in this dataset).}
 $|\clr - p^{\mathrm{ref}}|$ or $|\midp - p^{\mathrm{ref}}|$ against an
-external reference price, in bps. No code path in this codebase ever
+external reference price, in bps. No code path in this implementation ever
 assigns this column a value: the December~2025 SOL order-status archive
 used here carries no oracle or mark-price feed, and none is
 reconstructed elsewhere in the pipeline. Every row of both timeseries
@@ -309,6 +916,44 @@ CSVs has this field empty, for the entire month, on both engines --- a
 documented, structural gap rather than a result of zero.
 
 \section{RQ2.3 and Engine-Control Metrics}
+
+\begin{table}[htbp]
+\centering
+\caption[Metrics for RQ2.3]{RQ2.3 --- execution, allocation and
+order-arrival timing metrics, plus engine controls, at a glance.}
+\label{tab:metrics3}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.1cm} L p{1.6cm}@{}}
+\toprule
+\textbf{Metric} & \textbf{Definition and measurement} & \textbf{Data}\\
+\midrule
+Executed volume & Matched quantity and notional per interval; number of
+trades & L1 + trades\\
+Fill rate & Filled quantity divided by submitted quantity, overall and
+by participant class & L3/L4\\
+Time to execution & Elapsed time from submission to fill; for the FBA
+bounded below by the time to the next batch boundary, which quantifies
+the delay cost of batching & L3\\
+Trader surplus & $\sum_k |\pi_k - \clr|\, q_k$ over executed orders: the
+gain relative to the submitted limit price & L3/L4\\
+Order size inflation & Ratio of submitted to filled size per participant
+over time; the empirical signature of order stuffing under pro rata &
+L4\\
+Order-to-trade ratio & Submitted messages per executed trade;
+cancellation rate per interval; measures message traffic and quote
+flickering & L3\\
+Boundary concentration & Share of order arrivals in the final $x\%$ of
+the batch interval & L3\\
+Throughput & Orders processed per second under identical load &
+control\\
+Clearing latency & Wall-clock time per batch clearing computation and
+per continuous match & control\\
+Unexecuted residual & Share of batch volume on the heavier side that
+cannot be matched at $\clr$ and remains unexecuted; always rolled over
+to the next batch in this implementation & control\\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 \paragraph{Executed volume, executed notional (U).} Plain running sums
 over the trade stream: quantity, and quantity $\times$ price in raw
@@ -391,26 +1036,11 @@ zero.
 
 \section{Known Gaps}
 
-\begin{itemize}
-  \item \textbf{Pricing error} is always empty for the reason stated
-  above --- no oracle or mark-price feed in this dataset.
-  \item \textbf{Throughput and clearing latency} are wall-clock and vary
-  run to run and machine to machine; clearing latency additionally
-  compares different operation granularities across engines (per
-  submission for the CDA, per batch for the FBA).
-  \item \textbf{Price impact} combines two separately quantity-weighted
-  trade populations (effective spread's and realized spread's), which
-  can differ for trades near the end of the retained window --- harmless
-  in a full run, where every flushed bucket's markouts already exist by
-  the time it is computed.
-  \item \textbf{Kyle's lambda}'s differing CDA/FBA construction and its
-  fixed 5\,s CDA horizon (independent of the three realized-spread
-  horizons) are deliberate methodological choices, not a defect; the
-  near-zero FBA result is itself a finding about the price-selection
-  rule's insensitivity to flow imbalance, not noise.
-  \item \textbf{Not computed in this codebase}: comparison of simulated
-  CDA output against the trades Hyperliquid's own engine actually
-  produced from the same flow, and the $\tau \to 0$ degenerate-parameter
-  convergence check --- both require infrastructure or a parameter sweep
-  this thesis did not build or run (\Cref{sec:validation}).
-\end{itemize}
+The caveats behind pricing error, throughput/latency, price impact, and
+Kyle's lambda are each stated where the metric itself is defined above,
+not repeated here. The one gap with no home elsewhere in this appendix:
+comparing simulated CDA output against the trades Hyperliquid's own
+engine actually produced from the same flow, and the $\tau \to 0$
+degenerate-parameter convergence check, are both not computed here ---
+neither the infrastructure nor the parameter sweep either would require
+was built (\Cref{sec:validation}).
