@@ -8,7 +8,7 @@ for _f in ("Thesis/data/generated_numbers.tex", "Thesis/data/generated_verificat
         pass
 print("defined macros:", len(defined))
 
-for fname in ["Thesis/chapters/ch5_results.tex", "Thesis/chapters/ch4_simulation.tex",
+for fname in ["Thesis/chapters/ch5_results.tex", "Thesis/chapters/ch4_simulation.tex", "Thesis/chapters/ch6_discussion.tex",
               "Thesis/chapters/appendix.tex"]:
     text = open(fname, encoding="utf-8").read()
     used = set(re.findall(r"\\([A-Za-z]+)", text))

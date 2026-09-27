@@ -43,13 +43,13 @@ configuration for a liquid instrument on a centralised venue.}
 Interval & 50--250\,ms, with a short randomised extension &
 Long enough that the ratio of latency dispersion to $\tau$ is
 negligible; short enough that delay is immaterial to any participant
-other than a market maker managing inventory & Interval sweep not run
-(\Cref{tab:sweep}); the one interval measured, $\tau=1$\,s, is already
+other than a market maker managing inventory & Interval sweep not run;
+the one interval measured, $\tau=1$\,s, is already
 well above this range and \FbaEmptyBatchShare\% empty even there\\
 Disclosure & Indicative clearing price and aggregate imbalance; no
 order-level book & Retains the coordination benefit of transparency
 without exposing individual orders; the regime equity auctions already
-use at scale & Not testable here (P7)\\
+use at scale & Not testable here (behavioural)\\
 Segregation & Unified pool by default; intent segregation only where
 maker flow is demonstrably being adversely selected & Segregation splits
 liquidity, which is a certain cost against an uncertain benefit; the
@@ -58,8 +58,8 @@ maker-versus-maker crossing & \Cref{tab:res21} price impact\\
 Rationing & Pro rata with a small random component & Removes the timing
 channel, which is the one that would undo the mechanism; the random
 component blunts the size-inflation incentive without imposing full
-execution uncertainty & Rationing-rule comparison not run
-(\Cref{tab:rationingres}); the rule actually measured is
+execution uncertainty & Rationing-rule comparison not run;
+the rule actually measured is
 price-time-within-the-batch, not this recommendation, so the two should
 not be conflated\\
 Settlement & Net settlement with per-fill audit records retained;
@@ -110,17 +110,17 @@ being cancelled.
 \section{What This Design Can and Cannot Establish}
 \label{sec:testable2}
 
-The nine predictions carried through this thesis split by testability, and
+The predictions carried through this thesis split by testability, and
 the split bounds every claim made.
 
-\textbf{Mechanical predictions are established.} P1 (zero intra-interval
-dispersion), P4 (the delay lower bound), P8 (the effect of $\tau$ on batch
-composition), and P9 (positive surplus relative to submitted limits) follow
+\textbf{Mechanical predictions are established.} Zero intra-interval
+dispersion, the delay lower bound, the effect of $\tau$ on batch
+composition, and positive surplus relative to submitted limits follow
 from the clearing rule applied to a given order set, and where the
 simulation confirms them by construction rather than by measurement, the
 results say so.
 
-\textbf{One prediction is partly reachable.} P2, that batching reduces the
+\textbf{One prediction is partly reachable.} That batching reduces the
 adverse selection component of the effective spread, is testable in its
 mechanical part --- given this flow, does clearing it in batches produce
 less price impact than clearing it continuously? --- but not its
@@ -128,7 +128,7 @@ behavioural part, since liquidity providers in the replay cannot requote in
 response to knowing they will not be sniped. A measured reduction in price
 impact is therefore a lower bound on the effect theory predicts.
 
-\textbf{Behavioural predictions are out of reach.} P3, P5, P6 and P7 all
+\textbf{Behavioural predictions are out of reach.} The remaining ones all
 require participants who can adapt: quoted spreads narrow because market
 makers requote, size inflation occurs because participants respond to pro
 rata, boundary concentration because they respond to a predictable gate,
@@ -209,5 +209,7 @@ non-validating node \citep{albers2026openbook}, and any message the node
 missed or saw in a different order than the venue's own engine propagates
 into both arms of the comparison. Because it does so identically it is
 largely differenced out of the paired comparison, but it affects absolute
-levels, and a CDA fidelity check against the venue's own trades would be
-informative rather than redundant if it existed.
+levels. The fidelity check against the venue's own recorded executions shows
+this directly: because the replay does not enforce time-in-force, the simulated
+volume is about \VerCdaOverVenue\ times the venue's, although the simulated
+price follows the real SOL price closely (\Cref{sec:testfidelity,sec:testprice}).

@@ -3,6 +3,14 @@
 > See [`README.md`](README.md) for the full documentation index and
 > [`ARCHITECTURE.md`](ARCHITECTURE.md) for the whole-project map.
 
+> **Update (verification appendix).** Five tests were added after this file was written: three
+> property tests in `engines/properties.rs` and two status-code tests in `types.rs`, so the suite is now
+> 85 tests (81 default + 4 ignored); the counts and tables below describe the original 80. The property
+> tests compare the CDA with a naive full-scan book after every event (3,000 random scenarios x 120
+> events) and every FBA clearing with brute force (3,000 scenarios x 12 batches); run
+> `cargo test properties -- --nocapture` to see the number of assertions. `analysis/run_mutation_tests.py`
+> plants 19 deliberate bugs in a copy of the sources and reports which test layer catches each one.
+
 This project has **two independent, non-overlapping verification systems**. Knowing which one
 answers your question matters:
 

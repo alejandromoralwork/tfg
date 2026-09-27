@@ -10,7 +10,7 @@
 \usepackage{microtype}
 
 % --- page layout ---
-\usepackage[a4paper,left=3.0cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+% page geometry is set once, in main.tex (2 cm margins)
 \usepackage{setspace}
 \onehalfspacing
 \setlength{\parskip}{0.4em}
@@ -110,7 +110,9 @@
 \theoremstyle{definition}
 \newtheorem{definition}{Definition}[chapter]
 \newtheorem{proposition}{Proposition}[chapter]
+\newtheorem{lemma}{Lemma}[chapter]
 \theoremstyle{remark}
+\newtheorem{remark}{Remark}[chapter]
 \newtheorem{hypothesisx}{Prediction}[chapter]
 \newenvironment{prediction}{\begin{hypothesisx}}{\end{hypothesisx}}
 

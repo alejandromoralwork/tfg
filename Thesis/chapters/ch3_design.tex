@@ -293,7 +293,11 @@ built into the problem, and $\sigma$ is what resolves it. Second, the
 filling rule is simple. Buyers whose limit price is above the clearing price
 and sellers whose limit price is below it are filled completely, orders on the
 wrong side are not filled, and only orders priced exactly at the clearing
-price can be partly filled. Those are the orders that must be rationed.
+price can be partly filled. Those are the orders that must be rationed. This
+holds when one price maximises the volume; when a range of prices does and the
+tie-break picks a price inside it, the long side is rationed in priority order
+and an order priced better than the clearing price can occasionally be filled
+only in part as well (\Cref{sec:testfba}).
 
 \subsection{Rationing Rules}
 \label{sec:rationing}

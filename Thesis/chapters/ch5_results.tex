@@ -1,6 +1,7 @@
 \chapter{Results: Comparing CDA and FBA}
 \label{ch:results}
 \input{data/generated_numbers}
+\input{data/generated_verification}
 
 \begin{quote}
 \small
@@ -8,7 +9,7 @@
 one executed run: SOL/USD, the full month of 1--31~December 2025,
 $\tau = 1$\,second, and the single fixed engine configuration described in
 \Cref{app:config}. There is no interval sweep, no comparison of rationing
-rules and no second instrument or period (\Cref{sec:res_sweep}). Throughout,
+rules and no second instrument or period. Throughout,
 a \textbf{bucket} is one of the 2,678,400 consecutive one-second windows the
 month is cut into, starting at the first timestamp of the run; every metric is
 computed per bucket. Each paired difference uses only the buckets where the
@@ -78,11 +79,12 @@ These are preconditions, not findings: the comparison can only be trusted as
 far as the code behind it. The run triggered no structural check failure and
 passed every test in both test sets (\ValCargoTestsPassed/\ValCargoTestsTotal\
 automatic tests, \ValChecklistPassed/\ValChecklistTotal\ hand-checked cases).
-The simulation is deterministic by design, but this was not re-checked bit by
-bit for this multi-day run. Two further checks are
-missing, not weak: agreement of the CDA with the venue's own trades, and
-convergence of the FBA to the CDA as $\tau \to 0$. Neither was built, so
-nothing below confirms them.
+An independent Python reimplementation of both engines, written from the
+rules with different data structures, agrees with the simulator in every
+one-second bucket of four full hours (\VerRefBuckets\ engine-buckets,
+\VerRefMismatches\ differences), and the tests catch \VerMutKilled\ of
+\VerMutTotal\ bugs planted on purpose. Convergence of the FBA to
+the CDA as $\tau \to 0$ was not checked, so nothing below confirms it.
 
 \section{RQ2.1: Liquidity and Transaction Costs}
 \label{sec:res21}
@@ -407,17 +409,17 @@ traded, clipped at the 0.5th/99.5th percentiles for legibility.}
 \label{fig:pricediff}
 \end{figure}
 
-\section{RQ2.3: Execution, Allocation and Order-Arrival Timing}
+\section{RQ2.3: Execution and Order-Arrival Timing}
 \label{sec:res23}
 
-\Cref{tab:res23} reports the execution and allocation metrics. The caveat of
+\Cref{tab:res23} reports the execution and order-arrival-timing metrics. The caveat of
 \Cref{sec:testable} applies to all of them: order size inflation and boundary
 concentration show mechanical properties of fixed historical orders, not
 behavioural reactions.
 
 \begin{table}[htbp]
 \centering
-\caption[RQ2.3 results]{Execution, allocation and order-arrival timing
+\caption[RQ2.3 results]{Execution and order-arrival timing
 under both mechanisms, plus engine controls. $n$ as in \Cref{tab:res21};
 FBA-only rows report a one-sided mean, std.\ and $n$ (no CDA analogue).}
 \label{tab:res23}
@@ -426,8 +428,8 @@ FBA-only rows report a one-sided mean, std.\ and $n$ (no CDA analogue).}
 \toprule
 \textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Diff.} & \textbf{$p$} & \textbf{$n$}\\
 \midrule
-Executed volume (SOL) & \ResExecVolumeCda & \ResExecVolumeFba & \ResExecVolumeDiff & \ResExecVolumeP & \ResExecVolumeNPaired\\
-Executed notional (USD) & \ResExecNotionalCda & \ResExecNotionalFba & \ResExecNotionalDiff & \ResExecNotionalP & \ResExecNotionalNPaired\\
+Executed volume (SOL, per interval, mean) & \ResExecVolumeCda & \ResExecVolumeFba & \ResExecVolumeDiff & \ResExecVolumeP & \ResExecVolumeNPaired\\
+Executed notional (USD, per interval, mean) & \ResExecNotionalCda & \ResExecNotionalFba & \ResExecNotionalDiff & \ResExecNotionalP & \ResExecNotionalNPaired\\
 Trade count (per interval, mean) & \ResTradeCountCda & \ResTradeCountFba & \ResTradeCountDiff & \ResTradeCountP & \ResTradeCountNPaired\\
 Fill rate & \ResFillRateCda & \ResFillRateFba & \ResFillRateDiff & \ResFillRateP & \ResFillRateNPaired\\
 Avg.\ time to execution (s) & \ResTimeToExecCda & \ResTimeToExecFba & \ResTimeToExecDiff & \ResTimeToExecP & \ResTimeToExecNPaired\\
@@ -449,11 +451,14 @@ Mean clearing/match latency ($\mu$s) & \ResClearingLatencyCda & \ResClearingLate
 
 \textbf{Executed volume and notional} (\ResExecVolumeCda\ versus
 \ResExecVolumeFba\,SOL per interval, \ResExecNotionalCda\ versus
-\ResExecNotionalFba\,USD) are not statistically different ($p$
-\ResExecVolumeP\ and $p$ \ResExecNotionalP). This is the clearest confirmation
-that the comparison is fair: both engines can only trade against the orders
-that were actually submitted, so this row checks the replay more than it
-describes the mechanism.
+\ResExecNotionalFba\,USD per interval) are not statistically different ($p$
+\ResExecVolumeP\ and $p$ \ResExecNotionalP). These are means over the
+2,678,400 one-second intervals of the month, not month totals; summed over
+the whole month they are the \$\SampleCdaNotional\ and \$\SampleFbaNotional\
+of \Cref{tab:sample}. This is the clearest confirmation that the comparison
+is fair: both engines can only trade against the orders that were actually
+submitted, so this row checks the replay more than it describes the
+mechanism.
 
 \textbf{Trade count} is slightly higher for the FBA (\ResTradeCountFba\ versus
 \ResTradeCountCda\ trades per interval, $p$ \ResTradeCountP). With almost the
@@ -468,7 +473,7 @@ is the complementary number. Only a mean per bucket is recorded, so no median or
 95th percentile across individual orders is available.
 
 \textbf{Trader surplus} measures the price improvement relative to the
-submitted limit price that uniform pricing gives. Prediction~P9 says it should
+submitted limit price that uniform pricing gives. Theory says it should
 be positive for every FBA order that is not marginal; the useful comparison is
 the difference from the CDA, where trades happen at the resting order's price.
 
@@ -511,11 +516,28 @@ daily means lie between $0.93$ and $0.99$, a structural feature of one-second
 batches on this instrument and not a few extreme episodes.
 
 \textbf{Engine controls} test whether the implementation could explain the
-results. Mean latency measures a different operation for each engine (one
-book update for the CDA, one batch clearing for the FBA), so the gap does not
-show that the CDA is faster \emph{per order}. It does rule out the reverse
-concern, that the FBA results come from the CDA being slowed by heavy load,
-because the CDA is much faster in every case (\Cref{fig:latencycontrol}).
+results, not describe the mechanisms themselves. The mean latency gap looks
+extreme (\ResClearingLatencyCda\,$\mu$s for the CDA against
+\ResClearingLatencyFba\,$\mu$s for the FBA, three orders of magnitude) because
+the two numbers time different amounts of work: the CDA's figure is the cost of
+matching one order against the book, while the FBA's is the cost of clearing one
+\emph{whole batch} --- building the demand and supply schedule from every order
+in it and rationing every eligible one, all in a single timed operation. New live
+orders arrive at roughly a hundred per second on average across the month, so an
+average non-empty batch (\FbaEmptyBatchShare\% of batches hold none at all) is
+clearing that many orders' worth of work in one measurement; a gap of that rough
+order of magnitude between one order and one batch is therefore expected from
+what is being measured, not evidence that the FBA algorithm itself is that much
+slower. Throughput
+compares the two more fairly, since its numerator is the same message count for
+both engines: there the gap narrows to \ResThroughputCda\ against
+\ResThroughputFba\ orders per second, under four times, which is closer to a
+genuine per-message cost --- clearing a batch means searching over every
+candidate price and sorting every eligible order, more work per order handled
+than the CDA's lookup against a couple of book levels. Either way, both figures
+stay far inside what real-time trading needs, and the CDA is faster on both
+measures, which rules out the reverse concern: the FBA's results are not an
+artifact of the CDA being slowed by heavy load (\Cref{fig:latencycontrol}).
 
 \begin{figure}[htbp]
 \centering
@@ -535,38 +557,6 @@ the full month, showing the level is persistent rather than
 episode-driven.}
 \label{fig:residualshare}
 \end{figure}
-
-\section{Interval Sweep and Rationing Comparison}
-\label{sec:res_sweep}
-
-Neither was run: every result here is for the single configuration with
-$\tau=1$\,second and price-time rationing within the batch.
-\Cref{tab:sweep,tab:rationingres} are kept as labelled placeholders, with no
-invented numbers, and running them is the most direct next step. One diagnostic
-that does not depend on $\tau$ can already be computed from this run: the share
-of FBA batches with no trade at all, \FbaEmptyBatchShare\%.
-
-\begin{table}[htbp]
-\centering
-\caption[Interval sweep --- not executed]{Not executed in this thesis: an
-interval sweep over $\tau \in \{1,10,50,100,250,500,1000\}$\,ms would
-populate this table.}
-\label{tab:sweep}
-\small
-Not run.
-\end{table}
-
-\begin{table}[htbp]
-\centering
-\caption[Rationing rule comparison --- not executed]{Not executed in
-this thesis: a comparison across price-time, pro rata, size-priority and
-random rationing at fixed $\tau$ would populate this table. Every result
-in this chapter reflects the one rationing rule the implementation has,
-price-time-within-the-batch.}
-\label{tab:rationingres}
-\small
-Not run.
-\end{table}
 
 \section{Summary of Findings}
 \label{sec:res_summary}
@@ -597,14 +587,34 @@ separating during the fastest market moves.
 \textbf{RQ2.3.} Total volume and notional are not statistically different
 ($p=\ResExecVolumeP$, $p=\ResExecNotionalP$), so the same orders trade either way.
 Time to execution is longer for the FBA, the mechanism's one clear disadvantage;
-trader surplus is slightly higher, in line with prediction~P9; and order size
+trader surplus is slightly higher, as uniform pricing implies; and order size
 inflation is \emph{lower}, which is unsurprising because the rule used is
 price-time, not pro rata. The latency gap (\ResClearingLatencyCda\,$\mu$s versus
 \ResClearingLatencyFba\,$\mu$s) rules out one alternative explanation: neither
 engine had trouble keeping up with the month's load.
 
-Predictions P5, P6 and P7 remain out of reach for the reason given in
+The behavioural predictions (quotes narrowing as market makers requote, order
+sizes inflating under pro rata, orders bunching before the batch boundary, bids
+shaded under price uncertainty) remain out of reach for the reason given in
 \Cref{sec:testable}: every result above is the mechanical effect of one fixed
-rule on orders that were not submitted in reaction to it. P1 holds by
-construction for most intervals, and P8 and the rationing comparison were not
-run, so this chapter does not claim to have tested them.
+rule on orders that were not submitted in reaction to it. Zero price dispersion
+within a batch holds by construction for most intervals, and the effect of
+$\tau$ on batch composition and the rationing comparison were not run, so this
+chapter does not claim to have tested them.
+
+Put plainly, this is what the chapter finds for RQ2. On the same real order
+flow, clearing it in one-second batches removes the cost that shows up as a
+resting maker's loss under continuous trading: the FBA's estimated effective
+spread and price impact sit near zero and its Kyle's lambda stays close to
+flat, against a clearly positive cost and a clearly positive lambda for the
+CDA, while the two engines still execute statistically the same volume and
+notional and track the same price to a fraction of a basis point outside the
+fastest moves. Nothing is filled that would not otherwise be, and nothing
+trades at a different total price; only \emph{when} it is filled and \emph{who
+carries the adverse-selection cost} changes. That gain is not free: at
+$\tau=1$\,second on this instrument, most batches are empty or almost entirely
+one-sided, and execution is slower than under the CDA. And it is a mechanical
+result, not a behavioural one: it describes what this one rule does to orders
+that were never submitted in reaction to it, on one instrument over one month,
+at the single interval and rationing rule tested here --- not a claim about how
+a real batched market, with participants free to respond, would behave.

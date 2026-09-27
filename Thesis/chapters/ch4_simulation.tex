@@ -29,9 +29,11 @@ The continuous engine keeps a limit order book in which orders are served by
 price first and arrival time second. Each new order is matched at once against
 the other side of the book and trades at the price of the resting order, so
 one large order that sweeps several price levels can produce several trade
-prices. Any unfilled part of a limit order stays in the book. The
+prices. Any unfilled part of a limit order stays in the book until it is
+filled or a cancel record removes it (\Cref{sec:cancellations}). The
 time-in-force field of an order is read from the data but not enforced, which
-is a limitation of this implementation.
+is a limitation of this implementation whose size is measured in
+\Cref{sec:testfidelity}.
 
 \subsection{The Batch Engine (FBA)}
 
@@ -44,8 +46,9 @@ then picks the price with the largest traded volume. If several prices tie, it
 applies four rules in turn: largest matched volume, then smallest leftover
 imbalance, then the price closest to the previous batch's clearing price, and
 finally the lowest price, so the outcome is always the same. Orders priced
-strictly better than the clearing price are filled completely. Orders priced
-exactly at it are served in order of aggressiveness (a market order before any
+strictly better than the clearing price are filled completely, except in the
+rare case where a range of prices supports the same volume (\Cref{sec:testfba}).
+Orders priced exactly at it are served in order of aggressiveness (a market order before any
 limit order) and then submission time.
 
 Volume that cannot be matched always moves to the next batch. No outside
@@ -55,46 +58,91 @@ The interval is fixed at $\tau=1$\,second, which keeps a replay of about 640
 million records computationally feasible while still being a meaningful
 interval.
 
+\subsection{The Design Choices Used for the FBA}
+\label{sec:fbachoices}
+
+The design chapter describes a space of possible batch auctions in five blocks.
+The engine that was run makes one fixed choice in each block, listed in
+\Cref{tab:fbachoices}. None of them can be changed at run time
+(\Cref{app:config}), and every result in this thesis is for exactly this
+combination.
+
+\begin{table}[htbp]
+\centering
+\caption[FBA design choices]{The FBA configuration that was run, by design
+block.}
+\label{tab:fbachoices}
+\small
+\begin{tabularx}{\textwidth}{@{}p{2.9cm} L@{}}
+\toprule
+\textbf{Design block} & \textbf{Choice in the simulated engine}\\
+\midrule
+Interval and gate & One fixed interval $\tau=1$\,s. The batch opens at the first
+record and closes when a record with a timestamp at or after the next boundary
+arrives; there is no randomised extension of the close.\\
+Disclosure & Not applicable in a replay: nobody reacts to what the engine shows,
+so the disclosure regime cannot change any result.\\
+Segregation & One pool: all orders, buyers and sellers, market makers and takers,
+are cleared together in a single auction.\\
+Clearing & One uniform price per batch, chosen to maximise the executed volume
+from the submitted limit prices; market orders count as demand or supply at every
+price. Ties in volume are broken by the least leftover imbalance, then the
+closest price to the previous clearing price, then the lowest price.\\
+Rationing & Price-time priority within the batch: market orders first, then the
+better price, then the earlier submission; the side with more volume is filled in
+that order until the smaller side is used up.\\
+Residual and cancels & Volume that finds no counterpart always rolls into the
+next batch; it is never cancelled by the engine. An order leaves the engine only
+when it is fully filled or when a cancel record for it arrives
+(\Cref{sec:cancellations}); a cancel that arrives before the batch closes removes
+the order from that batch.\\
+Settlement & Trades are recorded gross, one per matched pair; there is no netting
+and no fee or rebate, so the maker--taker question of the design chapter does not
+arise.\\
+Not modelled & Time-in-force, self-trade prevention, and any reaction of
+participants to the mechanism.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{How Cancellations and Other Records Are Treated}
+\label{sec:cancellations}
+
+Each record of the data is one status change of one order, and the replay turns
+it into an action for the engines in a fixed way. A record that opens an order
+(status \texttt{open}, or \texttt{triggered} for a conditional order) becomes a
+new order. A record of one of the eight cancel types (cancelled by the trader,
+scheduled or reduce-only cancel, cancel after a sibling order was filled,
+self-trade cancel, margin cancel, vault-withdrawal cancel, liquidation cancel)
+removes the order with the same order number from the engine: from the resting
+book of the CDA, or from the waiting orders of the FBA, including any part that
+was carried over from earlier batches. The whole order is removed, whatever size
+it had left. If the order is no longer there, because it was already filled or
+never seen, the cancellation does nothing and is not an error. Cancellations
+are processed in file order, so a cancel that carries the same timestamp as a
+new order is applied in the order the records appear. Rejections, and conditional
+orders that have not triggered yet, never enter an engine.
+
+The records that the venue wrote when \emph{its own} engine executed an order
+(status \texttt{filled}) are deliberately not replayed. The two engines decide
+fills themselves, and replaying the venue's fills as well would count them
+twice. The consequence is that an order which the venue filled completely is
+removed from a simulated book only if the simulation also fills it; otherwise it
+stays until it is matched, or cancelled by a later record, which the venue never
+sends for an order that is already filled. Cancellation records are therefore
+the only way the simulated books shed orders other than by trading, and the size
+of the books depends on them (\Cref{sec:testresets}).
+
 \section{Data Source and Data Levels}
 \label{sec:data}
 
 The simulation uses the public Hyperliquid Level~4 order book dataset of
 \citet{albers2026openbook}, recorded directly at a Hyperliquid node and
-published on Zenodo. Besides the usual order book events it records rejected
-orders, failed cancellations, both sides of every trade and post-trade
-inventory, all with nanosecond timestamps. Because it is recorded at the node
-and not sampled from snapshots, the book does not have to be reconstructed,
-which removes an important source of error. \Cref{tab:levels} shows the
-standard levels of order book data; every metric in the appendix is tagged
-with the lowest level it needs.
-
-\begin{table}[htbp]
-\centering
-\caption[Order book data levels]{The order book data-level hierarchy
-and what each level enables. This thesis works with L4 throughout.}
-\label{tab:levels}
-\small
-\begin{tabularx}{\textwidth}{@{}p{1.0cm} p{4.2cm} L@{}}
-\toprule
-\textbf{Level} & \textbf{Content} & \textbf{What it enables}\\
-\midrule
-L1 & Best bid and offer, last trade & Quoted spread, midpoint series,
-realized volatility, effective spread\\
-L2 & Aggregated depth per price level (the ladder) & Depth at best and
-within $x$ bps, depth curve shape, book imbalance, slippage of a
-hypothetical order\\
-L3 & Order-by-order feed: every add, modify, cancel and execution with
-an order ID and timestamp & Exact book reconstruction, queue position,
-time priority effects, cancellation and order-to-trade ratios,
-arrival-time distribution inside an interval\\
-L4 & L3 plus participant attribution (wallet or account identifier) per
-order and per fill & Per-participant metrics: maker inventory and
-markout PnL, adverse selection by counterparty type, fill distribution
-across participants under a rationing rule, order size inflation, flow
-classification into benign and toxic\\
-\bottomrule
-\end{tabularx}
-\end{table}
+published on Zenodo: the full order-by-order feed, with participant
+attribution, rejected orders, failed cancellations, both sides of every
+trade and post-trade inventory, all at nanosecond resolution. Because it is
+recorded at the node and not sampled from snapshots, the book does not have
+to be reconstructed, which removes an important source of error.
 
 Since the engines are the author's own, some quantities that are invisible in
 real markets can be observed directly: every submitted price, including those
@@ -120,12 +168,15 @@ else identical, stating where it could not:
   order that would fill against the same participant's own resting order is
   executed like any other. This is a real limitation, not a shared policy.
   \item \textbf{Determinism.} The same input always produces the same output,
-  since nothing in either engine depends on randomness or on the clock.
+  since nothing in either engine depends on randomness or on the clock. This
+  holds for an uninterrupted replay; the month result was restarted several
+  times in its first days (\Cref{sec:testresets}).
 \end{enumerate}
 
 The sample is a single instrument, SOL/USD, replayed once through each engine
 over the whole month covered by the data: 1--31~December 2025, 744 hourly
-files, no gaps. It is the full month, not a sample, so comparisons across
+files, none missing (the records themselves contain a few silences,
+\Cref{sec:testfiles}). It is the full month, not a sample, so comparisons across
 instruments or sessions are not possible. Each one-second interval provides one
 CDA value and one FBA value from the same order flow, so differences are
 measured as paired differences per interval. This removes variation caused by
@@ -168,7 +219,9 @@ against a simple reference implementation, and a checklist of cases worked out
 by hand, including the awkward ones (empty book, no crossing orders, every
 tie-breaking step, a batch with one deciding order). The run finishing without
 stopping is consistent with these properties holding throughout, but it is not
-a new proof of them. Two further checks were considered but not built:
-comparing the CDA against the venue's own trades, and checking that the FBA
-converges to the CDA as $\tau \to 0$, which needs the interval sweep that was
-not run. \Cref{app:testing} lists every test and every data check.
+a new proof of them. Two checks against outside references were added: an
+independent second implementation of both engines, and a comparison of the
+simulated volume and price with what the venue itself recorded. Checking that
+the FBA converges to the CDA as $\tau \to 0$ was not done, because it needs an
+interval sweep that was not run. \Cref{app:testing} lists every test and every
+data check, and its results are summarised in \Cref{sec:validationresults}.
