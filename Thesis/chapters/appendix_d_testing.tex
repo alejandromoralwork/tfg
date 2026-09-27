@@ -72,47 +72,36 @@ recovered this way (the rest is one order that never appears in the archive at a
 \section{The Engines}
 \label{sec:testfba}
 
-Both engines were tested the same way: a randomised, seeded stream of orders and
-cancellations is sent through the real engine and, in parallel, through a
-deliberately naive reference written independently for this test (a full scan of
-every resting order for the CDA; a brute-force scan of every possible price for the
-FBA). After every event, or every batch clearing, the two are compared. For the CDA
-this ran 360,000 events across 3,000 scenarios and checked that the two books and
-their trades always matched, that the book was never crossed, that every trade
-printed at the resting order's price, and that no order was filled beyond its size.
-For the FBA it ran 36,000 clearings and checked that the price chosen was always the
-true volume-maximising one (not just among the candidate prices, but among
-\emph{every} possible price), that the allocation followed the price-time rule
-exactly, and that nothing was lost or duplicated. One inaccuracy in the design
-description (Chapter~\ref{ch:simulation}) came out of this: orders priced strictly
-better than the clearing price are filled completely on the short side of a batch,
-but on the long side a better-priced order can occasionally be filled only in part,
-when several prices give the same volume. This happened for \VerFbaBetterPct\
-percent of such orders; the engine was doing exactly what the rationing rule says,
-so the wording, not the code, was corrected.
+Both engines were checked three ways. First, a randomised property test: a seeded
+stream of orders and cancellations runs through the real engine and, in parallel,
+through a deliberately naive reference (a full scan of every resting order for the
+CDA; a brute-force scan of every possible price for the FBA), compared after every
+event or clearing. This covered 360,000 CDA events across 3,000 scenarios (book
+never crossed, every trade at the resting order's price, no order filled beyond its
+size) and 36,000 FBA clearings (the price chosen always the true volume-maximiser
+among \emph{every} possible price, not just the candidates, with the allocation
+following price-time priority exactly).
 
-These random tests are complemented by \VerChecklistCda\ and \VerChecklistFba\
-scenarios worked out entirely by hand, covering the ordinary cases (a plain cross, a
-sweep of several price levels, ties with and without price history) and the edge
-cases that are easy to get wrong (an empty book or batch, a market order with no
-liquidity, a cancel of an unknown order, roll-over of a leftover). Three of these
-are regression tests for real defects found while building the simulator.
+Second, \VerChecklistCda\ and \VerChecklistFba\ scenarios worked out by hand cover
+the ordinary cases (a plain cross, a multi-level sweep, ties with and without price
+history) and the edge cases that are easy to get wrong (an empty book or batch, a
+market order with no liquidity, a cancel of an unknown order, roll-over of a
+leftover); three are regression tests for real defects found while building the
+simulator.
 
-A separate, independent Python implementation of both engines (sharing no code or
-data structures with the Rust one, and decoding the raw records itself) was run
-against four full hours of real data: the sample hour included with the code, a
-quiet night, the busiest hour of the month, and an hour with many repeated records.
-\Cref{tab:reftable} shows that every one of its predictions --- trades, volumes,
-prices, depths, and for the FBA the unexecuted share --- matched the Rust output in
-every one of the \VerRefBuckets\ one-second buckets checked, with the single
-exception being none at all.
+Third, an independent Python re-implementation of both engines (sharing no code or
+data structures with the Rust one, decoding the raw records itself) was run against
+four full hours of real data: the sample hour, a quiet night, the busiest hour of
+the month, and an hour with many repeated records. \Cref{tab:reftable} shows every
+prediction it made --- trades, volumes, prices, depths, and for the FBA the
+unexecuted share --- matched the Rust output in all \VerRefBuckets\ one-second
+buckets checked.
 
 \begin{table}[htbp]
 \centering
-\caption[Rust engines against an independent reference]{One-second buckets in
-which an independently written reference implementation, on four full hours,
-agrees with the Rust simulator. \VerRefMismatches\ disagreements across
-\VerRefBuckets\ engine-buckets.}
+\caption[Rust engines against an independent reference]{Agreement between an
+independently written reference implementation and the Rust simulator, four full
+hours. \VerRefMismatches\ disagreements across \VerRefBuckets\ engine-buckets.}
 \label{tab:reftable}
 \small
 \begin{tabularx}{\textwidth}{@{}L r r@{}}
@@ -127,11 +116,11 @@ agrees with the Rust simulator. \VerRefMismatches\ disagreements across
 \end{tabularx}
 \end{table}
 
-Finally, to check that the tests themselves are strict enough to matter, 19
-realistic bugs were planted one at a time in a copy of the source code (never in the
-real engines) --- for example, changing the CDA's crossing rule from ``at or above''
-to ``strictly above'', or making the FBA's tie-break prefer the larger imbalance
-instead of the smaller one. \VerMutSummary
+Finally, to check the tests themselves are strict enough to matter, 19 realistic
+bugs were planted one at a time in a copy of the source (never the real engines) ---
+e.g.\ changing the CDA's crossing rule from ``at or above'' to ``strictly above'', or
+the FBA's tie-break to prefer the larger imbalance instead of the smaller one.
+\VerMutSummary
 
 \section{The Metrics and the Result Files}
 \label{sec:testmetrics}
@@ -232,22 +221,7 @@ resumes creates both engines again from empty, losing every resting or pending
 order. This leaves a visible trace: the CDA's book depth briefly collapses at the
 start of an hour, and the FBA occasionally clears a batch already split across the
 timing grid. Looking for this trace shows \VerResetN\ such restarts, all in the
-first five days of the month and none afterward (\Cref{tab:resets}).
-
-\begin{table}[htbp]
-\centering
-\caption[Signs of engine restarts]{Hours at which the CDA's whole-book depth drops
-by more than 40\% within a minute, and how long it took to recover.}
-\label{tab:resets}
-\small
-\begin{tabular}{@{}l r r r r@{}}
-\toprule
-\textbf{Start of hour (UTC)} & \textbf{Depth before} & \textbf{Depth after} & \textbf{Drop} & \textbf{Minutes to recover}\\
-\midrule
-\VerResetRows
-\bottomrule
-\end{tabular}
-\end{table}
+first five days of the month and none afterward.
 
 Because both engines restart at the same record, the paired comparison between them
 is affected equally; but book-state measures, especially CDA depth, are understated

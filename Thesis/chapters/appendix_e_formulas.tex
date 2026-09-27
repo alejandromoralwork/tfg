@@ -266,12 +266,13 @@ batch closing in the bucket before dividing. \emph{None} if the bucket
 had zero total messages across its batches.
 
 \paragraph{Throughput, clearing latency (U, wall-clock and
-non-deterministic across runs and machines).} Throughput:
-$\mathrm{bucket\_message\_count} / \sum(\text{measured compute time})$.
-Clearing latency: $\sum(\text{measured compute time})/\mathrm{count}$,
-where the count is \emph{per submission} for the CDA (one book snapshot,
-one timing, per actionable record) but \emph{per batch clear} for the
-FBA (one timing per batch) --- the same column name measures two
+non-deterministic across runs and machines).} Throughput is the bucket's
+message count divided by the summed measured compute time spent on
+those messages. Clearing latency is that same summed compute time
+divided by a count, where the count means two different things
+depending on engine: \emph{per submission} for the CDA (one book
+snapshot, one timing, per actionable record) but \emph{per batch clear}
+for the FBA (one timing per batch) --- the same column name measures two
 different granularities of operation depending on engine, a caveat that
 matters when \Cref{ch:results} compares the two directly. Neither column
 is a claim about market quality; both exist to rule out ``one engine is
