@@ -79,8 +79,12 @@ CDA; a brute-force scan of every possible price for the FBA), compared after eve
 event or clearing. This covered 360,000 CDA events across 3,000 scenarios (book
 never crossed, every trade at the resting order's price, no order filled beyond its
 size) and 36,000 FBA clearings (the price chosen always the true volume-maximiser
-among \emph{every} possible price, not just the candidates, with the allocation
-following price-time priority exactly).
+among \emph{every} possible price, with the allocation following price-time
+priority exactly on both sides). That priority walk is also what confirms a claim
+made in \Cref{sec:clearing}: a better-priced order is only ever left partly filled
+on the longer side, and only when the volume-maximising price range spans more
+than one price --- never on the shorter side, and never when a single price
+maximises volume.
 
 Second, \VerChecklistCda\ and \VerChecklistFba\ scenarios worked out by hand cover
 the ordinary cases (a plain cross, a multi-level sweep, ties with and without price

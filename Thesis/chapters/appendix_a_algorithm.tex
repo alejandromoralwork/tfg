@@ -42,4 +42,10 @@ clearing price $p_{\mathrm{prev}}$ (not an external reference — the FBA
 has no oracle input, see \Cref{app:config}), then take the lowest price
 as a final deterministic tie-break. Step 16 is the only place where the
 rationing rule enters, which is why the rule can be swapped without
-touching the price computation.
+touching the price computation. Steps 13--16 are written as two phases
+for clarity; the implementation instead walks each side once in a single
+priority order, inframarginal orders sorted ahead of marginal ones, so
+steps 13--14's ``completely'' holds in the typical case but not
+unconditionally: when the maximising interval spans more than one price,
+a strictly better-priced order on the \emph{longer} side can itself be
+left only partly filled (\Cref{sec:testfba}).
