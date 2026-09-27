@@ -48,6 +48,10 @@ __pycache__/
 # --- Thesis exposé: kept locally, not published to the public repo ---
 docs/expose.tex
 
+# --- Downloaded copies of cited papers (open-access only), for local
+# reading convenience; not redistributed via the public repo ---
+bibliography_pdfs/
+
 # --- OS / editor cruft ---
 .DS_Store
 Thumbs.db
