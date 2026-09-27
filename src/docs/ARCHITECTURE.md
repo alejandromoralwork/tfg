@@ -12,7 +12,7 @@ here:
 |---|---|
 | [`ENGINE_DESIGN.md`](ENGINE_DESIGN.md) | The FBA uniform-clearing-price algorithm (candidate prices, three-tier selection, rationing) with a worked example; the module-interaction walkthrough from `add`/`load` to settlement. |
 | [`METRICS.md`](METRICS.md) | Authoritative formula-by-formula reference for all 35 `simulate` time-series CSV columns — exact accumulators, `None`-vs-`0.0` edge cases, and CDA-vs-FBA differences. |
-| [`TESTING.md`](TESTING.md) | How every test is run and what it proves: the full `cargo test` catalog (80 tests, 11 files) and the runtime `test engine` checklist (37 cases) — both interactively and as terminal/argv commands. |
+| [`TESTING.md`](TESTING.md) | How every test is run and what it proves: the full `cargo test` catalog (85 tests, 13 files) and the runtime `test engine` checklist (37 cases) — both interactively and as terminal/argv commands. |
 | [`REFERENCE.md`](REFERENCE.md) | Exhaustive, file-by-file API reference — every public struct/enum/function in the crate with its exact signature and algorithm, one section per source file. |
 | [`SCHEMA.md`](SCHEMA.md) | Field-by-field schema of the 54-byte binary order-status record and the CSV PREVIEW format, plus the `mapdir` lookup tables. |
 | [`Cancellations.md`](Cancellations.md) | Why the dataset's `accepted` vs `_rejected` file split is *not* "live vs rejected", how cancellations are replayed (and fills deliberately are not), and the unenforced-TIF limitation. |
@@ -527,7 +527,7 @@ Every formula above is checked against a hand-computed value by the runtime
 
 ## 6. Running & testing
 
-**For the full testing reference — every one of the 80 `cargo test` functions, every one of
+**For the full testing reference — every one of the 85 `cargo test` functions, every one of
 the 37 runtime `test engine` checklist cases, and exactly how to run each in the terminal —
 see [`TESTING.md`](TESTING.md). This section is just the quick-reference command list.**
 

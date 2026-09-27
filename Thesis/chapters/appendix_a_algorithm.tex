@@ -1,0 +1,45 @@
+\chapter{Batch Clearing Algorithm}
+\label{app:algorithm}
+
+The clearing routine implements \eqref{eq:demandsupply} and
+\eqref{eq:clearing} by a search over the admissible price grid, followed
+by the tie-break cascade and the rationing step of
+\Cref{sec:rationing}.
+
+\begin{lstlisting}[language=,caption={Batch clearing, single asset
+pair.},label={lst:clearing}]
+INPUT : buys B = {(pi_i, q_i)}, sells S = {(pi_j, q_j)},
+        tick grid P, tie-break cascade C, rationing rule R,
+        previous clearing price p_prev
+OUTPUT: clearing price p*, fills F, residual E
+
+1  candidates <- distinct limit prices in B and S, snapped to P
+2  for each p in candidates:
+3      D(p) <- sum of q_i over buys with pi_i >= p
+4      S(p) <- sum of q_j over sells with pi_j <= p
+5      V(p) <- min(D(p), S(p))
+6  Vmax  <- max over p of V(p)
+7  M     <- { p : V(p) = Vmax }              // maximising set
+8  if Vmax = 0: return (no clearing, all orders roll over)
+9  M     <- argmin over p in M of |D(p) - S(p)|        // cascade 1
+10 if |M| > 1: M <- argmin over p in M of |p - p_prev|  // cascade 2
+11 if |M| > 1: M <- argmin over p in M of p             // cascade 3
+12 p*    <- unique element of M
+13 fill all buys with pi_i > p* completely            // inframarginal
+14 fill all sells with pi_j < p* completely
+15 marginal <- orders with pi = p* on the long side
+16 allocate Vmax - (filled inframarginal) among marginal using R
+17 E     <- unmatched quantity on the long side
+18 apply time-in-force to E: roll over, or cancel
+19 return (p*, F, E)
+\end{lstlisting}
+
+Steps 1--7 are the line search; the unimodality of $V$ noted in
+\Cref{sec:clearing} guarantees that the maximising set is an interval on
+the grid. Steps 9--11 are the tie-break cascade: minimise the residual
+imbalance, then minimise distance from the auction's own previous
+clearing price $p_{\mathrm{prev}}$ (not an external reference — the FBA
+has no oracle input, see \Cref{app:config}), then take the lowest price
+as a final deterministic tie-break. Step 16 is the only place where the
+rationing rule enters, which is why the rule can be swapped without
+touching the price computation.

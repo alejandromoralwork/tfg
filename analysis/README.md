@@ -47,6 +47,21 @@ change on a re-run, only the numbers.
 - `make_tables.py` — turns the above into `Thesis/data/generated_numbers.tex`.
 - `make_figures.py` — the ~6 figures described in the thesis plan, saved to
   `Thesis/figures/*.pdf`.
+- `matched_volatility.py` — paired CDA/FBA volatility computed only on
+  timestamps where both engines actually traded (see
+  `Thesis/chapters/appendix_e_formulas.tex`).
+- `signed_fba_spread.py` — signed (CDA-tick-rule) effective/realized
+  spread and price impact for the FBA, replacing the unsigned values the
+  taker/maker-blind clearing rule would otherwise force.
+- `crosscheck_summary.py` — recomputes per-column count/mean/min/max from
+  the timeseries CSVs and compares against the running summary the Rust
+  recorder wrote to `results/sol/checkpoint.txt`.
+- `render_cli_screenshot.py` — renders a real captured `market_sim`
+  interactive session as a terminal-style PNG
+  (`Thesis/figures/fig_cli_screenshot.png`) for the reproducibility appendix.
+- `_check_macros.py` — dev helper: cross-checks every `\Res`/`\Desc`/
+  `\Sample`/`\Val`/`\Ver`/... macro used in the thesis chapters against
+  the macros actually defined in `Thesis/data/generated_*.tex`.
 - `run_all.py` — single entrypoint.
 
 
@@ -64,3 +79,4 @@ turns them into `Thesis/data/generated_verification.tex` (macros `\Ver...` used 
 - `verify_price_vs_yahoo.py` - hourly simulated price against Yahoo Finance SOL-USD; writes `Thesis/figures/fig_pricevsyahoo.png`.
 - `verify_outputs.py`, `verify_resets.py` - invariants on the result files; signs of engine restarts in the month run.
 - `run_property_tests.py`, `run_mutation_tests.py` - Rust test totals; planted-bug (mutation) testing on a copy of `src/`.
+- `make_verification_tables.py` - turns all `analysis/output/verification_*.json` files above into `Thesis/data/generated_verification.tex`.

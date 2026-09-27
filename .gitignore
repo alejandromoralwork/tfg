@@ -45,6 +45,9 @@ analysis/output/
 __pycache__/
 *.pyc
 
+# --- Thesis exposé: kept locally, not published to the public repo ---
+docs/expose.tex
+
 # --- OS / editor cruft ---
 .DS_Store
 Thumbs.db

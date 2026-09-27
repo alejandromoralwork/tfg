@@ -1,0 +1,48 @@
+\chapter{Engine Configuration Parameters}
+\label{app:config}
+
+\begin{table}[htbp]
+\centering
+\caption[Engine configuration]{The engines' fixed configuration and
+behaviour, as actually implemented. This thesis used one configuration
+throughout --- most rows below are not runtime-adjustable in this
+implementation, which the Meaning column states plainly rather than presenting
+a wider configuration surface than exists.}
+\label{tab:config}
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.2cm} L p{3.2cm}@{}}
+\toprule
+\textbf{Parameter} & \textbf{Meaning} & \textbf{Value}\\
+\midrule
+\texttt{engine}            & CDA or FBA & both, paired\\
+\texttt{tau\_ns}           & Batch interval, in nanoseconds; the same
+value also sets the metrics CSV's bucket width (\Cref{sec:environment})
+& 1{,}000{,}000{,}000 (1\,s)\\
+\texttt{boundary}          & Batch-close timing & fixed only --- no
+randomised-boundary code path exists\\
+\texttt{rationing}         & Allocation of the marginal quantity at
+$\clr$ & fixed: price-time-within-the-batch (rank by aggressiveness,
+then submission time, then order id) --- not pro rata, not a runtime
+choice\\
+\texttt{tie\_break}        & Cascade for selecting $\clr$ from the
+volume-maximising set & fixed: (1)~maximise matched volume, (2)~minimise
+residual imbalance, (3)~minimise distance from the auction's own
+previous clearing price, (4)~lowest price\\
+\texttt{residual\_policy}  & Disposition of unmatched quantity at $\clr$
+& fixed: always rolled into the next batch --- no cancel-on-no-clear
+path exists\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Four rows present in an earlier draft of this table --- a seed for a
+randomised boundary, a $\kappa$ parameter for a size/pro-rata hybrid
+rationing rule, a self-trade-prevention policy, and a warm-up period
+excluded from metrics --- have been removed rather than marked
+\texttt{n/a}: none of the four has any basis in the engines used here
+(no randomised boundary, no hybrid rationing rule, no self-trade
+prevention, and no warm-up exclusion are implemented), and a table row
+implies a real, if unused, feature that keeping them here would have
+been misleading. Self-trade prevention's absence in particular is a
+genuine limitation, not a controlled-for policy shared by both engines
+--- it is stated as such in \Cref{sec:experiments}.

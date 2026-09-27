@@ -22,7 +22,18 @@ AMM) is used to fill it. Both engines trade a single fixed pair, SOL/USD.
 ## Repository layout
 
 ```
-docs/expose.tex                  Thesis exposé (research questions, methodology, metrics)
+Thesis/                          The thesis itself (LaTeX, XeLaTeX/Tectonic) — see Thesis/main.tex
+  chapters/                       ch1_introduction .. ch7_conclusion, appendix_a_algorithm .. appendix_e_formulas
+  data/                           Generated macro files (generated_numbers.tex, generated_verification.tex)
+  figures/                        Plots and the CLI screenshot, produced by analysis/
+
+analysis/                        Python pipeline: loads output/, computes paired statistics, renders
+                                  Thesis figures and the generated_*.tex macro files; see analysis/README.md
+
+deploy/                          Google Cloud Batch job spec + helper scripts for the full-month run
+
+docs/                             Non-code project docs (video walkthrough script, etc.)
+docs/expose.tex                  Thesis exposé (research questions, methodology, metrics) — git-ignored, kept locally
 
 src/                              Rust crate `market_sim` — both matching engines, the CLI, and metrics
   Cargo.toml, main.rs             Crate root (Cargo.toml lives here, not a level above — see src/docs/init.md)
@@ -148,7 +159,7 @@ each module from submission to settlement, see
 
 ```bash
 cd src
-cargo test                     # unit tests (parsers, decoders, metric math, ...) — 80 tests
+cargo test                     # unit tests (parsers, decoders, metric math, ...) — 85 tests
 cargo test -- --ignored        # + the tests that need real sample data / external tools
 ```
 
@@ -165,7 +176,7 @@ sim [FBA]> test engine all
 ```
 
 See [`src/docs/TESTING.md`](src/docs/TESTING.md) for the full reference: every one of
-the 80 `cargo test` functions and every one of the 37 runtime checklist cases, what
+the 85 `cargo test` functions and every one of the 37 runtime checklist cases, what
 each proves, and which system to reach for when.
 
 ## Documentation

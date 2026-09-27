@@ -27,24 +27,37 @@ rules chosen.
 \paragraph{RQ2.} The paired comparison of the two engines on identical
 order flow covers the one configuration actually run: SOL/USD,
 $\tau=1$\,second, the full month of December 2025, without the interval
-sweep or rationing comparison the fuller design calls for. Three findings
-stand out. Kyle's lambda is close to zero for the FBA against a
-meaningfully positive value for the CDA, matching the theoretical
-mechanism: anchoring the clearing price to its own previous value insulates
-it from a single batch's flow imbalance in a way the continuous book has no
-equivalent protection against. Depth within every threshold checked is
-slightly lower on the FBA side, the opposite of what a liquidity-aggregation
-argument for batching would predict, though a modest result next to the
-Kyle's lambda finding. And the batch itself is thin at this interval ---
-\FbaEmptyBatchShare\% of one-second batches clear no trade at all, and the
-median unexecuted residual share among those that do is exactly one ---
-which qualifies every other number: this is closer to the degenerate,
-near-continuous limit of the mechanism than to the well-populated
-multilateral auction the design assumes. Effective and realized spread,
-signed via a tick-rule proxy for the FBA's missing aggressor flag, sit close
-to zero on the FBA side against the CDA's persistent, genuinely signed
-cost: no clear one-sided cost under the FBA the way a resting CDA maker
-bears one.
+sweep or rationing comparison the fuller design calls for. One finding
+carries the chapter: four metrics that measure the cost of trading in four
+unrelated ways --- effective spread, realized spread, price impact and
+Kyle's lambda --- are all close to zero for the FBA and all clearly costly
+for the CDA. In the CDA, a resting order is predictably picked off: the
+price moves against it after every trade, which is the textbook signature
+of adverse selection. Anchoring the FBA's clearing price to its own
+previous value removes that exposure, because a batch leaves no resting
+order sitting there to be picked off in the first place. (The FBA has no
+directly observable aggressor side, so its numbers rest on a tick-rule
+proxy, not a certainty; four independent metrics agreeing is what makes the
+result credible despite that.)
+
+This gain is not free, and it does not come from trading less or at a
+different price --- both engines clear statistically the same volume, at
+prices that track each other closely. What it costs instead is depth and
+time. Depth within a fixed distance of the reference price, the one depth
+measure genuinely comparable across the two engines, is slightly
+\emph{lower} for the FBA at every threshold, and a given amount of trading
+moves the FBA's price marginally more, not less (Amihud illiquidity) ---
+the opposite of what a liquidity-pooling argument for batching would
+predict, if a more modest effect than the spread result above. Execution
+also simply takes longer under the FBA. Underlying both is a market that,
+at this interval, is usually not the well-populated auction the mechanism
+assumes: \FbaEmptyBatchShare\% of one-second batches clear no trade at all,
+and among those that do, the larger side is typically left almost entirely
+unmatched (median unexecuted residual share of exactly one). At
+$\tau=1$\,second on this instrument, the FBA behaves closer to its own
+degenerate, near-continuous limit than to a well-filled multilateral
+auction --- which is the frame every other number above has to be read
+through.
 
 \section{Limitations}
 \label{sec:limitations}

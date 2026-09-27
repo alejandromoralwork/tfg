@@ -12,8 +12,8 @@ comparison fair), and aggregates those returns into a per-day RMS
 volatility figure per engine -- comparable via the same Newey-West paired
 test (`paired_stats.paired_diff`) used everywhere else in this thesis.
 
-See Thesis/chapters/appendix.tex, "Matched-timestamp volatility" paragraph,
-for the formula as stated in the thesis.
+See Thesis/chapters/appendix_e_formulas.tex, "Matched-timestamp volatility"
+paragraph, for the formula as stated in the thesis.
 """
 
 import numpy as np

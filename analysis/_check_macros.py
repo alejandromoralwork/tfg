@@ -9,7 +9,8 @@ for _f in ("Thesis/data/generated_numbers.tex", "Thesis/data/generated_verificat
 print("defined macros:", len(defined))
 
 for fname in ["Thesis/chapters/ch5_results.tex", "Thesis/chapters/ch4_simulation.tex", "Thesis/chapters/ch6_discussion.tex",
-              "Thesis/chapters/appendix.tex"]:
+              "Thesis/chapters/ch7_conclusion.tex", "Thesis/chapters/appendix_c_reproducibility.tex",
+              "Thesis/chapters/appendix_d_testing.tex", "Thesis/chapters/appendix_e_formulas.tex"]:
     text = open(fname, encoding="utf-8").read()
     used = set(re.findall(r"\\([A-Za-z]+)", text))
     candidates = {m for m in used if re.match(r"^(Res|Desc|Sample|Val|Ver|Fba|Latency|Pricepaths|Price|Dispersion)", m)}

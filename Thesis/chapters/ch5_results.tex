@@ -561,60 +561,167 @@ episode-driven.}
 \section{Summary of Findings}
 \label{sec:res_summary}
 
-Three results together show what a one-second batch looks like for this
-instrument. Records arrive on average a few milliseconds apart, yet
-\FbaEmptyBatchShare\% of FBA batches contain no trade, and in the batches that do
-trade the median unexecuted residual share is exactly $1.00$: the volume that
-crosses is a small part of a much larger one-sided remainder. At $\tau=1$\,second
-on this SOL market, a batch is usually either empty or strongly one-sided, not
-the well-filled auction the mechanism is designed for. What a longer $\tau$ would
-change can only be answered with the interval sweep, which was not run.
+This section steps back from the individual metrics and asks what they add up
+to. Read together rather than table by table, the numbers above support five
+conclusions.
 
-\textbf{RQ2.1.} With the estimated direction for the FBA's missing aggressor flag,
-the FBA's effective spread (\ResEffectiveSpreadFba\,bps) is close to zero, against
-\ResEffectiveSpreadCda\,bps for the CDA, and price impact shows the same pattern:
-no side carries a clear, systematic cost under the FBA, unlike the CDA's resting
-market maker. Depth within 10/50/100\,bps points the same way, being slightly
-\emph{lower} for the FBA at every threshold, the opposite of what pooling of
-liquidity would predict.
+\textbf{1. Four different metrics all say the same thing: in the FBA, nobody
+pays the cost that a resting order pays in the CDA.} Effective spread,
+realized spread, price impact and Kyle's lambda measure this cost from four
+different angles --- quoted prices, prices some seconds after the trade, the
+gap between the two, and how far a batch's own price moves for a given order
+imbalance. None of the four is calculated from any of the others. If they
+agreed only because of how they are built, that would be a coincidence worth
+suspecting; instead, they agree because the same underlying thing is
+happening four times over.
 
-\textbf{RQ2.2.} Kyle's lambda is the clearest result of the chapter: near zero for
-the FBA and clearly positive and wider for the CDA. Prices within a batch are
-identical in \DispersionFbaExactZeroPct\% of intervals, and the two engines' prices
-follow each other to well under a basis point in a typical interval, only
-separating during the fastest market moves.
+In the CDA, the pattern is the textbook one for adverse selection. The
+effective spread is positive (\ResEffectiveSpreadCda\,bps), and the maker
+does not keep it: the realized spread is \emph{negative} at all three
+horizons tested
+(\ResRealizedSpreadOneSCda/\ResRealizedSpreadFiveSCda/\ResRealizedSpreadThirtySCda\,bps
+at 1/5/30\,s). So the price impact --- the part of the cost lost to
+better-informed traders --- is positive, and it grows the longer you wait
+after the trade
+(\ResPriceImpactOneSCda\,$\to$\,\ResPriceImpactFiveSCda\,$\to$\,\ResPriceImpactThirtySCda\,bps),
+which is what happens as the market slowly absorbs what that trade revealed.
+Kyle's lambda tells the same story a fourth way: at \ResKyleLambdaCda\,bps
+per SOL of net flow, the CDA's price visibly moves when one side of the
+market dominates.
 
-\textbf{RQ2.3.} Total volume and notional are not statistically different
-($p=\ResExecVolumeP$, $p=\ResExecNotionalP$), so the same orders trade either way.
-Time to execution is longer for the FBA, the mechanism's one clear disadvantage;
-trader surplus is slightly higher, as uniform pricing implies; and order size
-inflation is \emph{lower}, which is unsurprising because the rule used is
-price-time, not pro rata. The latency gap (\ResClearingLatencyCda\,$\mu$s versus
-\ResClearingLatencyFba\,$\mu$s) rules out one alternative explanation: neither
-engine had trouble keeping up with the month's load.
+Every one of those four numbers is close to zero for the FBA instead.
+Effective spread: \ResEffectiveSpreadFba\,bps. Realized spread: within
+\ResRealizedSpreadOneSFba\,--\,\ResRealizedSpreadThirtySFba\,bps of zero, at
+every horizon. Price impact: still under \ResPriceImpactThirtySFba\,bps even
+30 seconds after the trade. Kyle's lambda: \ResKyleLambdaFba\,bps per SOL, an
+order of magnitude below the CDA's. Every one of these differences is
+significant at $p<0.001$, on samples of half a million or more paired
+intervals, and \Cref{fig:dailytrend} shows this is not one lucky month-long
+average: the FBA's effective spread stays near zero on every one of the 31
+days taken separately.
 
-The behavioural predictions (quotes narrowing as market makers requote, order
-sizes inflating under pro rata, orders bunching before the batch boundary, bids
-shaded under price uncertainty) remain out of reach for the reason given in
-\Cref{sec:testable}: every result above is the mechanical effect of one fixed
-rule on orders that were not submitted in reaction to it. Zero price dispersion
-within a batch holds by construction for most intervals, and the effect of
-$\tau$ on batch composition and the rationing comparison were not run, so this
-chapter does not claim to have tested them.
+One caveat is worth repeating here. The FBA has no real record of who was
+buyer and who was seller in a batch, so its side of all four numbers had to
+be estimated with a tick rule (\Cref{sec:res21}) --- these are the best
+available estimates, not a certainty. But that makes the agreement across
+four independent metrics more informative, not less: a single estimated
+number could be an artefact of the estimate; four numbers, built four
+different ways, landing on the same answer is harder to explain that way.
+It is also exactly what the theory in Chapter~\ref{ch:foundations} predicts:
+clearing everyone at one uniform price removes the reason to race a resting
+order, because in a batch there is no resting order left to race.
 
-Put plainly, this is what the chapter finds for RQ2. On the same real order
-flow, clearing it in one-second batches removes the cost that shows up as a
-resting maker's loss under continuous trading: the FBA's estimated effective
-spread and price impact sit near zero and its Kyle's lambda stays close to
-flat, against a clearly positive cost and a clearly positive lambda for the
-CDA, while the two engines still execute statistically the same volume and
-notional and track the same price to a fraction of a basis point outside the
-fastest moves. Nothing is filled that would not otherwise be, and nothing
-trades at a different total price; only \emph{when} it is filled and \emph{who
-carries the adverse-selection cost} changes. That gain is not free: at
-$\tau=1$\,second on this instrument, most batches are empty or almost entirely
-one-sided, and execution is slower than under the CDA. And it is a mechanical
-result, not a behavioural one: it describes what this one rule does to orders
-that were never submitted in reaction to it, on one instrument over one month,
-at the single interval and rationing rule tested here --- not a claim about how
-a real batched market, with participants free to respond, would behave.
+\textbf{2. This is not because the FBA trades less, trades different orders,
+or trades at a different price.} Three checks confirm this. Executed volume
+and notional are statistically indistinguishable between the two engines
+($p=\ResExecVolumeP$/$\ResExecNotionalP$). Trade count is almost identical
+(\ResTradeCountCda\ against \ResTradeCountFba\ trades per interval). And the
+two engines' own price series, which nothing forces to agree, track each
+other closely: a median difference of \PriceDiffMedianBps\,bps and a mean of
+\PriceDiffMeanBps\,bps, widening only during the fastest price moves of the
+month (the size of the gap correlates \PriceDiffVolCorr\ with realized
+volatility, far more than with how many orders arrived).
+
+So the near-zero cost in point~1 is not a side effect of a thinner or slower
+market quietly doing less business --- both engines are clearing essentially
+the same flow at essentially the same price. What changes between them is
+not \emph{how much} trades, or \emph{at what price}. It is \emph{who pays for
+it}. In the CDA, the resting side pays every time a better-informed order
+arrives against it. In the FBA, nobody in particular pays, because everyone
+in the batch trades together at the one price the batch produces.
+
+\textbf{3. The cost that disappears from the spread turns up somewhere else:
+in depth, in delay, and in how often a batch has two sides at all.} Three
+separate signs point the same way.
+
+First, depth within a fixed distance of the reference price --- the one
+depth measure that does not depend on how each engine happens to define
+``at the best,'' and so the one that is actually comparable --- is slightly
+\emph{lower} for the FBA at every threshold tested (10/50/100\,bps: FBA
+\ResDepthWithinTenBpsFba/\ResDepthWithinFiftyBpsFba/\ResDepthWithinHundredBpsFba\
+against CDA
+\ResDepthWithinTenBpsCda/\ResDepthWithinFiftyBpsCda/\ResDepthWithinHundredBpsCda,
+all $p<0.001$). If batching pooled many participants' \emph{standing}
+liquidity, not just their timing, this should have come out the other way.
+Amihud illiquidity agrees: a given amount of trading moves the FBA's price
+marginally more, not less (\ResAmihudFba\ against \ResAmihudCda,
+$p<0.001$).
+
+Second, a one-second batch on this market is rarely the well-filled, two-sided
+auction the mechanism is meant to produce. \FbaEmptyBatchShare\% of batches
+clear no trade at all. In the batches that do trade, the larger side is
+typically left almost entirely unmatched: the unexecuted residual share
+averages \DescResidualShareFbaMean\ and its median is exactly
+\DescResidualShareFbaMedian, so a fully one-sided batch is the ordinary
+outcome, not a rare one. \Cref{fig:residualshare} shows this every single
+day of the month (daily means between 0.93 and 0.99) --- it is a structural
+feature of this instrument at this interval, not a handful of bad episodes.
+
+Third, execution simply takes longer under the FBA: \ResTimeToExecFba\,s on
+average, against \ResTimeToExecCda\,s for the CDA, a gap of
+\ResTimeToExecDiff\,s. This is the one place in the whole chapter where the
+FBA is unambiguously worse, not just differently measured.
+
+None of this means the mechanism failed. It means that at $\tau=1$\,second,
+on a market where most one-second windows see no crossing trade at all, a
+batch usually does not have enough order flow on both sides for the
+coordination the mechanism relies on to do its work. A longer $\tau$ would
+change how full a batch is; whether it would do so without giving back
+point~1's gain is a question this thesis's single-interval design cannot
+answer.
+
+\textbf{4. A few results are simply the rule working as written, and mostly
+confirm that the replay is correct rather than teach something new about
+batching.} Trader surplus is marginally higher under the FBA
+(\ResTraderSurplusFba\ against \ResTraderSurplusCda\,USD per interval) ---
+exactly what uniform pricing should do, since it gives every non-marginal
+order a better price than it asked for. Order size inflation is lower under
+the FBA (\ResSizeInflationFba\ against \ResSizeInflationCda), but the
+rationing rule actually implemented here is price-time, not pro rata
+(\Cref{sec:rationing}), and price-time gives nobody a reason to inflate their
+order size in the first place. A lower number here shows the rule doing
+exactly what it is supposed to do, not that batching itself discourages
+stuffing. Boundary concentration sits almost exactly at the 10\% that random,
+untimed arrivals would give by chance (\DescBoundaryConcentrationFbaMean,
+median \DescBoundaryConcentrationFbaMedian) --- unsurprising, since these
+historical orders had no real batch boundary to time against in the first
+place. And the three-orders-of-magnitude gap in raw clearing latency is an
+artefact of timing one order against timing one whole batch, not a real
+per-order slowdown (\Cref{sec:res23}); throughput, the fairer comparison,
+still leaves the FBA comfortably inside what real-time trading needs. All
+four results are useful precisely because they turned out as expected: they
+are evidence the simulation is doing what it claims to, not new findings
+about the mechanism.
+
+\textbf{5. All four conclusions above hold for exactly this replay, and no
+further.} Every number in this chapter is the mechanical output of one fixed
+rule applied to orders that were actually submitted for Hyperliquid's own
+continuous engine, not in reaction to being cleared in batches.
+\Cref{sec:testable} explains why the behavioural predictions this thesis
+could not test --- market makers requoting, bids shaded under price
+uncertainty, size inflation under a rule that would actually reward it,
+orders bunching before a real batch boundary --- all need participants who
+can respond to the mechanism, and a replay of fixed history cannot supply
+that.
+
+Two further limits are worth stating plainly. The conclusions above hold for
+one instrument (SOL/USD), one month (December 2025), one interval
+($\tau=1$\,s) and one rationing rule (price-time); none of this was rerun at
+a different interval or rule, so whether a longer $\tau$ would fill batches
+without losing point~1's near-zero cost is a question this thesis raises and
+does not answer. And \Cref{app:testing} shows the replay itself trades
+roughly twice the volume the real venue recorded, because time-in-force is
+read but not enforced. Both engines share this defect identically, so it
+does not favour either side of the comparisons above --- but it does mean
+the \emph{absolute} volume, trade-count and latency levels in this chapter
+describe this replay, not Hyperliquid's live market.
+
+Put together: on this real order flow, clearing it in one-second batches
+instead of continuously removes the adverse-selection cost a resting maker
+pays, without changing how much trades or at what price. It pays for that
+with thinner depth, slower execution, and a market that, at this interval,
+usually does not have two sides at once. That is a mechanical description of
+what one specific rule does to one month of real orders that were never
+asked to react to it --- not a general verdict on frequent batch auctions,
+and not evidence of how real participants, free to requote, resize or retime
+their orders, would behave under one.

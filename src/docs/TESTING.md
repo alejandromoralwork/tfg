@@ -2,22 +2,17 @@
 
 > See [`README.md`](README.md) for the full documentation index and
 > [`ARCHITECTURE.md`](ARCHITECTURE.md) for the whole-project map.
-
-> **Update (verification appendix).** Five tests were added after this file was written: three
-> property tests in `engines/properties.rs` and two status-code tests in `types.rs`, so the suite is now
-> 85 tests (81 default + 4 ignored); the counts and tables below describe the original 80. The property
-> tests compare the CDA with a naive full-scan book after every event (3,000 random scenarios x 120
-> events) and every FBA clearing with brute force (3,000 scenarios x 12 batches); run
-> `cargo test properties -- --nocapture` to see the number of assertions. `analysis/run_mutation_tests.py`
-> plants 19 deliberate bugs in a copy of the sources and reports which test layer catches each one.
+>
+> `analysis/run_mutation_tests.py` plants 19 deliberate bugs in a copy of the sources and reports
+> which test layer catches each one — a check on the tests below, not one more test in the count.
 
 This project has **two independent, non-overlapping verification systems**. Knowing which one
 answers your question matters:
 
 | | `cargo test` | `test engine <target>` |
 |---|---|---|
-| What it is | 80 inline `#[test]` functions, standard Rust unit/differential tests | 37 hand-built checklist cases, compiled into the binary itself |
-| Where it lives | `#[cfg(test)] mod tests { ... }` blocks in 11 source files | `src/inputs/test_suite.rs` (production code, not `#[cfg(test)]`) |
+| What it is | 85 inline `#[test]` functions, standard Rust unit/differential/property tests | 37 hand-built checklist cases, compiled into the binary itself |
+| Where it lives | `#[cfg(test)] mod tests { ... }` blocks in 13 source files | `src/inputs/test_suite.rs` (production code, not `#[cfg(test)]`) |
 | Needs a Rust toolchain? | Yes — `cargo` to compile and run | No — runs inside the already-built `market_sim` binary |
 | What it tests | Parsers, decoders, pure math, data-structure invariants, differential (naive-scan) checks | Whole-engine matching *behavior* (CDA/FBA scenarios end to end) and the entire 35-column metrics catalogue, each against a hand-computed value |
 | How to run | `cd src && cargo test` | `test engine all` inside the REPL, or `market_sim test engine all` as an argv command |
@@ -34,14 +29,14 @@ the checkpoint-persistence format. Use both.
 
 ```
 cd src
-cargo test                      # every non-ignored test — 76 of the 80 total
+cargo test                      # every non-ignored test — 81 of the 85 total
 cargo test -- --ignored         # only the 4 ignored tests (need real data or real tools)
 cargo test <substring>          # filter by test name substring, e.g.:
 cargo test kyle_lambda          #   -> runs both kyle_lambda tests in metrics/timeseries.rs
 cargo test --release            # same tests, optimized build (rarely needed — these are fast)
 ```
 
-There is no separate `tests/` integration-test directory — every one of the 80 tests is an
+There is no separate `tests/` integration-test directory — every one of the 85 tests is an
 inline `#[cfg(test)] mod tests { ... }` block inside the file it tests. `cargo test` discovers
 all of them from one invocation at the crate root (`src/`).
 
@@ -66,8 +61,19 @@ available; they're skipped by default because CI or a fresh clone might not.
 
 ## 2. `cargo test` catalog — every test, by file
 
-80 tests total across 11 files. Grouped in the order they'd typically be read; ignored tests
+85 tests total across 13 files. Grouped in the order they'd typically be read; ignored tests
 are marked **[ignored]**.
+
+### `src/types.rs` — 2 tests
+Module under test: `Order::is_cancellation` / `Order::is_new_live_order`, the status-code rules
+every other component (engines, metrics, the replay-fidelity checks in `app:testing`) relies on.
+
+1. `cancellation_codes_are_exactly_the_eight_documented` — walks every status code 0–17 in
+   `data/mapdir/statuses.csv` and asserts `is_cancellation()` is true for exactly the eight
+   documented cancellation codes and false for all the rest.
+2. `live_order_rule_covers_every_status_code` — same sweep for `is_new_live_order()`: true only
+   for `open` (1) and, when the order is a conditional/trigger order, `triggered` (9); asserts no
+   code is ever counted as both a cancellation and a new live order.
 
 <a id="cargo-cda"></a>
 ### `src/engines/cda.rs` — 6 tests
@@ -103,6 +109,30 @@ Module under test: `demand_supply_evaluators` (the batch engine's demand/supply 
    (checked at `0` and `u128::MAX`).
 3. `demand_supply_evaluators_match_naive_scan_across_random_batches` — seeded-LCG differential
    test, 200 random batches × 20 random query prices each, against the naive O(n) reference.
+
+<a id="cargo-properties"></a>
+### `src/engines/properties.rs` — 3 tests
+Module under test: both engines end to end, at scale — the fuzz tests above check individual
+accessors/evaluators after one random step or against one random batch; these run whole
+multi-thousand-event scenarios and re-derive the expected outcome from an independent,
+deliberately naive oracle (full-scan book, brute-force demand/supply, explicit priority sort),
+not from the engine's own internal state.
+
+1. `cda_matches_naive_oracle_and_keeps_invariants` — 3,000 random seeds × 120 events each
+   (360,000 events total: limits, markets, cancels of live/unknown/already-filled oids,
+   out-of-order timestamps, a small user pool so self-matching occurs). After *every* event:
+   book never crossed, `bid_depth`/`ask_depth` match a full re-scan, every trade's price equals
+   the resting (maker) order's limit, and the fill sequence matches price-then-time priority
+   against the naive oracle. Prints the total assertion count (`PROPERTY_SUMMARY`).
+2. `fba_clear_matches_brute_force_and_keeps_invariants` — 3,000 random seeds × 12 batches each
+   (36,000 clearings). For every `clear()`: a single uniform price for all trades, the traded
+   quantity equals `min(demand(p*), supply(p*))` from a brute-force scan of every integer price
+   in range (proving the "candidate prices suffice" search is correct, not just fast),
+   inframarginal orders filled in full, the marginal side filled in priority order, and the
+   residual correctly rolled over.
+3. `both_engines_are_deterministic` — the same seed run twice through each engine produces
+   byte-identical trades, confirming the property tests themselves (and the engines) have no
+   hidden nondeterminism that would make a single run's pass/fail meaningless.
 
 ### `src/inputs/binary_format.rs` — 11 tests
 Module under test: the 54-byte packed order-status decoder.
@@ -285,8 +315,10 @@ for what each formula computes; this list is about what each test *proves*.
 
 | File | Tests | Ignored |
 |---|---|---|
+| `types.rs` | 2 | 0 |
 | `engines/cda.rs` | 6 | 0 |
 | `engines/fba.rs` | 3 | 0 |
+| `engines/properties.rs` | 3 | 0 |
 | `inputs/binary_format.rs` | 11 | 0 |
 | `inputs/cli.rs` | 15 | 0 |
 | `inputs/download_cmd.rs` | 6 | 1 |
@@ -296,11 +328,11 @@ for what each formula computes; this list is about what each test *proves*.
 | `inputs/simulate_cmd.rs` | 3 | 0 |
 | `inputs/simulator.rs` | 10 | 2 |
 | `metrics/timeseries.rs` | 17 | 0 |
-| **Total** | **80** | **4** |
+| **Total** | **85** | **4** |
 
-(`types.rs`, `engines/mod.rs`, `metrics/stats.rs`, `metrics/mod.rs`, and `inputs/update_cmd.rs`
-have no `#[cfg(test)]` block at all — `update_cmd.rs` in particular is the one production file
-in `inputs/` with zero test coverage of any kind, cargo or runtime.)
+(`engines/mod.rs`, `metrics/stats.rs`, `metrics/mod.rs`, and `inputs/update_cmd.rs` have no
+`#[cfg(test)]` block at all — `update_cmd.rs` in particular is the one production file in
+`inputs/` with zero test coverage of any kind, cargo or runtime.)
 
 ---
 
