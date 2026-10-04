@@ -106,13 +106,13 @@
 \DeclareMathOperator*{\argmin}{arg\,min}
 
 % --- theorem-like environments ---
+% (Only `definition` and `prediction`/`hypothesisx` are kept; the thesis's
+% own argument in ch2 is deliberately written as plain prose rather than
+% as Lemma/Proposition/Remark environments, so those declarations were
+% removed rather than left as dead code.)
 \usepackage{amsthm}
 \theoremstyle{definition}
 \newtheorem{definition}{Definition}[chapter]
-\newtheorem{proposition}{Proposition}[chapter]
-\newtheorem{lemma}{Lemma}[chapter]
-\theoremstyle{remark}
-\newtheorem{remark}{Remark}[chapter]
 \newtheorem{hypothesisx}{Prediction}[chapter]
 \newenvironment{prediction}{\begin{hypothesisx}}{\end{hypothesisx}}
 

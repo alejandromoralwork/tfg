@@ -3,6 +3,11 @@
 
 \section{Answers to the Research Questions}
 
+This thesis asked two questions: how a frequent batch auction engine is
+designed, and what changes when the same real order flow is cleared by
+one instead of by a continuous book. The two paragraphs below answer each
+in turn.
+
 \paragraph{RQ1.} A frequent batch auction engine is fully specified by five
 design blocks: the batch interval, the disclosure regime during
 accumulation, the order flow segregation architecture, the clearing and
@@ -28,8 +33,8 @@ rules chosen.
 order flow covers the one configuration actually run: SOL/USD,
 $\tau=1$\,second, the full month of December 2025, without the interval
 sweep or rationing comparison the fuller design calls for. One finding
-carries the chapter: four metrics that measure the cost of trading in four
-unrelated ways --- effective spread, realized spread, price impact and
+does most of the work in this answer: four metrics that measure the cost
+of trading in four unrelated ways --- effective spread, realized spread, price impact and
 Kyle's lambda --- are all close to zero for the FBA and all clearly costly
 for the CDA. In the CDA, a resting order is predictably picked off: the
 price moves against it after every trade, which is the textbook signature
@@ -66,8 +71,9 @@ The central limitation is intrinsic to the design. A replay holds order flow
 constant, which is what makes the comparison clean, and by the same token
 prevents participants from responding to the mechanism: the orders replayed
 were submitted under a continuous engine, so their sizes were not chosen
-against the rationing rule implemented (price-time-within-the-batch, not the
-pro rata baseline recommended for a real deployment), their arrival times
+against the rationing rule implemented (price-time-within-the-batch, a
+different rule from the pro rata and size-priority alternatives surveyed
+in \Cref{sec:rationing}), their arrival times
 were not chosen against a batch boundary, and their limit prices were not
 chosen under uncertainty about a clearing price. Every equilibrium
 prediction of the FBA literature --- narrower quoted spreads, size
@@ -78,40 +84,18 @@ work can build on: the engines are per-pair, so the multi-asset clearing
 problem is part of the design analysis but not of the measurement; and
 several metrics require adaptation to a batch setting, most notably the
 sign of the effective and realized spread, so an extension inherits that
-adaptation rather than a clean continuous-market baseline.
+adaptation rather than a clean continuous-market baseline
+(\Cref{sec:metricreliability} works through this case by case).
 
-\section{Future Work}
-\label{sec:futurework}
-
-\paragraph{Strategic agent populations.} The natural extension is to
-replace replayed flow with agents that respond to the mechanism ---
-liquidity providers who requote when their quote becomes stale, informed
-traders in the sense of \citet{kyle1985continuous}, and uninformed liquidity
-demanders --- making the behavioural (equilibrium) predictions testable
-\citep{lebaron2006agent}. Results would then depend on the behavioural
-assumptions built into the agents, which is why the designs are
-complements: the replay establishes what the mechanism does mechanically,
-the agent model what it does in equilibrium under stated assumptions. A
-hybrid in which historical flow supplies the background and a small set of
-strategic agents is layered on top would preserve much of the realism of the
-former while permitting adaptation at the margin.
-
-\paragraph{Hybrid architectures.} The comparison here is binary, but the
-design space is not: a venue could run continuous matching with periodic
-batch clearings for the marginal order set, batch only during volatile
-periods, or batch only some instruments. Each could reuse the shared
-order/trade representation and metrics implementation used here, though not
-a common matching interface, which building would itself be a prerequisite.
-
-\paragraph{The multi-asset case.} Implementing multi-asset clearing with
-coherent cross-rates and measuring how much cross-pair arbitrage rent it
-removes on real flow would connect the microstructure framing of this
-thesis with the decentralised exchange literature; the present engines
-cannot answer it because they clear one pair at a time.
-
-\paragraph{Fee design under batching.} Finally, the maker--taker problem
-could be studied directly by implementing each of the four candidate
-definitions in the engine and measuring how the resulting fee incidence is
-distributed across participant types on the same flow. This is mechanical
-rather than behavioural, so within reach of the design used here, and it
-addresses a question every venue considering batching will have to answer.
+The sample itself bounds the claims further. The data come from one
+venue, one instrument and one continuous month; a crypto perpetuals
+exchange has a participant population, fee structure and latency profile
+that differ from an equity market, so magnitudes should not be carried
+over elsewhere without re-estimation, and the month gives day-by-day
+stability within the sample, not a cross-instrument or cross-regime one.
+And because the replay does not enforce time-in-force, it trades about
+\VerCdaOverVenue\ times the venue's own recorded volume
+(\Cref{sec:testfidelity}). Both engines share this gap identically, so
+the paired comparisons in \Cref{ch:results} are unaffected by it. But the
+absolute volume, trade-count and latency levels reported there describe
+this replay, not Hyperliquid's live market.

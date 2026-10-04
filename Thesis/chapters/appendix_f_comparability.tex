@@ -1,0 +1,114 @@
+\chapter{Comparability of the FBA's Unmatched Orders and the CDA Book}
+\label{app:comparability}
+
+A natural first instinct is to treat the FBA's set of not-yet-matched
+orders at time $t$ as a stand-in for ``the CDA order book at $t$,'' and
+then compute the usual book-based metrics (quoted spread, depth, book
+imbalance) on it the same way they are computed on the CDA. This appendix
+explains why that instinct does not survive scrutiny, and what the
+metrics defined in \Cref{app:formulas} do instead.
+
+\section{The Question}
+
+A CDA order book at $t$ is a \emph{settled} object: every order that could
+trade against the book already has, continuously, one order at a time.
+Nothing sits in it by accident of timing. The FBA has no such object
+between clears --- only a buffer of orders accumulating toward the next
+batch, and, once that batch clears, whatever is left over. Two candidate
+readings of ``the FBA's book at $t$'' exist, and they fail for different
+reasons.
+
+\section{Pre-Clearing: Settlement Mismatch and Inflated Depth}
+
+Read immediately \emph{before} the batch containing $t$ clears, the
+pending set mixes two things that must not be mixed. Using the notation
+of \Cref{sec:fbanotation}: some pending orders are inframarginal at the
+price the batch is about to clear at (every buy with $\pi_k > \clr$,
+every sell with $\pi_k < \clr$) and will execute the instant the gate
+closes --- they are not resting liquidity in any economic sense, only
+flow that batching has temporarily delayed. Others are genuinely
+marginal or out of the money and will remain unmatched. Counting the
+whole pending set as if it were book depth overstates FBA liquidity
+purely as an artifact of the batching delay, not because more liquidity
+is actually standing there.
+
+The deeper problem is one of kind, not convention. The CDA book at $t$
+reflects a mechanism that has already finished matching everything it
+can as of $t$. The FBA's pending set at the same $t$ is, by construction,
+\emph{unsettled}: matching for the interval containing $t$ has not
+happened yet. Comparing the two is comparing a post-matching state to a
+pre-matching one, not two readings of the same kind of object taken at
+different conventions.
+
+\section{Post-Clearing: One-Sidedness and a Different Kind of ``Still There''}
+
+Read immediately \emph{after} the batch containing $t$ clears, the
+residual --- what rolls into the next batch --- fixes the settlement
+problem: both objects are now ``what is left once everything that could
+match, did.'' Two problems survive even so.
+
+First, the FBA residual is overwhelmingly one-sided. The unexecuted
+residual share reported in \Cref{sec:res23} has a median of exactly
+$1.00$ across the month: the typical cleared batch leaves orders on only
+one side of $\clr$, not both. A CDA book is, essentially always, a
+two-sided object with a bid and an ask and a gap between them; the FBA's
+leftover queue usually has nothing on the second side to form a gap
+against at all. There is no general-purpose spread or imbalance to
+extract from an object that is one-sided most of the time.
+
+Second, even on the rare batch where the residual is two-sided, the
+\emph{reason} an order is still there differs between the two
+mechanisms. A CDA resting order has been passed over continuously by
+every unit of opposing flow that has arrived since it was posted --- its
+survival is a standing, cumulative judgment by the market. An FBA
+residual order is unmatched because of how much opposing volume happened
+to land in that one specific batch window; it rolls forward and may
+clear in the very next one. ``Still unmatched'' means something more
+persistent in a CDA book than it does in a one-second FBA buffer.
+
+\section{What the Metric Formulas Actually Use}
+
+None of the above is a problem this thesis's metrics inherited silently;
+each book-like FBA quantity in \Cref{app:formulas} was already defined to
+sidestep one of the two issues above, for a reason now made explicit.
+
+\begin{description}
+  \item[Depth at best] uses $D(\clr)$/$S(\clr)$ --- the \emph{total}
+  volume eligible to trade at the clearing price, matched and unmatched
+  together, not the unmatched residual. This is the fair analogue of a
+  CDA book's touch size (``how much was there at the best price''), and
+  deliberately not an answer to ``how much is left over.'' It does not
+  repeat the Pre-Clearing section's mixing problem, because it is
+  evaluated \emph{after} $\clr$ is known: $D(\clr)$ and $S(\clr)$ are
+  read off the one price that actually cleared, not off some provisional
+  price guessed mid-accumulation, so there is no delayed-execution volume
+  being miscounted as standing liquidity here.
+  \item[Quoted spread] uses the post-clearing residual, but only for
+  batches where both a best unfilled buy \emph{and} a best unfilled sell
+  exist. Given the near-universal one-sidedness documented above, this
+  gate is not a minor technicality: it is what keeps the reported FBA
+  quoted spread restricted to the genuinely two-sided minority of
+  batches, rather than silently averaging in the one-sided majority where
+  no such object exists.
+  \item[Book imbalance] is not computed for the FBA at all. Unlike
+  quoted spread, it has no gated, partial version here: a book-imbalance
+  figure needs a resting two-sided book to read continuously, which, as
+  argued above, the FBA simply does not have between clears, so this
+  thesis reports it for the CDA only rather than build a proxy for an
+  object that does not exist.
+  \item[Almost everything else] --- executed volume and notional, trade
+  count, VWAP, effective and realized spread, price impact --- is built
+  from the \emph{executed trade set}, not the unmatched set at all. A
+  trade is timing-unambiguous for both mechanisms, since it only exists
+  post-clearing either way (a CDA trade the instant of crossing, an FBA
+  trade the instant the batch clears), which is exactly why trade-based
+  metrics sidestep the pre/post-clearing dilemma above entirely rather
+  than resolving it.
+\end{description}
+
+Put together, the FBA's unmatched orders --- the leftover residual this
+appendix has been discussing --- appear in exactly one metric, quoted
+spread, and only there under the two-sided gate above; depth at best
+uses a related but distinct, already-cleared total instead, and book
+imbalance is not attempted. Nowhere in this thesis is the unmatched set
+read, on its own, as a general stand-in for ``the FBA order book.''

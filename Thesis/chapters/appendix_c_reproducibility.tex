@@ -26,10 +26,10 @@ The full source, in Rust, is public \citep{moral2026marketsim}. It lives at
 \ph[to be inserted before submission].
 \end{sloppypar}
 It is one crate, \texttt{market\_sim}, with no engine-specific dependency beyond
-the standard Rust toolchain (edition 2021) --- both matching engines
-(\texttt{src/engines/cda.rs}, \texttt{src/engines/fba.rs}), the binary decoder,
-the metrics recorder and the command-line interface used below are plain
-\texttt{.rs} files in that one repository, not a package pulled from elsewhere.
+the standard Rust toolchain (edition 2021). Both matching engines, the binary
+decoder, the metrics recorder and the command-line interface used below are
+plain Rust source files in that one repository, not a package pulled from
+elsewhere.
 Cloning and building it is the same on any platform:
 
 \begin{lstlisting}[language=,caption={Getting and building the simulator.}]
@@ -72,9 +72,8 @@ market_sim test engine all
 engine, adding orders by hand, reading back the book, and clearing an FBA batch,
 exactly the commands and output described in \Cref{app:algorithm,tab:config}.
 This is a real captured session; the terminal colours shown are reapplied from
-the exact \texttt{.cyan()}/\texttt{.green()}/\dots calls in \texttt{src/inputs/cli.rs}
-because the ANSI codes themselves are dropped when the output is piped into a file
-rather than shown on a real terminal.
+the command-line interface's colour calls because the ANSI codes themselves are
+dropped when the output is piped into a file rather than shown on a real terminal.
 
 \begin{figure}[htbp]
 \centering
@@ -100,20 +99,20 @@ market_sim simulate sol 1          # the exact run behind this thesis; ~45h on o
 A single machine is slow only because the replay is single-threaded by design
 (\Cref{sec:environment}); the run can be stopped and resumed at any point, since
 it checkpoints after every hourly file (\Cref{tab:config} above). For a faster
-turnaround, \texttt{src/docs/DEPLOY.md} in the same repository is a complete,
-copy-paste walkthrough for running the identical container on Google Cloud
-Batch, including the exact job specification (\texttt{deploy/batch-sol.json})
-this thesis's own cloud run used. It is written for a reader who has never used
-Google Cloud before and takes them from installing \texttt{gcloud} to a finished
-run in their own project, typically a few dollars of compute for the full month.
+turnaround, the repository includes a complete, copy-paste walkthrough for
+running the identical container on Google Cloud Batch, including the exact
+job specification used by this thesis's own cloud run. It takes a reader who
+has never used Google Cloud before from
+installing \texttt{gcloud} to a finished run in their own project, typically
+a few dollars of compute for the full month.
 
 This thesis does not, and deliberately does not, publish a shared key or a
 running virtual machine that lets a reader execute the simulation on the
 author's own cloud account: a thesis PDF is effectively public forever, and a
 live credential embedded in it cannot be safely revoked once distributed, while
 leaving compute running for anonymous use is an open invitation to abuse and an
-open-ended cost. \texttt{DEPLOY.md} gives every step needed to stand up the same
-environment, in a reader's own project, in its place.
+open-ended cost. The repository's own walkthrough gives every step needed to
+stand up the same environment, in a reader's own project, in its place.
 
 \section{Downloading the Exact Simulated Output Used Here}
 \label{sec:repro_output}
@@ -123,23 +122,24 @@ way to reproduce these result files from the raw order-status archive, but it
 is not the only way to obtain them: the two timeseries CSVs and the summary
 report the run above actually produced --- the same files
 \Cref{sec:repro_code}'s repository turns into every number and figure in
-\Cref{ch:results} --- are shared directly, since at roughly 640\,MB and
-630\,MB the two CSVs are far over GitHub's 100\,MB file limit and so cannot be
-committed to the repository itself (\Cref{sec:repro_code}):
+\Cref{ch:results} --- are archived on Zenodo with their own permanent DOI
+\citep{moral2026output}, at
+\url{https://zenodo.org/records/22845443} (DOI
+\url{https://doi.org/10.5281/zenodo.22845443}). This is deliberately not a
+personal file share: the two CSVs are, at roughly 640\,MB and 630\,MB, far
+over GitHub's 100\,MB file limit and so cannot be committed to the repository
+itself (\Cref{sec:repro_code}), and a long-lived, independently citable
+record is the right place for data a result in this thesis depends on, not an
+ad hoc link that can move or expire. The record contains:
 
 \begin{itemize}
-  \item \textbf{FBA timeseries} (\texttt{fba\_timeseries.csv}, about 630\,MB):
-  \href{https://drive.google.com/file/d/1WJepo3DHxfHGoFZmFe6vNIF0Q_p3sKva/view}{drive.google.com (FBA timeseries CSV)}
-  \item \textbf{CDA timeseries} (\texttt{cda\_timeseries.csv}, about 640\,MB):
-  \href{https://drive.google.com/file/d/1_fQhQ-0v-MzQ3E3smL00IogyfQkoOCse/view}{drive.google.com (CDA timeseries CSV)}
+  \item \textbf{FBA timeseries} (\texttt{fba\_timeseries.csv}, about 630\,MB);
+  \item \textbf{CDA timeseries} (\texttt{cda\_timeseries.csv}, about 640\,MB);
   \item \textbf{Summary report} (\texttt{summary.txt}, a few kilobytes, the
-  per-column min/mean/max totals quoted throughout this appendix):
-  \href{https://drive.google.com/file/d/1WJZxlT6rCNR5-zn1KWNTKkWLnp9So5at/view}{drive.google.com (summary.txt)}
+  per-column min/mean/max totals quoted throughout this appendix).
 \end{itemize}
 
-Each file is exactly what \texttt{market\_sim simulate sol 1} writes to
-\texttt{results/sol/}, byte for byte, from the run behind this thesis. Placed
-in that same directory, \texttt{python analysis/run\_all.py}
-(\texttt{analysis/README.md} in the repository) recomputes every macro,
-table and figure in \Cref{ch:results} directly from them, without needing to
-replay the month at all.
+Each file is exactly what \texttt{market\_sim simulate sol 1} writes to the
+results directory, byte for byte, from the run behind this thesis. The analysis
+pipeline recomputes every macro, table and figure in \Cref{ch:results} directly
+from them, without needing to replay the month at all.

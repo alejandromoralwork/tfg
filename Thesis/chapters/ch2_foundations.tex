@@ -179,13 +179,14 @@ The trade-off assumes the operator can choose where to sit among these
 options. Decentralised blockchain venues are the limiting case where it
 cannot: a transaction waiting in a public mempool is visible to everyone
 before it executes, so such markets are fully open by default without the
-benefit that regime is supposed to buy. Disclosure normally exposes the
-trading intent of the submitter, as in \citet{madhavan1996transparency},
-and the informational disadvantage falls on the quoter, as in
-\citet{glosten1985bid}; a mempool inverts both, since what is revealed is
-an instruction that has not yet happened and the party revealing it is
-the one demanding liquidity. An observer can buy ahead of a pending swap
-and sell into the price it moves, sandwiching the submitter. Batch
+benefit that regime is supposed to buy. Disclosure normally exposes the trading intent of the order submitter
+\citep{madhavan1996transparency}, and the informational disadvantage this
+creates normally falls on the market maker posting a quote
+\citep{glosten1985bid}. A mempool flips both of these. What is exposed is
+not a resting quote but an instruction that has not executed yet, and the
+party exposed by it is not the quoter but the one demanding liquidity,
+the submitter itself. An observer can buy ahead of a pending swap and
+sell into the price it moves, sandwiching the submitter. Batch
 clearing removes this by construction: if every order in the interval
 settles at one uniform price, position within the batch carries no value.
 
@@ -292,33 +293,12 @@ the informational motives usually invoked to explain late submission.
 
 \subsection{Setup}
 
-Consider a single batch collecting orders over the window $[0,\tau]$. Let
-$\mathbb{B}$ and $\mathbb{A}$ denote the sets of bids and asks submitted in
-the window, each order $k$ characterised by a limit price $\pi_k$, a
-quantity $q_k$, and a submission time $t_k$. We define the aggregate
-demand and supply schedules:
-\begin{equation}
-  \label{eq:demandsupply}
-  D(p) = \sum_{k \in \mathbb{B}} q_k \mathbf{1}\{\pi_k \ge p\},
-  \qquad
-  S(p) = \sum_{k \in \mathbb{A}} q_k \mathbf{1}\{\pi_k \le p\},
-\end{equation}
-and the executable volume $V(p) = \min\{D(p), S(p)\}$. The clearing rule
-selects a price from the volume-maximising set
-\begin{equation}
-  \mathbb{P}^{*} = \argmax_{p \in \mathbb{R}_{+}} V(p),
-  \qquad V^{*} = \max_{p} V(p),
-\end{equation}
-which, since $D$ is non-increasing and $S$ non-decreasing, is a closed
-interval $[\underline{p}, \overline{p}]$ whenever the book crosses
-($V^{*} > 0$). When this interval is non-degenerate the clearing price is
-not determined by the volume objective alone, and a secondary selection
-rule $\sigma$ with $p^{*} = \sigma(\mathbb{P}^{*}) \in \mathbb{P}^{*}$
-must be specified. Real auctions resolve the indeterminacy by minimising
-the residual imbalance and then by proximity to a reference price
-\citep{haynes2020precedence}. Let $x_k \ge 0$ denote the executed quantity
-of order $k$ under a volume-maximising allocation, so that
-$\sum_{k \in \mathbb{B}} x_k = \sum_{k \in \mathbb{A}} x_k = V^{*}$.
+This argument considers a single batch, using the demand and supply
+schedules $D(p)$/$S(p)$, the volume-maximising set $\mathcal{P}^{*}$, and
+the clearing price $\clr = \sigma(\mathcal{P}^{*})$ defined in
+\Cref{sec:fbanotation}, plus the executed quantity $x_k \ge 0$ of order
+$k$ under a volume-maximising allocation, so that $\sum_{k \in \mathbb{B}}
+x_k = \sum_{k \in \mathbb{A}} x_k = V^{*}$.
 
 \subsection{Price Improvement Is a Transfer}
 
@@ -331,16 +311,15 @@ Write the realised surplus of the two sides at clearing price $p$ as
     = \sum_{k \in \mathbb{A}} (p - \pi_k)\, x_k .
 \end{equation}
 
-\begin{lemma}[Invariance of total surplus]
-\label{lem:invariance}
-For any $p \in \mathbb{P}^{*}$ with allocation $x$ held fixed,
+\textbf{Total surplus does not depend on which clearing price is chosen.}
+For any $p \in \mathcal{P}^{*}$ with allocation $x$ held fixed,
 \begin{equation}
+\label{lem:invariance}
   W = \mathrm{PI}^{\mathbb{B}}(p) + \mathrm{PI}^{\mathbb{A}}(p)
     = \sum_{k \in \mathbb{B}} \pi_k x_k
       - \sum_{k \in \mathbb{A}} \pi_k x_k ,
 \end{equation}
 which does not depend on $p$.
-\end{lemma}
 
 Expanding the two sums, the terms in $p$ enter as
 $p\left(\sum_{\mathbb{A}} x_k - \sum_{\mathbb{B}} x_k\right)$, which
@@ -352,11 +331,11 @@ Second, a measured increase in buy-side price improvement is not evidence
 that the mechanism created value: total gains from trade are fixed by the
 allocation, and the clearing price only divides them. The metric must
 therefore be read as a distributive statistic, reported for both sides
-jointly. If $\mathbb{P}^{*}$ were a singleton, the division would be
+jointly. If $\mathcal{P}^{*}$ were a singleton, the division would be
 pinned down by the submitted limits and there would be nothing to
 contest; because it is generically an interval, the surplus split depends
 on a rule, and any participant able to influence the position of
-$\mathbb{P}^{*}$ or of $\sigma$ within it has an incentive to do so.
+$\mathcal{P}^{*}$ or of $\sigma$ within it has an incentive to do so.
 
 \subsection{The Last-Mover Advantage}
 
@@ -364,22 +343,25 @@ Suppose the engine operates under the fully open disclosure regime, so
 that a participant submitting at time $t$ observes the schedules formed by
 all orders with $t_k < t$.
 
-\begin{proposition}[Late submission weakly dominates]
+\textbf{Late submission weakly dominates.} Suppose a participant can see
+the orders already submitted by others, and hence the residual supply or
+demand it faces, and that the selection rule $\sigma$ responds
+monotonically to submitted limit prices, so that a participant can shift
+the clearing price within $\mathcal{P}^{*}$ by adjusting its own limit.
+Writing $\underline{p}=\min\mathcal{P}^{*}$ and
+$\overline{p}=\max\mathcal{P}^{*}$, the participant's best response is to
+set its limit so that the clearing price moves to the edge of
+$\mathcal{P}^{*}$ most favourable to it,
+\begin{equation}
 \label{prop:lastmover}
-Suppose a participant can see the orders already submitted by others, and
-hence the residual supply or demand it faces. Suppose also that the
-selection rule $\sigma$ responds monotonically to submitted limit prices,
-so that a participant can shift the clearing price within
-$\mathbb{P}^{*}$ by adjusting its own limit. Then the participant's best
-response is to set its limit so that the clearing price moves to the edge
-of $\mathbb{P}^{*}$ most favourable to it (the lowest price for a buyer,
-the highest for a seller), while still keeping its order executed. Because
-this manoeuvre requires knowing the other orders, a participant's surplus
-can only grow with the information it has when it submits. Submitting
-later is therefore never worse than submitting earlier, and it is
-strictly better whenever the extra information changes the participant's
-optimal limit.
-\end{proposition}
+  p^{*} \to \underline{p} \text{ for a buyer,} \qquad
+  p^{*} \to \overline{p} \text{ for a seller,}
+\end{equation}
+while still keeping its order executed. Because this manoeuvre requires
+knowing the other orders, a participant's surplus can only grow with the
+information it has when it submits. Submitting later is therefore never
+worse than submitting earlier, and it is strictly better whenever the
+extra information changes the participant's optimal limit.
 
 The argument is the standard one for sequential-move bargaining over a
 fixed surplus, applied to the division established in
@@ -388,49 +370,47 @@ $\pi_{\mathbb{B}}$ knows that any ask weakly below it will execute, and
 therefore submits just below $\pi_{\mathbb{B}}$ rather than at its own
 valuation, capturing the interval. Truthfulness is not violated in its own
 terms, since it is stated for a participant that cannot move the clearing
-price; what disclosure does is make the boundaries of $\mathbb{P}^{*}$
+price; what disclosure does is make the boundaries of $\mathcal{P}^{*}$
 computable, and hence make deviation actionable for any participant whose
 order is large enough to reach them.
 
-\begin{remark}
-The proposition identifies the source of the incentive to wait. When
-several prices clear the same maximum volume, the choice among them is not
-neutral: it transfers surplus between buyers and sellers. Under a
-monotone $\sigma$, the participant who moves last can capture this
-transfer by pushing the price to the boundary of $\mathbb{P}^{*}$ in its
-own favour. The prize goes to whoever submits closest to the deadline with
-the fullest view of the book. This is the \emph{boundary latency
-arbitrage}: a reward for speed and timing rather than for providing
-liquidity or information.
-\end{remark}
+This identifies the source of the incentive to wait. When several prices
+clear the same maximum volume, the choice among them is not neutral: it
+transfers surplus between buyers and sellers. Under a monotone $\sigma$,
+the participant who moves last can capture this transfer by pushing the
+price to the boundary of $\mathcal{P}^{*}$ in its own favour. The prize
+goes to whoever submits closest to the deadline with the fullest view of
+the book. This is the \emph{boundary latency arbitrage}: a reward for
+speed and timing rather than for providing liquidity or information.
 
 Two conditions expose a participant to being the donating side of the
 transfer: submitting without observing the accumulated batch, as an
 uninformed participant does, and submitting early without repricing. Since
-the transfer is zero-sum by \Cref{lem:invariance}, every participant exposed
+the transfer is zero-sum by the result above (\Cref{lem:invariance}), every participant exposed
 in this way is matched by one with an incentive to exploit it. An order
 resting in an open batch is thus a free option written to every subsequent
-submitter in the window --- the \citet{copeland1983information}
-characterisation of a limit order, transposed from the continuous book,
-where the option is written to traders reacting to news, into the batch,
-where it is written to traders reacting to the accumulating batch itself.
+submitter in the window. This is the same option \citet{copeland1983information}
+describe for a resting limit order in a continuous book: there, it is
+written to traders reacting to news; here, the same option is written to
+traders reacting to the accumulating batch itself.
 
 \subsection{Cancellation, Repricing, and the Deadline Race}
 
-The natural defence against \Cref{prop:lastmover} is to withdraw or
-reprice an order that has become adversely positioned. This is where the
-speed race re-enters.
+The natural defence against the last-mover advantage above
+(\Cref{prop:lastmover}) is to withdraw or reprice an order that has become
+adversely positioned. This is where the speed race re-enters.
 
-\begin{proposition}[Latency monotonicity]
+\textbf{Latency monotonicity.} Let participant $i$ face message latency
+$\ell_i > 0$ and let the batch close deterministically at $\tau$. A
+message dispatched at time $t$ is included in the batch if and only if
+\begin{equation}
 \label{prop:latency}
-Let participant $i$ face message latency $\ell_i > 0$ and let the batch
-close deterministically at $\tau$. A message dispatched at time $t$ is
-included in the batch if and only if $t + \ell_i \le \tau$, so the latest
-observable state on which $i$ can act is that prevailing at $\tau -
-\ell_i$. The information set available to $i$ at the moment of its final
-decision is therefore ordered by $\ell_i$, and expected surplus is
-non-increasing in $\ell_i$.
-\end{proposition}
+  t + \ell_i \le \tau,
+\end{equation}
+so the latest observable state on which $i$ can act is that prevailing at
+$\tau - \ell_i$. The information set available to $i$ at the moment of
+its final decision is therefore ordered by $\ell_i$, and expected surplus
+is non-increasing in $\ell_i$.
 
 The structure of the advantage differs from the continuous case but its
 source does not. In a continuous book, lower latency wins a contest for
@@ -446,14 +426,16 @@ investment in speed falls but does not disappear under batch clearing, and
 with the model of \citet{zoican2021speed}.
 
 Three remarks bound the mechanism. Prohibiting cancellation within the
-batch does not close the channel, since a participant with two-sided access
-can neutralise an adverse position with an offsetting order, a synthetic
-cancellation (enforcement would require account-level self-match
-prevention), and would in any case strengthen the incentive of
-\Cref{prop:lastmover} by raising the cost of early submission. And the
-channel is disclosure-conditional: the informational component of the
-last-mover advantage requires an observable accumulating batch and is absent
-under a sealed-bid regime.
+batch does not close the channel: a participant with two-sided access can
+still neutralise an adverse position with an offsetting order, a
+synthetic cancellation that needs no cancel message at all (true
+enforcement would require account-level self-match prevention). And
+banning cancellation outright would, if anything, strengthen the incentive
+described above (\Cref{prop:lastmover}), by raising the cost of correcting
+an early submission instead of removing it. The channel is also
+disclosure-conditional: the informational component of the last-mover
+advantage requires an observable accumulating batch and is absent under a
+sealed-bid regime.
 
 \subsection{Equilibrium Implication and Design Responses}
 
@@ -471,11 +453,11 @@ $\tau$ exceeds $t + \ell_i$; the participant then solves an interior
 optimum trading the value of information against the risk of exclusion,
 which justifies randomisation independently of the sniping argument
 usually advanced for it. Restricting disclosure to an aggregate imbalance
-or to nothing removes the informational component of
-\Cref{prop:lastmover} while leaving bid shading, so the choice is between
+or to nothing removes the informational component of the result above
+(\Cref{prop:lastmover}) while leaving bid shading, so the choice is between
 two costs rather than between one cost and none. Finally, and least
 discussed in the literature, $\sigma$ can be made insensitive to the
 marginal submitted limits, for instance by choosing the point of
-$\mathbb{P}^{*}$ closest to an external reference price. This removes the
+$\mathcal{P}^{*}$ closest to an external reference price. This removes the
 lever without altering the allocation, since by \Cref{lem:invariance} the
-allocation is invariant on $\mathbb{P}^{*}$ in any case.
+allocation is invariant on $\mathcal{P}^{*}$ in any case.

@@ -3,7 +3,73 @@
 
 This chapter breaks a batch auction engine into five design blocks, lists the
 options available in each block, and explains from theory how participants
-should be expected to behave under each option.
+should be expected to behave under each option. It opens with the one piece
+of notation every later chapter reuses: a precise, self-contained definition
+of the clearing mechanism itself.
+
+\section{The FBA Mechanism: Notation and Formal Definition}
+\label{sec:fbanotation}
+
+A frequent batch auction collects orders over a half-open window $[0,\tau)$
+of length $\tau$. Let $\mathbb{B}$ and $\mathbb{A}$ denote the sets of bids
+and asks submitted in the window, each order $k$ characterised by a limit
+price $\pi_k$ (absent for a market order), a quantity $q_k$, and a
+submission time $t_k$. The aggregate demand and supply schedules are
+\begin{equation}
+  \label{eq:demandsupply}
+  D(p) = \sum_{k \in \mathbb{B}} q_k \mathbf{1}\{\pi_k \ge p\},
+  \qquad
+  S(p) = \sum_{k \in \mathbb{A}} q_k \mathbf{1}\{\pi_k \le p\},
+\end{equation}
+and the executable volume at price $p$ is $V(p) = \min\{D(p), S(p)\}$.
+
+The clearing rule selects a price from the volume-maximising set
+\begin{equation}
+  \mathcal{P}^{*} = \argmax_{p \in \mathbb{R}_{+}} V(p),
+  \qquad V^{*} = \max_{p} V(p),
+\end{equation}
+which, since $D$ is non-increasing and $S$ is non-decreasing, is a closed
+interval $[\underline{p}, \overline{p}]$ whenever the book crosses
+($V^{*} > 0$). When this interval is non-degenerate the clearing price is
+not pinned down by the volume objective alone, and a secondary selection
+rule $\sigma$ is needed:
+\begin{equation}
+  \label{eq:clearing}
+  \clr = \sigma\bigl(\mathcal{P}^{*}\bigr) \in \mathcal{P}^{*}.
+\end{equation}
+Real auctions resolve this indeterminacy with a fixed cascade of
+tie-breaking steps, applied in order until one price remains
+\citep{haynes2020precedence}, and the engine used in this thesis follows
+exactly this cascade (\Cref{app:config}):
+\begin{enumerate}
+  \item choose the price (or prices) that maximise $V(p)$ --- this is
+  $\mathcal{P}^{*}$ itself;
+  \item if $\mathcal{P}^{*}$ is not a singleton, choose the price that
+  minimises the residual imbalance $|D(p) - S(p)|$;
+  \item if still tied, choose the price closest to the auction's own
+  previous clearing price;
+  \item if still tied, choose the lowest such price.
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.72\textwidth]{figures/fig_fba_schedule.png}
+\caption[FBA clearing as a supply/demand diagram]{The FBA clearing
+mechanism drawn as a classical demand/supply diagram: $D(p)$ and $S(p)$
+as step functions of price, crossing (binding) at the clearing price
+$\clr$. Drawn from a small illustrative example (four orders, three buys
+and one sell), chosen because it clears without a tie and so needs no
+tie-break cascade to illustrate the basic mechanism cleanly; a real
+batch from the simulated month has dozens of orders and does not render
+legibly at this scale.}
+\label{fig:fbaschedule}
+\end{figure}
+
+Finally, let $x_k \ge 0$ denote the executed quantity of order $k$ under a
+volume-maximising allocation, so that $\sum_{k \in \mathbb{B}} x_k =
+\sum_{k \in \mathbb{A}} x_k = V^{*}$. This notation --- $D$, $S$, $V$,
+$\mathcal{P}^{*}$, $\sigma$, $\clr$, $x_k$ --- is used without
+redefinition for the rest of this thesis.
 
 \section{The Engine as a Set of Design Blocks}
 \label{sec:blocks}
@@ -256,37 +322,28 @@ definition the engine adopts is the behaviour it ends up paying for.
 
 Prices can only take values on a fixed grid of allowed steps, so the set
 $\mathcal{P}^{*}$ of prices that maximise traded volume is a short run of
-neighbouring steps. The engine finds it in one pass over the submitted limit
-prices and then picks one of them:
-\begin{equation}
-  \clr = \sigma\bigl(\mathcal{P}^{*}\bigr).
-  \label{eq:clearing}
-\end{equation}
-Exchanges implement the selection rule $\sigma$ as a fixed sequence of
-tie-breaking steps:
+neighbouring steps. The engine finds it in one pass over the submitted
+limit prices and then picks one of them by the four-step tie-break
+cascade defined in \Cref{sec:fbanotation}: \eqref{eq:clearing}.
 
-\begin{enumerate}
-  \item choose the price that leaves the smallest unmatched quantity;
-  \item if still tied, choose the price on the side of the remaining
-  imbalance, so that excess buying or selling pressure shows in the price;
-  \item if still tied, choose the price closest to a reference, such as the
-  previous clearing price or an external price feed.
-\end{enumerate}
-
-The order of these steps matters. The first two depend on the limit prices
-participants submit, so they are exactly the lever that a late participant
-exploits in \Cref{prop:lastmover}. Only the third does not depend on
-submitted orders. Putting it first would remove that lever without changing
-who trades or how much (\Cref{lem:invariance}).
+The order of those steps matters. Minimising the residual imbalance
+(step 2) depends on the limit prices participants submit, so it is
+exactly the lever that a late participant exploits (\Cref{prop:lastmover}).
+The remaining two steps --- distance to the previous clearing price, then
+the lowest price --- do not depend on submitted orders. Putting one of
+those first would remove the lever without changing who trades or how
+much (\Cref{lem:invariance}).
 
 \subsection{Why the Price Is Uniform}
 
 Clearing can also be seen as an optimisation problem: choose how much of each
 order to execute so that total gains from trade are as large as possible,
 subject to buying and selling the same quantity. The uniform price is then not
-an extra rule; it is the price of one additional unit in the batch that
-comes out of this balance requirement, so every executed order trades at the
-same price. Two things follow. First, the optimisation decides who trades but
+an extra rule bolted on afterwards; it falls directly out of that one
+requirement, that total buying equal total selling across the whole
+batch. Because the requirement applies to the batch as a whole and not
+order by order, every executed order ends up trading at the same price.
+Two things follow. First, the optimisation decides who trades but
 not always at what price: several prices can support the same trades, and
 that range is exactly $\mathcal{P}^{*}$. The price ambiguity is therefore
 built into the problem, and $\sigma$ is what resolves it. Second, the

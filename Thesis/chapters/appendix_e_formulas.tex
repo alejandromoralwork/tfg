@@ -141,7 +141,7 @@ $|r|$ directly. \emph{None} with fewer than two usable points.
 \paragraph{Matched-timestamp volatility (U).} Unlike the preceding
 per-bucket estimator, this is not a field either simulator exports
 directly: it is computed by the Python analysis pipeline
-(\texttt{analysis/matched\_volatility.py}) from both engines' \texttt{vwap}
+from both engines' \texttt{vwap}
 columns jointly, after the fact. Build the intersection $\mathcal{T}$ of
 buckets where both engines report a trade that second (\texttt{vwap}
 non-\emph{None} on both sides); form consecutive-pair log-returns
@@ -280,17 +280,16 @@ just slower'' as an alternative explanation for a measured difference
 elsewhere.
 
 \paragraph{Unexecuted residual share (F).} Summed across every batch
-closing in the bucket: numerator $\sum |\,\mathrm{demand}(\clr) -
-\mathrm{supply}(\clr)\,|$, denominator $\sum
-\max(\mathrm{demand}(\clr),\mathrm{supply}(\clr))$. This is the
-structural one-sidedness of the schedule \emph{at the clearing price}
-within a batch, not the complement of fill rate and not ``the share of
-submitted volume left unfilled'' in the everyday sense --- a batch can
-match every unit it possibly can ($\min(\mathrm{demand},\mathrm{supply})$
-executed in full) and still report a high value here if demand and
-supply were far apart in size at $\clr$, which is common when $\tau$ is
-short and a batch contains few orders. \emph{None} if the denominator is
-zero.
+closing in the bucket, using the $D(\cdot)$/$S(\cdot)$ notation of
+\Cref{sec:fbanotation}: numerator $\sum |\,D(\clr) - S(\clr)\,|$,
+denominator $\sum \max(D(\clr),S(\clr))$. This is the structural
+one-sidedness of the schedule \emph{at the clearing price} within a
+batch, not the complement of fill rate and not ``the share of submitted
+volume left unfilled'' in the everyday sense --- a batch can match every
+unit it possibly can ($\min(D(\clr),S(\clr))$ executed in full) and still
+report a high value here if demand and supply were far apart in size at
+$\clr$, which is common when $\tau$ is short and a batch contains few
+orders. \emph{None} if the denominator is zero.
 
 \section{Known Gaps}
 

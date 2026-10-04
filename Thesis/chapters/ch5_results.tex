@@ -109,19 +109,19 @@ the metric was computable on both engines.}
 \textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Diff.} &
 \textbf{$p$} & \textbf{$n$}\\
 \midrule
-Quoted spread (bps) & \ResQuotedSpreadCda & \ResQuotedSpreadFba & \ResQuotedSpreadDiff & \ResQuotedSpreadP & \ResQuotedSpreadNPaired\\
-Depth at best & \ResDepthAtBestCda & \ResDepthAtBestFba & \ResDepthAtBestDiff & \ResDepthAtBestP & \ResDepthAtBestNPaired\\
-Depth within 10 bps & \ResDepthWithinTenBpsCda & \ResDepthWithinTenBpsFba & \ResDepthWithinTenBpsDiff & \ResDepthWithinTenBpsP & \ResDepthWithinTenBpsNPaired\\
-Depth within 50 bps & \ResDepthWithinFiftyBpsCda & \ResDepthWithinFiftyBpsFba & \ResDepthWithinFiftyBpsDiff & \ResDepthWithinFiftyBpsP & \ResDepthWithinFiftyBpsNPaired\\
-Depth within 100 bps & \ResDepthWithinHundredBpsCda & \ResDepthWithinHundredBpsFba & \ResDepthWithinHundredBpsDiff & \ResDepthWithinHundredBpsP & \ResDepthWithinHundredBpsNPaired\\
-Effective spread (bps) & \ResEffectiveSpreadCda & \ResEffectiveSpreadFba & \ResEffectiveSpreadDiff & \ResEffectiveSpreadP & \ResEffectiveSpreadNPaired\\
-Realized spread, $\Delta=1$s (bps) & \ResRealizedSpreadOneSCda & \ResRealizedSpreadOneSFba & \ResRealizedSpreadOneSDiff & \ResRealizedSpreadOneSP & \ResRealizedSpreadOneSNPaired\\
-Realized spread, $\Delta=5$s (bps) & \ResRealizedSpreadFiveSCda & \ResRealizedSpreadFiveSFba & \ResRealizedSpreadFiveSDiff & \ResRealizedSpreadFiveSP & \ResRealizedSpreadFiveSNPaired\\
-Realized spread, $\Delta=30$s (bps) & \ResRealizedSpreadThirtySCda & \ResRealizedSpreadThirtySFba & \ResRealizedSpreadThirtySDiff & \ResRealizedSpreadThirtySP & \ResRealizedSpreadThirtySNPaired\\
-Price impact, $\Delta=1$s (bps) & \ResPriceImpactOneSCda & \ResPriceImpactOneSFba & \ResPriceImpactOneSDiff & \ResPriceImpactOneSP & \ResPriceImpactOneSNPaired\\
-Price impact, $\Delta=5$s (bps) & \ResPriceImpactFiveSCda & \ResPriceImpactFiveSFba & \ResPriceImpactFiveSDiff & \ResPriceImpactFiveSP & \ResPriceImpactFiveSNPaired\\
-Price impact, $\Delta=30$s (bps) & \ResPriceImpactThirtySCda & \ResPriceImpactThirtySFba & \ResPriceImpactThirtySDiff & \ResPriceImpactThirtySP & \ResPriceImpactThirtySNPaired\\
-Amihud illiquidity ($\times 10^6$) & \ResAmihudCda & \ResAmihudFba & \ResAmihudDiff & \ResAmihudP & \ResAmihudNPaired\\
+Quoted spread (bps) & \ResQuotedSpreadCda & \ResQuotedSpreadFba & \ResQuotedSpreadDiff\ (\ResQuotedSpreadHacSe) & \ResQuotedSpreadP & \ResQuotedSpreadNPaired\\
+Depth at best & \ResDepthAtBestCda & \ResDepthAtBestFba & \ResDepthAtBestDiff\ (\ResDepthAtBestHacSe) & \ResDepthAtBestP & \ResDepthAtBestNPaired\\
+Depth within 10 bps & \ResDepthWithinTenBpsCda & \ResDepthWithinTenBpsFba & \ResDepthWithinTenBpsDiff\ (\ResDepthWithinTenBpsHacSe) & \ResDepthWithinTenBpsP & \ResDepthWithinTenBpsNPaired\\
+Depth within 50 bps & \ResDepthWithinFiftyBpsCda & \ResDepthWithinFiftyBpsFba & \ResDepthWithinFiftyBpsDiff\ (\ResDepthWithinFiftyBpsHacSe) & \ResDepthWithinFiftyBpsP & \ResDepthWithinFiftyBpsNPaired\\
+Depth within 100 bps & \ResDepthWithinHundredBpsCda & \ResDepthWithinHundredBpsFba & \ResDepthWithinHundredBpsDiff\ (\ResDepthWithinHundredBpsHacSe) & \ResDepthWithinHundredBpsP & \ResDepthWithinHundredBpsNPaired\\
+Effective spread (bps) & \ResEffectiveSpreadCda & \ResEffectiveSpreadFba & \ResEffectiveSpreadDiff\ (\ResEffectiveSpreadHacSe) & \ResEffectiveSpreadP & \ResEffectiveSpreadNPaired\\
+Realized spread, $\Delta=1$s (bps) & \ResRealizedSpreadOneSCda & \ResRealizedSpreadOneSFba & \ResRealizedSpreadOneSDiff\ (\ResRealizedSpreadOneSHacSe) & \ResRealizedSpreadOneSP & \ResRealizedSpreadOneSNPaired\\
+Realized spread, $\Delta=5$s (bps) & \ResRealizedSpreadFiveSCda & \ResRealizedSpreadFiveSFba & \ResRealizedSpreadFiveSDiff\ (\ResRealizedSpreadFiveSHacSe) & \ResRealizedSpreadFiveSP & \ResRealizedSpreadFiveSNPaired\\
+Realized spread, $\Delta=30$s (bps) & \ResRealizedSpreadThirtySCda & \ResRealizedSpreadThirtySFba & \ResRealizedSpreadThirtySDiff\ (\ResRealizedSpreadThirtySHacSe) & \ResRealizedSpreadThirtySP & \ResRealizedSpreadThirtySNPaired\\
+Price impact, $\Delta=1$s (bps) & \ResPriceImpactOneSCda & \ResPriceImpactOneSFba & \ResPriceImpactOneSDiff\ (\ResPriceImpactOneSHacSe) & \ResPriceImpactOneSP & \ResPriceImpactOneSNPaired\\
+Price impact, $\Delta=5$s (bps) & \ResPriceImpactFiveSCda & \ResPriceImpactFiveSFba & \ResPriceImpactFiveSDiff\ (\ResPriceImpactFiveSHacSe) & \ResPriceImpactFiveSP & \ResPriceImpactFiveSNPaired\\
+Price impact, $\Delta=30$s (bps) & \ResPriceImpactThirtySCda & \ResPriceImpactThirtySFba & \ResPriceImpactThirtySDiff\ (\ResPriceImpactThirtySHacSe) & \ResPriceImpactThirtySP & \ResPriceImpactThirtySNPaired\\
+Amihud illiquidity ($\times 10^6$) & \ResAmihudCda & \ResAmihudFba & \ResAmihudDiff\ (\ResAmihudHacSe) & \ResAmihudP & \ResAmihudNPaired\\
 \midrule
 \multicolumn{6}{@{}l}{\emph{CDA-only (no FBA analogue, \Cref{app:formulas})}}\\
 Book imbalance (mean, std., $n$) & \multicolumn{4}{l}{\DescBookImbalanceCdaMean\ (\DescBookImbalanceCdaStd)} & \DescBookImbalanceCdaN\\
@@ -278,8 +278,9 @@ oracle or mark price against which either engine could be measured.
 \begin{table}[htbp]
 \centering
 \caption[RQ2.2 results]{Price discovery under both mechanisms. Paired
-differences (FBA$-$CDA) with Newey--West $p$-values where both engines
-report the metric; $n$ as in \Cref{tab:res21}.}
+differences (FBA$-$CDA), mean (Newey--West HAC standard error in
+parentheses), with $p$-values where both engines report the metric;
+$n$ as in \Cref{tab:res21}.}
 \label{tab:res22}
 \small
 \begin{tabularx}{\textwidth}{@{}L c c c c c@{}}
@@ -287,10 +288,10 @@ report the metric; $n$ as in \Cref{tab:res21}.}
 \textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Diff.} &
 \textbf{$p$} & \textbf{$n$}\\
 \midrule
-Intra-interval price dispersion (bps) & \ResDispersionCda & \ResDispersionFba & \ResDispersionDiff & \ResDispersionP & \ResDispersionNPaired\\
-Kyle's lambda (bps per SOL) & \ResKyleLambdaCda & \ResKyleLambdaFba & \ResKyleLambdaDiff & \ResKyleLambdaP & \ResKyleLambdaNPaired\\
-Matched-timestamp volatility, daily RMS (bps) & \ResMatchedVolCda & \ResMatchedVolFba & \ResMatchedVolDiff & \ResMatchedVolP & \ResMatchedVolNPaired\\
-Matched-timestamp volatility, intraday (bps) & \ResMatchedVolIntradayCda & \ResMatchedVolIntradayFba & \ResMatchedVolIntradayDiff & \ResMatchedVolIntradayP & \ResMatchedVolIntradayNPaired\\
+Intra-interval price dispersion (bps) & \ResDispersionCda & \ResDispersionFba & \ResDispersionDiff\ (\ResDispersionHacSe) & \ResDispersionP & \ResDispersionNPaired\\
+Kyle's lambda (bps per SOL) & \ResKyleLambdaCda & \ResKyleLambdaFba & \ResKyleLambdaDiff\ (\ResKyleLambdaHacSe) & \ResKyleLambdaP & \ResKyleLambdaNPaired\\
+Matched-timestamp volatility, daily RMS (bps) & \ResMatchedVolCda & \ResMatchedVolFba & \ResMatchedVolDiff\ (\ResMatchedVolHacSe) & \ResMatchedVolP & \ResMatchedVolNPaired\\
+Matched-timestamp volatility, intraday (bps) & \ResMatchedVolIntradayCda & \ResMatchedVolIntradayFba & \ResMatchedVolIntradayDiff\ (\ResMatchedVolIntradayHacSe) & \ResMatchedVolIntradayP & \ResMatchedVolIntradayNPaired\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -420,30 +421,32 @@ behavioural reactions.
 \begin{table}[htbp]
 \centering
 \caption[RQ2.3 results]{Execution and order-arrival timing
-under both mechanisms, plus engine controls. $n$ as in \Cref{tab:res21};
-FBA-only rows report a one-sided mean, std.\ and $n$ (no CDA analogue).}
+under both mechanisms, plus engine controls. Diff.\ is mean
+(Newey--West HAC standard error in parentheses); $n$ as in
+\Cref{tab:res21}. FBA-only rows report a one-sided mean, std.\ and $n$
+(no CDA analogue).}
 \label{tab:res23}
 \small
 \begin{tabularx}{\textwidth}{@{}L c c c c c@{}}
 \toprule
 \textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Diff.} & \textbf{$p$} & \textbf{$n$}\\
 \midrule
-Executed volume (SOL, per interval, mean) & \ResExecVolumeCda & \ResExecVolumeFba & \ResExecVolumeDiff & \ResExecVolumeP & \ResExecVolumeNPaired\\
-Executed notional (USD, per interval, mean) & \ResExecNotionalCda & \ResExecNotionalFba & \ResExecNotionalDiff & \ResExecNotionalP & \ResExecNotionalNPaired\\
-Trade count (per interval, mean) & \ResTradeCountCda & \ResTradeCountFba & \ResTradeCountDiff & \ResTradeCountP & \ResTradeCountNPaired\\
-Fill rate & \ResFillRateCda & \ResFillRateFba & \ResFillRateDiff & \ResFillRateP & \ResFillRateNPaired\\
-Avg.\ time to execution (s) & \ResTimeToExecCda & \ResTimeToExecFba & \ResTimeToExecDiff & \ResTimeToExecP & \ResTimeToExecNPaired\\
-Trader surplus (USD, per interval) & \ResTraderSurplusCda & \ResTraderSurplusFba & \ResTraderSurplusDiff & \ResTraderSurplusP & \ResTraderSurplusNPaired\\
-Order size inflation ratio & \ResSizeInflationCda & \ResSizeInflationFba & \ResSizeInflationDiff & \ResSizeInflationP & \ResSizeInflationNPaired\\
-Order-to-trade ratio & \ResOrderToTradeRatioCda & \ResOrderToTradeRatioFba & \ResOrderToTradeRatioDiff & \ResOrderToTradeRatioP & \ResOrderToTradeRatioNPaired\\
+Executed volume (SOL, per interval, mean) & \ResExecVolumeCda & \ResExecVolumeFba & \ResExecVolumeDiff\ (\ResExecVolumeHacSe) & \ResExecVolumeP & \ResExecVolumeNPaired\\
+Executed notional (USD, per interval, mean) & \ResExecNotionalCda & \ResExecNotionalFba & \ResExecNotionalDiff\ (\ResExecNotionalHacSe) & \ResExecNotionalP & \ResExecNotionalNPaired\\
+Trade count (per interval, mean) & \ResTradeCountCda & \ResTradeCountFba & \ResTradeCountDiff\ (\ResTradeCountHacSe) & \ResTradeCountP & \ResTradeCountNPaired\\
+Fill rate & \ResFillRateCda & \ResFillRateFba & \ResFillRateDiff\ (\ResFillRateHacSe) & \ResFillRateP & \ResFillRateNPaired\\
+Avg.\ time to execution (s) & \ResTimeToExecCda & \ResTimeToExecFba & \ResTimeToExecDiff\ (\ResTimeToExecHacSe) & \ResTimeToExecP & \ResTimeToExecNPaired\\
+Trader surplus (USD, per interval) & \ResTraderSurplusCda & \ResTraderSurplusFba & \ResTraderSurplusDiff\ (\ResTraderSurplusHacSe) & \ResTraderSurplusP & \ResTraderSurplusNPaired\\
+Order size inflation ratio & \ResSizeInflationCda & \ResSizeInflationFba & \ResSizeInflationDiff\ (\ResSizeInflationHacSe) & \ResSizeInflationP & \ResSizeInflationNPaired\\
+Order-to-trade ratio & \ResOrderToTradeRatioCda & \ResOrderToTradeRatioFba & \ResOrderToTradeRatioDiff\ (\ResOrderToTradeRatioHacSe) & \ResOrderToTradeRatioP & \ResOrderToTradeRatioNPaired\\
 \midrule
 \multicolumn{6}{@{}l}{\emph{FBA-only (mean, std., $n$)}}\\
 Boundary concentration, final 10\% & \multicolumn{4}{l}{\DescBoundaryConcentrationFbaMean\ (\DescBoundaryConcentrationFbaStd)} & \DescBoundaryConcentrationFbaN\\
 Unexecuted residual share & \multicolumn{4}{l}{\DescResidualShareFbaMean\ (\DescResidualShareFbaStd)} & \DescResidualShareFbaN\\
 \midrule
 \multicolumn{6}{@{}l}{\emph{Engine controls}}\\
-Throughput (orders/s) & \ResThroughputCda & \ResThroughputFba & \ResThroughputDiff & \ResThroughputP & \ResThroughputNPaired\\
-Mean clearing/match latency ($\mu$s) & \ResClearingLatencyCda & \ResClearingLatencyFba & \ResClearingLatencyDiff & \ResClearingLatencyP & \ResClearingLatencyNPaired\\
+Throughput (orders/s) & \ResThroughputCda & \ResThroughputFba & \ResThroughputDiff\ (\ResThroughputHacSe) & \ResThroughputP & \ResThroughputNPaired\\
+Mean clearing/match latency ($\mu$s) & \ResClearingLatencyCda & \ResClearingLatencyFba & \ResClearingLatencyDiff\ (\ResClearingLatencyHacSe) & \ResClearingLatencyP & \ResClearingLatencyNPaired\\
 99th pct.\ latency, per-bucket mean ($\mu$s) & \LatencyCdaPNinetyNine & \LatencyFbaPNinetyNine & --- & --- & ---\\
 \bottomrule
 \end{tabularx}
@@ -570,10 +573,13 @@ pays the cost that a resting order pays in the CDA.} Effective spread,
 realized spread, price impact and Kyle's lambda measure this cost from four
 different angles --- quoted prices, prices some seconds after the trade, the
 gap between the two, and how far a batch's own price moves for a given order
-imbalance. None of the four is calculated from any of the others. If they
-agreed only because of how they are built, that would be a coincidence worth
-suspecting; instead, they agree because the same underlying thing is
-happening four times over.
+imbalance. The first three are built the same way: each needs a trade's
+direction, estimated for the FBA from the CDA's own tick-by-tick price moves
+(\Cref{sec:res21}). Kyle's lambda is not built that way at all --- it only
+needs each batch's own submitted buy and sell quantities, which are simply
+known, with no direction to estimate. Three of the four share one
+construction choice; the fourth does not, and it tells the same story
+anyway.
 
 In the CDA, the pattern is the textbook one for adverse selection. The
 effective spread is positive (\ResEffectiveSpreadCda\,bps), and the maker
@@ -601,13 +607,15 @@ average: the FBA's effective spread stays near zero on every one of the 31
 days taken separately.
 
 One caveat is worth repeating here. The FBA has no real record of who was
-buyer and who was seller in a batch, so its side of all four numbers had to
-be estimated with a tick rule (\Cref{sec:res21}) --- these are the best
-available estimates, not a certainty. But that makes the agreement across
-four independent metrics more informative, not less: a single estimated
-number could be an artefact of the estimate; four numbers, built four
-different ways, landing on the same answer is harder to explain that way.
-It is also exactly what the theory in Chapter~\ref{ch:foundations} predicts:
+buyer and who was seller in a batch, so effective spread, realized spread
+and price impact all had to be estimated with a tick rule
+(\Cref{sec:res21}) --- the best available estimate, not a certainty, and
+since all three share it, their agreement with each other is not three
+independent confirmations on its own. Kyle's lambda breaks that
+dependence: built with no estimated direction at all, its agreement with
+the other three is a genuinely separate check, not a repeat of the same
+one in different clothes. It is also exactly what the theory in
+Chapter~\ref{ch:foundations} predicts:
 clearing everyone at one uniform price removes the reason to race a resting
 order, because in a batch there is no resting order left to race.
 
@@ -725,3 +733,170 @@ what one specific rule does to one month of real orders that were never
 asked to react to it --- not a general verdict on frequent batch auctions,
 and not evidence of how real participants, free to requote, resize or retime
 their orders, would behave under one.
+
+\section{Reliability and Interpretation of the Metrics}
+\label{sec:metricreliability}
+
+The conclusions above are only as good as the metrics behind them, and not
+every metric in this chapter earns the same trust. Two engines with
+different internal structures --- one a continuous book, one a periodic
+auction --- do not always have a natural common yardstick, and where one
+had to be built rather than simply read off, that construction can leave a
+bias of its own. This section goes back through every metric family used
+above, states plainly what it measures, how far the comparison can be
+trusted, what could bias it, and what conclusion survives that bias
+regardless. The short version: metrics built directly from executed trades
+are the most trustworthy; metrics that had to borrow a missing piece of
+information from the other engine are the least; and the headline findings
+of \Cref{sec:res_summary} were deliberately built from the first group,
+corroborated from several independent angles, precisely because of this.
+
+\subsection{Highest confidence: metrics read directly off executed trades}
+
+Executed volume, executed notional, trade count and VWAP (\Cref{sec:res23})
+need no construction choice at all: a trade either happened or it did not,
+at a price and a quantity that are facts of the replay, identical in kind
+for both engines. There is no proxy, no borrowed signal, nothing to
+calibrate. These are the metrics behind point~2 of
+\Cref{sec:res_summary} (the two engines trade statistically the same flow
+at the same price), and that conclusion is about as close to unconditionally
+reliable as anything in this thesis: it would take an error in the
+replay itself, not a definitional mismatch between the engines, to
+overturn it.
+
+\subsection{The tick-rule-signed cost metrics}
+
+Effective spread, realized spread and price impact (\Cref{sec:res21}) are
+the headline result of this chapter, and also the metrics that lean
+hardest on a construction choice. The CDA knows which side of every trade
+was the aggressor; the FBA does not, since a batch has no resting order
+to be crossed. The FBA's side of all three numbers is therefore signed
+with a tick rule read off the \emph{CDA's} price series (\Cref{sec:res21}
+explains why the FBA's own price history cannot be used without
+circularity). Two biases follow directly from this. First, the tick rule
+itself is an estimate: it is usually 80--85\% accurate against true trade
+direction even with full trade-level data, so every FBA-side number in
+\Cref{tab:res21} should be read as \emph{directionally} informative, not
+as a precise point estimate of a real aggressor-flagged quantity. Second,
+and more consequentially, all three metrics share this one construction:
+the same borrowed sign, applied to the same trades. Their agreement with
+each other is therefore not three independent confirmations --- a
+systematic bias in that one shared choice would move all three together,
+not cancel out.
+
+What breaks that dependence is Kyle's lambda (\Cref{sec:res22}). Unlike
+the other three, it needs no borrowed sign at all: it regresses each
+batch's own price change on its net submitted order flow, buy quantity
+minus sell quantity, a quantity read directly off the orders themselves
+with nothing to estimate. Kyle's lambda is therefore the one cost metric
+in this chapter genuinely free of the tick-rule construction, and it
+tells the same story as the other three: an order of magnitude smaller
+for the FBA than the CDA. That agreement has a real economic explanation,
+not a statistical coincidence: the FBA's clearing price is anchored to
+its own previous clearing price, so a single batch's own order imbalance
+barely moves it, regardless of how any trade inside that batch later gets
+signed. The conclusion this chapter is willing to stand behind follows
+from that structure: Kyle's lambda, built without the tick rule,
+independently confirms that the FBA's price does not move much for a
+given order imbalance, for a real and understood reason, which gives the
+tick-rule trio's shared near-zero result somewhere to stand. The
+\emph{sign and rough size} of the effect is what survives this scrutiny;
+the precise FBA point estimates for effective spread, realized spread and
+price impact should still not be read to the decimal, since all three
+remain hostage to the one construction choice they share.
+
+\subsection{Depth and quoted-spread analogues}
+
+Three liquidity metrics look alike but are not equally trustworthy.
+\textbf{Depth at best} compares a single CDA book level against the FBA's
+entire eligible side at the clearing price (\Cref{sec:res21}) ---
+structurally different objects, so the result that the FBA looks
+``deeper'' here is a definitional artefact, not evidence of more standing
+liquidity, and should not be used on its own. \textbf{Depth within a fixed
+distance of the reference price} uses the same definition on both sides
+(quantity within $x$ basis points of the CDA midpoint or the FBA clearing
+price) and is the one of the three that is actually comparable; its
+result --- the FBA is slightly \emph{thinner}, not deeper, at every
+threshold --- is the one this thesis relies on. \textbf{Quoted spread} sits
+between the two: the FBA side is read from the post-clearing residual,
+and only from batches where that residual is two-sided --- the rare
+case rather than the typical one for this instrument at $\tau=1$\,s, as
+\Cref{app:comparability} explains in full, along with why the FBA's
+unmatched order set is not, in general, usable as a stand-in for a CDA
+order book at all. The quoted-spread numbers in \Cref{tab:res21} are
+therefore computed correctly, but only over that selected, two-sided
+minority of batches: they describe how tight the book looks on the rare
+batches that resemble an ordinary two-sided market, not a month-wide
+average the way the CDA's quoted spread does. Read that narrowly, the
+near-equal CDA/FBA gap reported here is trustworthy; read as a general
+claim about FBA liquidity, it is not --- which is exactly why depth
+within a threshold, not quoted spread, carries the liquidity conclusion
+in \Cref{sec:res_summary}.
+
+\subsection{Engine controls: throughput and clearing latency}
+
+\Cref{sec:res23}'s engine-control rows exist to rule out one specific
+confound --- that a measured difference reflects which engine the
+computer happens to run faster, not what the mechanism does --- and that
+is also exactly where their own bias lives. Mean clearing latency times
+one CDA order against one whole FBA batch, so the three-orders-of-magnitude
+gap it shows is an artefact of what is being timed, not a real per-order
+slowdown. Throughput, whose numerator is the same message count for both
+engines, is the fairer of the two and still shows the CDA finishing faster
+per unit of work; because both figures are measured on the same machine
+under the same load, the direction of that gap is trustworthy even though
+neither number is a claim about market quality. Both are also wall-clock
+measurements and so are the only two of the 35 output columns that are not
+bit-for-bit deterministic across repeated runs (\Cref{sec:testdeterminism})
+--- a property of how they are measured, not evidence against the engines
+themselves.
+
+\subsection{Mechanically true, not behaviourally tested}
+
+Order size inflation and boundary concentration are computed correctly,
+but what they can support is narrower than it looks. Both describe
+properties of orders that were submitted to Hyperliquid's own continuous
+engine, not in reaction to being cleared in batches, so a result like ``no
+clustering beyond chance'' is a fact about this fixed order flow under the
+rule implemented, not a prediction about what real participants would do
+if they actually faced a predictable batch boundary or a pro rata
+incentive to inflate size (\Cref{sec:testable} sets out this distinction
+in full). The conclusion these metrics support is deliberately modest:
+they show the mechanical rule behaving as specified on real data, which is
+evidence the simulation is correct, not evidence about equilibrium
+behaviour under batching.
+
+\subsection{What the replay itself gets right or wrong}
+
+Two further checks bound every number in this chapter from underneath.
+Internally, a measured CDA/FBA difference could in principle reflect a
+difference in how well each engine happens to be implemented rather than
+the mechanism itself. This is mitigated by the two engines sharing one
+order and trade representation and one metrics implementation,
+reinforced by the independent reference-implementation check and the
+differential test suite (\Cref{sec:validation,app:testing}); the single
+strongest such check, convergence of the FBA to the CDA as $\tau\to0$,
+was not run. Externally, the replay does not enforce time-in-force, so it
+trades roughly twice the real venue's recorded volume. Both engines share
+this gap identically, so it cancels out of every paired comparison in
+this chapter, but it does mean the \emph{absolute} volume, trade-count
+and latency levels describe this replay, not Hyperliquid's live market.
+
+\subsection{Reading This Chapter}
+
+Ranked by how much a reader should lean on them: the trade-based metrics
+(volume, notional, trade count, VWAP, depth within a threshold) are safe
+to take near-literally; the tick-rule-signed cost metrics are safe to read
+for sign and rough magnitude, since the one of the four built without
+that construction, Kyle's lambda, independently tells the same story; the
+engine-control and mechanical-only metrics are safe
+only for the narrow claims --- no compute confound, no behavioural
+response --- they were built to support; and depth at best, quoted
+spread, and any reading of the FBA's unmatched orders as ``the FBA order
+book'' should not be trusted beyond what \Cref{app:comparability}
+specifically licenses. None of this weakens the headline result: it is
+precisely because the four independent, trade-grounded cost metrics agree
+with each other, and because the thinner-not-deeper depth result survives
+on the one definition that is genuinely comparable, that
+\Cref{sec:res_summary}'s conclusions rest on the most reliable tier of
+evidence this chapter has to offer.

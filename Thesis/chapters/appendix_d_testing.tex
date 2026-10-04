@@ -23,8 +23,8 @@ The 54-byte binary format is decoded by dedicated unit tests, including one that
 decodes the literal bytes of a real record and checks every field against the
 value printed in the dataset's own preview file. Because unit tests on a few
 records cannot show that all \VerRecords\ are read correctly, the whole archive was
-decoded a second time by an independent program (\texttt{analysis/verify\_raw\_data.py})
-that shares no code with the simulator. \Cref{tab:testcounts} compares its counts
+decoded a second time by an independent program that shares no code with the
+simulator. \Cref{tab:testcounts} compares its counts
 with the simulator's own \texttt{scan} command and its running totals: all three
 agree exactly, and the four record categories add up to the total with no remainder.
 
@@ -245,8 +245,5 @@ because it is far slower than the Rust simulator. And the repeated records and d
 silences noted above were measured but not corrected in the results.
 
 Everything here can be reproduced: \texttt{cargo test} runs the automatic tests,
-\texttt{market\_sim test engine all} the checklist, and the scripts in
-\texttt{analysis/} (named after the sections above, e.g.\
-\texttt{verify\_raw\_data.py}, \texttt{verify\_reference\_engines.py},
-\texttt{run\_mutation\_tests.py}, \texttt{verify\_replay\_fidelity.py},
-\texttt{verify\_resets.py}) reproduce every number in this appendix.
+\texttt{market\_sim test engine all} the checklist, and the verification scripts
+described above reproduce every number in this appendix.

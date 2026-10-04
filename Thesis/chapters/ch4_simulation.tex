@@ -31,9 +31,9 @@ the other side of the book and trades at the price of the resting order, so
 one large order that sweeps several price levels can produce several trade
 prices. Any unfilled part of a limit order stays in the book until it is
 filled or a cancel record removes it (\Cref{sec:cancellations}). The
-time-in-force field of an order is read from the data but not enforced, which
-is a limitation of this implementation whose size is measured in
-\Cref{sec:testfidelity}.
+time-in-force field of an order is read from the data but not enforced.
+This is a limitation of this implementation, and \Cref{sec:testfidelity}
+measures how large it is.
 
 \subsection{The Batch Engine (FBA)}
 
@@ -182,7 +182,22 @@ CDA value and one FBA value from the same order flow, so differences are
 measured as paired differences per interval. This removes variation caused by
 the market itself and isolates the effect of the mechanism. Because market
 data in consecutive seconds are correlated, the standard errors are
-Newey--West errors, which allow for this correlation.
+Newey--West errors, which allow for this correlation. The lag truncation
+is set automatically per metric from the paired sample size $n$ as
+$\lfloor 4(n/100)^{2/9} \rfloor$, capped at 60 lags, so no fixed lag
+count is chosen by hand and every table in \Cref{ch:results} reports a
+standard error computed the same reproducible way.
+
+This design's limits are real: \Cref{sec:limitations} sets out their full
+scope, and \Cref{sec:metricreliability} does the same for the metrics
+built to compare the two mechanisms. In short, an order stream only
+exists under the mechanism that produced it. A field comparison across
+two real mechanisms cannot hold that stream fixed the way a replay can;
+a replay buys that fixed comparison at a cost of its own, since it
+cannot show how the same flow would have looked had participants known
+they were trading under the other mechanism. Each design answers a
+different question, and this one is built to answer RQ2
+(\Cref{sec:rqs}).
 
 \section{Metrics}
 \label{sec:metrics}
