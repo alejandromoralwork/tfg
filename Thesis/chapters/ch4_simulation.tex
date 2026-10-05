@@ -209,14 +209,14 @@ metric with its exact formula.
 \subsection{Interpretive Status of the RQ2.3 Metrics}
 \label{sec:testable}
 
-Order size inflation and boundary concentration only make sense as
-\emph{reactions} to the mechanism, but the replayed orders were submitted on
-Hyperliquid's own continuous engine, not in reaction to batching. Also, an
-order's position relative to a simulated batch boundary depends on where the
-boundary was placed, not on any choice by the participant. These two metrics
-therefore show the mechanical effect of the rule that was implemented on fixed
-historical orders. That is a useful baseline, but it is not evidence of how
-participants would behave under real batching. Throughput and clearing latency
+Boundary concentration only makes sense as a \emph{reaction} to the
+mechanism, but the replayed orders were submitted on Hyperliquid's own
+continuous engine, not in reaction to batching. An order's position relative
+to a simulated batch boundary depends on where the boundary was placed, not on
+any choice by the participant. The metric therefore shows the mechanical effect
+of the rule that was implemented on fixed historical orders. That is a useful
+baseline, but it is not evidence of how participants would behave under real
+batching. Throughput and clearing latency
 have a different purpose: they are a control, used to rule out differences in
 processing speed as an explanation for anything else measured.
 

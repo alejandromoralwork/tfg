@@ -34,16 +34,16 @@ order flow covers the one configuration actually run: SOL/USD,
 $\tau=1$\,second, the full month of December 2025, without the interval
 sweep or rationing comparison the fuller design calls for. One finding
 does most of the work in this answer: four metrics that measure the cost
-of trading in four unrelated ways --- effective spread, realized spread, price impact and
+of trading from different angles --- effective spread, realized spread, price impact and
 Kyle's lambda --- are all close to zero for the FBA and all clearly costly
 for the CDA. In the CDA, a resting order is predictably picked off: the
 price moves against it after every trade, which is the textbook signature
 of adverse selection. Anchoring the FBA's clearing price to its own
 previous value removes that exposure, because a batch leaves no resting
 order sitting there to be picked off in the first place. (The FBA has no
-directly observable aggressor side, so its numbers rest on a tick-rule
-proxy, not a certainty; four independent metrics agreeing is what makes the
-result credible despite that.)
+directly observable aggressor side, so three of the four rest on a shared
+tick-rule proxy, not a certainty; Kyle's lambda needs no such proxy and
+agrees with them, which is what makes the result credible despite that.)
 
 This gain is not free, and it does not come from trading less or at a
 different price --- both engines clear statistically the same volume, at
@@ -57,8 +57,8 @@ predict, if a more modest effect than the spread result above. Execution
 also simply takes longer under the FBA. Underlying both is a market that,
 at this interval, is usually not the well-populated auction the mechanism
 assumes: \FbaEmptyBatchShare\% of one-second batches clear no trade at all,
-and among those that do, the larger side is typically left almost entirely
-unmatched (median unexecuted residual share of exactly one). At
+and even among those that do, most of the longer side is typically left
+unmatched at the clearing price. At
 $\tau=1$\,second on this instrument, the FBA behaves closer to its own
 degenerate, near-continuous limit than to a well-filled multilateral
 auction --- which is the frame every other number above has to be read

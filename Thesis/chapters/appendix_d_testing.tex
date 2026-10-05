@@ -59,7 +59,7 @@ minute occur, the longest \VerMaxGapMin\ minutes; and \VerDupPct\ percent of rec
 (\VerDupRepeats) are byte-for-byte repeats of an earlier record in the same file,
 concentrated in a few hours. A repeated \texttt{open} record puts a second copy of
 the same order into the replay, which is the reason a handful of one-second buckets
-later show a fill rate above one.
+later show more quantity filled than submitted.
 
 Sorting every record by order number and replaying each order's own history checks
 that it is opened once, never grows in size, and (with one exception in 60,378
@@ -136,8 +136,8 @@ nine decimal places, and confirming that streaming the output file in pieces (as
 real run does) gives byte-identical results to writing it all at once. A further
 eight checklist scenarios drive the metrics code with synthetic events and compare
 every output column with a hand-computed value. The independent reference
-implementation above adds a third, larger-scale check: it recomputes six metrics
-(quoted spread, depth, effective spread, unexecuted share) from scratch for every
+implementation above adds a third, larger-scale check: it recomputes quoted spread,
+depth, effective spread and the unexecuted share from scratch for every
 second of the same four hours, and matches (\Cref{tab:reftable}).
 
 The two month-long result files were then checked for internal consistency: every
@@ -147,9 +147,9 @@ negative, that VWAP times volume equals notional) was tested on all \VerRows\ ro
 of both files. Of dozens of such relations, only two are ever violated, and both are
 understood rather than being errors: the FBA's price dispersion, which should be
 exactly zero, is not in \VerDispRows\ buckets where two separate batches happened to
-contribute a trade to the same second; and the fill rate, which should never exceed
-one, does so in six rows out of \VerFillRows, all traceable to the repeated input
-records noted above. Recomputing eleven columns independently from the raw CSV
+contribute a trade to the same second; and the filled share of submitted quantity,
+which should never exceed one, does so in six rows out of \VerFillRows, all traceable
+to the repeated input records noted above. Recomputing eleven columns independently from the raw CSV
 files, rather than trusting the simulator's own running summary, matched to a
 relative error of at most $10^{-8}$ in every case but one (the FBA's Kyle's lambda,
 $2.4\times10^{-4}$, a sum of near-cancelling values). Every number quoted anywhere in

@@ -40,23 +40,24 @@ happened yet. Comparing the two is comparing a post-matching state to a
 pre-matching one, not two readings of the same kind of object taken at
 different conventions.
 
-\section{Post-Clearing: One-Sidedness and a Different Kind of ``Still There''}
+\section{Post-Clearing: Lopsidedness and a Different Kind of ``Still There''}
 
 Read immediately \emph{after} the batch containing $t$ clears, the
 residual --- what rolls into the next batch --- fixes the settlement
 problem: both objects are now ``what is left once everything that could
 match, did.'' Two problems survive even so.
 
-First, the FBA residual is overwhelmingly one-sided. The unexecuted
-residual share reported in \Cref{sec:res23} has a median of exactly
-$1.00$ across the month: the typical cleared batch leaves orders on only
-one side of $\clr$, not both. A CDA book is, essentially always, a
-two-sided object with a bid and an ask and a gap between them; the FBA's
-leftover queue usually has nothing on the second side to form a gap
-against at all. There is no general-purpose spread or imbalance to
-extract from an object that is one-sided most of the time.
+First, the residual is lopsided at the price that matters. Orders priced
+away from $\clr$ on both sides roll over, so the leftover set usually has
+a best buy and a best sell. At $\clr$ itself, however, it is typically
+one-sided: the unexecuted residual share reported in \Cref{sec:res23} has
+a median of exactly $1.00$ across the month, because most batches do not
+cross at all, and even the batches that trade leave most of their longer
+side unmatched. An imbalance read off this set describes which side the
+last batch could not absorb, not the standing two-sided pressure that a
+CDA book's imbalance describes.
 
-Second, even on the rare batch where the residual is two-sided, the
+Second, even where the residual is two-sided, the
 \emph{reason} an order is still there differs between the two
 mechanisms. A CDA resting order has been passed over continuously by
 every unit of opposing flow that has arrived since it was posted --- its
@@ -83,20 +84,19 @@ sidestep one of the two issues above, for a reason now made explicit.
   read off the one price that actually cleared, not off some provisional
   price guessed mid-accumulation, so there is no delayed-execution volume
   being miscounted as standing liquidity here.
-  \item[Quoted spread] uses the post-clearing residual, but only for
+  \item[Quoted spread] uses the post-clearing residual, and only for
   batches where both a best unfilled buy \emph{and} a best unfilled sell
-  exist. Given the near-universal one-sidedness documented above, this
-  gate is not a minor technicality: it is what keeps the reported FBA
-  quoted spread restricted to the genuinely two-sided minority of
-  batches, rather than silently averaging in the one-sided majority where
-  no such object exists.
+  exist. Because unmatched orders on both sides roll over, this holds in
+  almost every second, so the gate rarely binds; what remains is the
+  second problem above, that the leftover set is not the same kind of
+  object as a CDA book, which is why quoted spread is read with caution in
+  \Cref{sec:metricreliability}.
   \item[Book imbalance] is not computed for the FBA at all. Unlike
   quoted spread, it has no gated, partial version here: a book-imbalance
   figure needs a resting two-sided book to read continuously, which, as
   argued above, the FBA simply does not have between clears, so this
-  thesis reports it for the CDA only rather than build a proxy for an
-  object that does not exist.
-  \item[Almost everything else] --- executed volume and notional, trade
+  thesis does not build a proxy for an object that does not exist.
+  \item[Almost everything else] --- executed volume, trade
   count, VWAP, effective and realized spread, price impact --- is built
   from the \emph{executed trade set}, not the unmatched set at all. A
   trade is timing-unambiguous for both mechanisms, since it only exists

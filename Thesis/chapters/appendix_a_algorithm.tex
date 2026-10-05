@@ -21,21 +21,21 @@ OUTPUT: clearing price p*, fills F, residual E
 6  Vmax  <- max over p of V(p)
 7  M     <- { p : V(p) = Vmax }              // maximising set
 8  if Vmax = 0: return (no clearing, all orders roll over)
-9  M     <- argmin over p in M of |D(p) - S(p)|        // cascade 1
-10 if |M| > 1: M <- argmin over p in M of |p - p_prev|  // cascade 2
-11 if |M| > 1: M <- argmin over p in M of p             // cascade 3
+9  M     <- argmin over p in M of |D(p) - S(p)|        // tie-break step 2
+10 if |M| > 1: M <- argmin over p in M of |p - p_prev|  // tie-break step 3
+11 if |M| > 1: M <- argmin over p in M of p             // tie-break step 4
 12 p*    <- unique element of M
 13 fill all buys with pi_i > p* completely            // inframarginal
 14 fill all sells with pi_j < p* completely
 15 marginal <- orders with pi = p* on the long side
 16 allocate Vmax - (filled inframarginal) among marginal using R
 17 E     <- unmatched quantity on the long side
-18 apply time-in-force to E: roll over, or cancel
+18 roll E over into the next batch
 19 return (p*, F, E)
 \end{lstlisting}
 
-Steps 1--7 are the line search; the unimodality of $V$ noted in
-\Cref{sec:clearing} guarantees that the maximising set is an interval on
+Steps 1--7 are the line search; the monotonicity of $D$ and $S$ noted in
+\Cref{sec:fbanotation} guarantees that the maximising set is an interval on
 the grid. Steps 9--11 are the tie-break cascade: minimise the residual
 imbalance, then minimise distance from the auction's own previous
 clearing price $p_{\mathrm{prev}}$ (not an external reference — the FBA

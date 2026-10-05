@@ -2,11 +2,10 @@
 \label{app:formulas}
 
 This appendix gives the exact, implementation-level formula behind every
-metric reported in \Cref{ch:results}, and behind a handful of further
-diagnostic columns computed alongside them but not tabulated there (notably
-Kyle's lambda). Each entry carries a scope tag: \textbf{U}niversal (both
-engines), \textbf{C}DA-only, \textbf{F}BA-only, or \textbf{X} (defined but
-always empty --- the dataset lacks what it would need). A metric marked
+metric reported in \Cref{ch:results}, and behind the two price-discovery
+measures that could not be reported there. Each entry carries a scope tag:
+\textbf{U}niversal (both engines), \textbf{F}BA-only, or \textbf{X} (defined
+but always empty --- the dataset lacks what it would need). A metric marked
 \textbf{X} is kept here rather than silently dropped, so that its absence
 from every result in \Cref{ch:results} is a documented property of the
 data, not an omission.
@@ -40,7 +39,8 @@ unit-free and are \emph{not} rescaled.
 bucket with both sides present and $a_t + b_t > 0$,
 $\mathrm{spread}_{\mathrm{bps}} = (a_t - b_t)/\midp \cdot 10^{4}$,
 averaged over qualifying snapshots. FBA: for every batch with both a
-best unfilled buy and a best unfilled sell and $\clr > 0$,
+best unfilled buy and a best unfilled sell among the orders left after the
+clear (including those rolled over from earlier batches) and $\clr > 0$,
 $(\text{unfilled sell} - \text{unfilled buy})/\clr \cdot 10^{4}$,
 averaged over qualifying batches. A snapshot or batch that fails its own
 gate is excluded from the mean, not counted as zero.
@@ -56,14 +56,6 @@ price; its quantity accumulates into every threshold with
 $\mathrm{bps\_away} \le x$ --- the three columns are cumulative, so a
 level within 10\,bps also counts toward the 50 and 100\,bps columns.
 
-\paragraph{Book imbalance (C).} $(V^{bid} - V^{ask})/(V^{bid}+V^{ask})$
-at the top of book, averaged over snapshots with nonzero touch depth.
-Never set on an FBA row --- no code path computes an FBA analogue.
-
-\paragraph{Total book depth (C).} Mean of (bid depth $+$ ask
-depth)$/2$ across the \emph{whole} book, every price level both sides
---- contrast with depth at best's touch-only figure.
-
 \paragraph{Effective spread (U), raw per-bucket value.}
 \begin{equation}
   \mathrm{dev}_{\mathrm{bps}}(p_k, m_k, D_k) =
@@ -74,7 +66,8 @@ depth)$/2$ across the \emph{whole} book, every price level both sides
   \end{cases}
 \end{equation}
 quantity-weighted per bucket, $m_k$ the pre-trade reference price (CDA:
-book midpoint; FBA: the batch's own clearing price). \emph{None} if no
+book midpoint; FBA: the previous batch's clearing price as of the order's
+submission, \Cref{sec:quality}). \emph{None} if no
 trade in the bucket had a usable reference price. The FBA has no
 taker/maker distinction in a uniform-price batch, hence the third case:
 every FBA contribution to this raw column is $\ge 0$ by construction (a
@@ -158,13 +151,6 @@ more volatile one. A day with fewer than 5 matched returns is
 for comparing the engines head to head but not a whole-month volatility
 estimate for either alone.
 
-\paragraph{Matched-timestamp volatility, intraday variant (U).} The same
-construction, without the day-level grouping: each $r^{e}_i$ is reported
-directly as $|r^{e}_i| \cdot 10^{4}$ bps, one observation per matched
-return rather than one per calendar day, trading the daily version's
-noise-averaging for full time resolution ($n$ in the hundreds of
-thousands rather than around 31).
-
 \paragraph{Intra-interval price dispersion (U).}
 From bucketed trade prices, $\mathrm{disp} =
 \mathrm{stddev}(\{p_k\})/\mathrm{mean}(\{p_k\}) \cdot 10^{4}$ (population
@@ -222,15 +208,6 @@ if the bucket executed nonzero volume, else \emph{None}.
 \paragraph{Trade count (U).} A plain count, not \emph{None}-valued,
 incremented once per trade.
 
-\paragraph{Fill rate (U).} Bucketed by \emph{each order's own submission
-bucket}, not the trade's bucket: $\sum \mathrm{filled\_qty} / \sum
-\mathrm{orig\_qty}$ over orders first seen in that bucket. \emph{None} if
-no order was first seen in the bucket. Because this thesis's interval is
-1\,second and most orders take longer than that to reach their eventual
-fill state, this bucketing choice --- not a low overall fill propensity
---- is the main driver of a low average value; \Cref{ch:results} reports
-it alongside average time to execution, below, for that reason.
-
 \paragraph{Average time to execution (U).}
 For every order with a first fill, $(\text{first\_fill\_ts} -
 \text{first\_seen\_ts})/10^{9}$ seconds, bucketed by first-seen time;
@@ -244,20 +221,6 @@ sell side $\max(0, p_k - \pi) \cdot q_k$ --- clipped at zero, so an
 adverse fill never contributes a negative amount. This is realized
 price improvement against each side's own submitted limit, in raw
 $\mathrm{PRICE\_SCALE}$ units.
-
-\paragraph{Order size inflation (U).} Bucketed by first-seen time,
-aggregated per (bucket, participant) as (submitted total, filled total);
-a participant contributes $\mathrm{submitted}/\mathrm{filled}$ to the
-bucket's mean only when both are strictly positive --- an order that
-never filled at all is excluded, deliberately, rather than folded in
-through a floor on the denominator, which would let never-traded orders
-dominate the statistic rather than genuinely oversized ones.
-\emph{None} if no participant in the bucket had a computable ratio.
-
-\paragraph{Order-to-trade ratio (U).} $\mathrm{bucket\_message\_count} /
-\mathrm{trade\_count}$; the numerator counts \emph{every} message,
-accepted and rejected, so its population does not line up one-to-one
-with fill rate's. \emph{None} if the bucket executed no trades.
 
 \paragraph{Boundary concentration (F).} Share of order arrivals landing
 in the final 10\% of an FBA batch's own window; a zero-width window
@@ -284,12 +247,14 @@ closing in the bucket, using the $D(\cdot)$/$S(\cdot)$ notation of
 \Cref{sec:fbanotation}: numerator $\sum |\,D(\clr) - S(\clr)\,|$,
 denominator $\sum \max(D(\clr),S(\clr))$. This is the structural
 one-sidedness of the schedule \emph{at the clearing price} within a
-batch, not the complement of fill rate and not ``the share of submitted
-volume left unfilled'' in the everyday sense --- a batch can match every
+batch, not ``the share of submitted volume left unfilled'' in the everyday
+sense --- a batch can match every
 unit it possibly can ($\min(D(\clr),S(\clr))$ executed in full) and still
 report a high value here if demand and supply were far apart in size at
 $\clr$, which is common when $\tau$ is short and a batch contains few
-orders. \emph{None} if the denominator is zero.
+orders. A batch in which no buy price reaches any sell price has
+$\min(D(\clr),S(\clr)) = 0$ and scores exactly $1$. \emph{None} if the
+denominator is zero.
 
 \section{Known Gaps}
 
