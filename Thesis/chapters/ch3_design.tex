@@ -11,28 +11,80 @@ of the clearing mechanism itself.
 \label{sec:fbanotation}
 
 A frequent batch auction collects orders over a half-open window $[0,\tau)$
-of length $\tau$. Let $\mathbb{B}$ and $\mathbb{A}$ denote the sets of bids
-and asks submitted in the window, each order $k$ characterised by a limit
-price $\pi_k$ (absent for a market order), a quantity $q_k$, and a
-submission time $t_k$. The aggregate demand and supply schedules are
+of length $\tau$ and, at the end of the window, considers all of them
+together instead of one at a time. Let $\mathbb{B}$ and $\mathbb{A}$ denote
+the sets of bids and asks submitted in the window. Each order $k$ has a
+quantity $q_k$ and a submission time $t_k$. A limit order also has a limit
+price $\pi_k$; a market bid is treated as having no upper price limit and a
+market ask as having no lower price limit, so it never falls out of either
+schedule below on grounds of price.
+
+\subsection{Demand and Supply}
+
+The batch is cleared the same way an economics textbook clears a market: by
+lining up how much would be bought against how much would be sold at every
+possible price, and finding where the two balance. For any price $p$, the
+bid side gives the cumulative \emph{demand} at that price and the ask side
+gives the cumulative \emph{supply}, exactly as in that textbook picture.
+Demand is the quantity buyers are willing to take at $p$ or less, so it can
+only fall as $p$ rises: a bid counts toward it once its limit price is at
+least $p$, and drops out as soon as $p$ climbs past that limit. Supply is
+the mirror image: the quantity sellers are willing to give up at $p$ or
+more, which can only rise as $p$ rises, since an ask counts once its limit
+price is at most $p$. Written out, with the market-order convention above,
 \begin{equation}
   \label{eq:demandsupply}
   D(p) = \sum_{k \in \mathbb{B}} q_k \mathbf{1}\{\pi_k \ge p\},
   \qquad
   S(p) = \sum_{k \in \mathbb{A}} q_k \mathbf{1}\{\pi_k \le p\},
 \end{equation}
-and the executable volume at price $p$ is $V(p) = \min\{D(p), S(p)\}$.
+Plotted against price, $D$ and $S$ are \emph{step} curves rather than
+smooth ones, because each order adds its whole quantity at once, the
+moment its limit price is reached, rather than a little at a time: $D$
+steps down as price rises, $S$ steps up. \Cref{fig:fbaschedule} shows
+exactly this picture for a small worked example, and is worth keeping in
+mind through the rest of this section. At any price $p$, only the smaller
+of the two sides can actually trade, so the volume executable at that
+price is
+\begin{equation}
+  V(p) = \min\{D(p), S(p)\}.
+\end{equation}
 
-The clearing rule selects a price from the volume-maximising set
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.72\textwidth]{figures/fig_fba_schedule.png}
+\caption[FBA clearing as a supply/demand diagram]{The FBA clearing
+mechanism drawn as a classical demand/supply diagram: $D(p)$ and $S(p)$
+as step functions of price. Reading it: pick any price on the horizontal
+axis; the height of the demand step there is how much would be bought at
+that price or cheaper, the height of the supply step is how much would be
+sold at that price or dearer. The two curves bind, i.e.\ reach their
+largest common height, at the clearing price $\clr$, marked where they
+meet. Drawn from a small illustrative example (four orders, three buys
+and one sell), chosen because it clears without a tie and so needs no
+tie-break cascade (below) to illustrate the basic mechanism cleanly; a
+real batch from the simulated month has dozens of orders and does not
+render legibly at this scale.}
+\label{fig:fbaschedule}
+\end{figure}
+
+\subsection{Finding the Clearing Price}
+
+In the figure, and in general, the two curves do not have to cross at one
+exact price: they can run side by side, both holding the same height,
+across several price ticks at once, which happens often when the book is
+thin. Every price in that stretch executes the same maximum volume, so
+volume by itself cannot say which one is actually used. The clearing rule
+therefore works in two stages. First, it finds every price that reaches
+the greatest executable volume, the volume-maximising set
 \begin{equation}
   \mathcal{P}^{*} = \argmax_{p \in \mathbb{R}_{+}} V(p),
   \qquad V^{*} = \max_{p} V(p),
 \end{equation}
-which, since $D$ is non-increasing and $S$ is non-decreasing, is a closed
-interval $[\underline{p}, \overline{p}]$ whenever the book crosses
-($V^{*} > 0$). When this interval is non-degenerate the clearing price is
-not pinned down by the volume objective alone, and a secondary selection
-rule $\sigma$ is needed:
+which, since $D$ is non-increasing and $S$ is non-decreasing, is a single
+closed interval $[\underline{p}, \overline{p}]$ whenever the book crosses
+at all ($V^{*} > 0$). When that interval holds more than one price, a
+second, tie-breaking stage is needed to pick exactly one of them:
 \begin{equation}
   \label{eq:clearing}
   \clr = \sigma\bigl(\mathcal{P}^{*}\bigr) \in \mathcal{P}^{*}.
@@ -51,25 +103,51 @@ exactly this cascade (\Cref{app:config}):
   \item if still tied, choose the lowest such price.
 \end{enumerate}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.72\textwidth]{figures/fig_fba_schedule.png}
-\caption[FBA clearing as a supply/demand diagram]{The FBA clearing
-mechanism drawn as a classical demand/supply diagram: $D(p)$ and $S(p)$
-as step functions of price, crossing (binding) at the clearing price
-$\clr$. Drawn from a small illustrative example (four orders, three buys
-and one sell), chosen because it clears without a tie and so needs no
-tie-break cascade to illustrate the basic mechanism cleanly; a real
-batch from the simulated month has dozens of orders and does not render
-legibly at this scale.}
-\label{fig:fbaschedule}
-\end{figure}
-
-Finally, let $x_k \ge 0$ denote the executed quantity of order $k$ under a
+Let $x_k \ge 0$ denote the executed quantity of order $k$ under a
 volume-maximising allocation, so that $\sum_{k \in \mathbb{B}} x_k =
-\sum_{k \in \mathbb{A}} x_k = V^{*}$. This notation --- $D$, $S$, $V$,
-$\mathcal{P}^{*}$, $\sigma$, $\clr$, $x_k$ --- is used without
-redefinition for the rest of this thesis.
+\sum_{k \in \mathbb{A}} x_k = V^{*}$.
+
+\subsection{Price Improvement and Surplus}
+
+Uniform pricing gives every executed order a better price than it asked
+for, and the figure above already shows exactly how much better. A buyer
+with limit price $\pi_k$ above $\clr$ does not pay $\pi_k$; the whole
+batch pays $\clr$, so this order keeps the gap $\pi_k - \clr$ for every
+unit it trades. In \Cref{fig:fbaschedule} this gap is the shaded
+rectangle: its width is how far that order's limit sits above the
+clearing price, its height is how much of it trades, and its area is
+what that order gains by not having to pay what it was willing to.
+Sellers gain the mirror amount, $\clr - \pi_k$, the gap between the
+clearing price and their own limit. Summed over every executed order,
+these gaps are the familiar consumer- and producer-surplus areas from an
+introductory supply/demand diagram, just read off a single discrete
+batch instead of a continuous market: the buyers' share sits above
+$\clr$, under the demand curve; the sellers' share sits below $\clr$,
+above the supply curve.
+
+Formally, each side's surplus at a candidate price $p$ is
+\begin{equation}
+  \label{eq:surplus}
+  \mathrm{PI}^{\mathbb{B}}(p) = \sum_{k \in \mathbb{B}} (\pi_k - p)\, x_k,
+  \qquad
+  \mathrm{PI}^{\mathbb{A}}(p) = \sum_{k \in \mathbb{A}} (p - \pi_k)\, x_k,
+\end{equation}
+and total surplus at the batch's own clearing price is $W =
+\mathrm{PI}^{\mathbb{B}}(\clr) + \mathrm{PI}^{\mathbb{A}}(\clr)$. Every
+term in both sums is non-negative for an executed order --- a buy only
+has $x_k>0$ if $\pi_k \ge \clr$, and a sell only if $\pi_k \le \clr$, so
+no order ever executes at a loss relative to its own limit. This is what
+\Cref{ch:results} measures as \emph{trader surplus}. The worked example
+also previews a point \Cref{sec:priceimprovement} returns to in full: the
+two sides need not split $W$ evenly, or even at all. Here the entire
+gain goes to the buyers, because the seller's own limit happens to equal
+the clearing price; a different clearing price within the same
+volume-maximising set $\mathcal{P}^{*}$ would have split it differently
+without changing who trades or how much.
+
+This notation --- $D$, $S$, $V$, $\mathcal{P}^{*}$, $\sigma$, $\clr$,
+$x_k$, $\mathrm{PI}^{\mathbb{B}}$, $\mathrm{PI}^{\mathbb{A}}$ --- is used
+without redefinition for the rest of this thesis.
 
 \section{The Engine as a Set of Design Blocks}
 \label{sec:blocks}

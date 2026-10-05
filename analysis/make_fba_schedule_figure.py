@@ -23,6 +23,7 @@ volume-maximising, so the batch clears at p*=100 with V*=15.
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
 
 import config
@@ -77,6 +78,27 @@ def main():
 
     ax.step(p_grid, d, where="post", color=DEMAND_COLOR, linewidth=2, label="Demand $D(p)$")
     ax.step(p_grid, s, where="post", color=SUPPLY_COLOR, linewidth=2, label="Supply $S(p)$")
+
+    # Buyer surplus: for each executed buy order priced strictly above
+    # p*, a rectangle from the clearing price to that order's own limit,
+    # at the quantity band it occupies -- the classic consumer-surplus
+    # area, drawn exactly rather than inferred from the step curve. Here
+    # only B1 (limit 105, qty 10, the top step of D) is inframarginal, so
+    # there is exactly one rectangle: price in [p*, 105], quantity in
+    # [0, 10]. Seller surplus (the mirror region between the supply curve
+    # and p*) is zero in this example -- S1's own limit price already
+    # equals the clearing price, so there is nothing to shade on that
+    # side. That asymmetry is real, not a simplification, and is the
+    # point \Cref{sec:priceimprovement} returns to: the two sides do not
+    # have to split the gains from trade evenly.
+    ax.add_patch(patches.Rectangle(
+        (p_star, 0), 105 - p_star, 10,
+        facecolor=DEMAND_COLOR, alpha=0.18, edgecolor="none", zorder=1,
+    ))
+    ax.text(
+        p_star + (105 - p_star) / 2, 5, "buyer\nsurplus",
+        ha="center", va="center", fontsize=9, color=DEMAND_COLOR,
+    )
 
     # Crossing / binding point at the clearing price.
     ax.plot([p_star], [v_star], marker="o", markersize=7, color=CLEAR_COLOR, zorder=5)
