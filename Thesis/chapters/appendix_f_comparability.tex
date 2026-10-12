@@ -6,7 +6,7 @@ orders at time $t$ as a stand-in for ``the CDA order book at $t$,'' and
 then compute the usual book-based metrics (quoted spread, depth, book
 imbalance) on it the same way they are computed on the CDA. This appendix
 explains why that instinct does not survive scrutiny, and what the
-metrics defined in \Cref{app:formulas} do instead.
+metrics defined in \Cref{sec:metricdefs} do instead.
 
 \section{The Question}
 
@@ -29,7 +29,7 @@ closes --- they are not resting liquidity in any economic sense, only
 flow that batching has temporarily delayed. Others are genuinely
 marginal or out of the money and will remain unmatched. Counting the
 whole pending set as if it were book depth overstates FBA liquidity
-purely as an artifact of the batching delay, not because more liquidity
+purely as an artefact of the batching delay, not because more liquidity
 is actually standing there.
 
 The deeper problem is one of kind, not convention. The CDA book at $t$
@@ -70,20 +70,24 @@ persistent in a CDA book than it does in a one-second FBA buffer.
 \section{What the Metric Formulas Actually Use}
 
 None of the above is a problem this thesis's metrics inherited silently;
-each book-like FBA quantity in \Cref{app:formulas} was already defined to
+each book-like FBA quantity in \Cref{sec:metricdefs} was already defined to
 sidestep one of the two issues above, for a reason now made explicit.
 
 \begin{description}
   \item[Depth at best] uses $D(\clr)$/$S(\clr)$ --- the \emph{total}
   volume eligible to trade at the clearing price, matched and unmatched
-  together, not the unmatched residual. This is the fair analogue of a
+  together, not the unmatched residual. This is the closest analogue of a
   CDA book's touch size (``how much was there at the best price''), and
-  deliberately not an answer to ``how much is left over.'' It does not
-  repeat the Pre-Clearing section's mixing problem, because it is
-  evaluated \emph{after} $\clr$ is known: $D(\clr)$ and $S(\clr)$ are
-  read off the one price that actually cleared, not off some provisional
-  price guessed mid-accumulation, so there is no delayed-execution volume
-  being miscounted as standing liquidity here.
+  deliberately not an answer to ``how much is left over.'' It is read off
+  the one price that actually cleared, not a provisional one, but it still
+  counts the volume about to execute at that price, so it carries the
+  Pre-Clearing section's mixing problem; this is one reason
+  \Cref{sec:res21} treats it as not comparable with the CDA's touch size.
+  \item[Depth within a threshold] is also read from the batch just before
+  it clears, so it too includes orders about to execute. That can only
+  make the FBA look deeper than its standing liquidity, which is why the
+  result that the FBA is nonetheless slightly \emph{thinner} on this
+  measure holds with margin.
   \item[Quoted spread] uses the post-clearing residual, and only for
   batches where both a best unfilled buy \emph{and} a best unfilled sell
   exist. Because unmatched orders on both sides roll over, this holds in
@@ -108,7 +112,7 @@ sidestep one of the two issues above, for a reason now made explicit.
 
 Put together, the FBA's unmatched orders --- the leftover residual this
 appendix has been discussing --- appear in exactly one metric, quoted
-spread, and only there under the two-sided gate above; depth at best
-uses a related but distinct, already-cleared total instead, and book
-imbalance is not attempted. Nowhere in this thesis is the unmatched set
+spread, and only there under the two-sided gate above; the two depth
+measures read the batch before it clears instead, and book imbalance is
+not attempted. Nowhere in this thesis is the unmatched set
 read, on its own, as a general stand-in for ``the FBA order book.''

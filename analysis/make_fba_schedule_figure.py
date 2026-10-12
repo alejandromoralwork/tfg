@@ -105,7 +105,7 @@ def main():
     ax.vlines(p_star, 0, v_star, color=CLEAR_COLOR, linewidth=1, linestyle="--")
     ax.hlines(v_star, p_grid.min(), p_star, color=CLEAR_COLOR, linewidth=1, linestyle="--")
     ax.annotate(
-        r"$p^{*}=\mathrm{clr}=100$" + "\n" + r"$V^{*}=15$",
+        r"$p^{*}=100$" + "\n" + r"$V^{*}=15$",
         xy=(p_star, v_star), xytext=(p_star + 2.5, v_star - 6),
         fontsize=10, color=CLEAR_COLOR,
         arrowprops=dict(arrowstyle="-", color=CLEAR_COLOR, linewidth=0.8),

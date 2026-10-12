@@ -12,43 +12,50 @@ in turn.
 design blocks: the batch interval, the disclosure regime during
 accumulation, the order flow segregation architecture, the clearing and
 rationing rule, and settlement and residual handling. These are not
-optional extras layered onto the mechanism but decisions a continuous
-engine also makes implicitly, which become visible and contestable only
-once serial processing is abandoned. Three points carry the most weight.
-The only unambiguous structural gain is discrete accumulation combined with
-uniform pricing; every other choice trades one distortion for another, so
-the question is which distortion the venue prefers. The blocks interact and
-cannot be optimised independently. And a venue can implement frequent batch
-auctions exactly as proposed and still have a speed race, because
-price-time rationing inside the batch reintroduces one through the
-allocation rule --- the sharpest practical implication of the analysis.
+optional extras layered onto the mechanism but decisions that serial
+processing settles automatically in a continuous engine, and which become
+visible and contestable only once it is abandoned. \Cref{tab:consequences}
+lists every option with its predicted consequence. Three points carry the
+most weight. The only unambiguous structural gain is discrete accumulation
+combined with uniform pricing; every other choice trades one distortion for
+another, so the question is which distortion the venue prefers. The blocks
+interact and cannot be optimised independently. And a venue can implement
+frequent batch auctions exactly as proposed and still have a speed race,
+through two separate channels: price-time rationing inside the batch
+rewards being early, and a fixed, predictable close rewards being late ---
+the sharpest practical implication of the analysis.
 Two questions with no settled answer were developed as contributions: the
 maker--taker distinction dissolves under simultaneous uniform-price
 clearing, with persistence across batches the strongest of four candidate
-redefinitions; and the price improvement uniform clearing produces is not a
-fixed property of the mechanism but depends on the clearing and rationing
-rules chosen.
+redefinitions; and the price improvement uniform clearing produces is a
+transfer between buyers and sellers, not a gain, whose split is set by the
+clearing-price selection rule. Under a fixed close and a visible batch,
+that split can be steered by whoever submits last, which turns the choice
+of time window into a boundary repricing race (\Cref{sec:priceimprovement}).
 
 \paragraph{RQ2.} The paired comparison of the two engines on identical
 order flow covers the one configuration actually run: SOL/USD,
 $\tau=1$\,second, the full month of December 2025, without the interval
 sweep or rationing comparison the fuller design calls for. One finding
-does most of the work in this answer: four metrics that measure the cost
-of trading from different angles --- effective spread, realized spread, price impact and
-Kyle's lambda --- are all close to zero for the FBA and all clearly costly
-for the CDA. In the CDA, a resting order is predictably picked off: the
-price moves against it after every trade, which is the textbook signature
-of adverse selection. Anchoring the FBA's clearing price to its own
-previous value removes that exposure, because a batch leaves no resting
-order sitting there to be picked off in the first place. (The FBA has no
-directly observable aggressor side, so three of the four rest on a shared
-tick-rule proxy, not a certainty; Kyle's lambda needs no such proxy and
-agrees with them, which is what makes the result credible despite that.)
+does most of the work in this answer: effective spread, realized spread
+and price impact are clearly costly for the CDA and all close to zero for
+the FBA. In the CDA, a resting order is predictably picked off: the price
+moves against it after every trade, which is the textbook signature of
+adverse selection, and Kyle's lambda confirms that the CDA's price moves
+with net order flow. In the FBA no such one-sided cost appears, consistent
+with every order in a batch trading at one uniform price set only after all
+of the batch's orders are in, so no stale quote can be picked off. This
+result rests on one estimate: the FBA has no directly observable aggressor
+side, so all three FBA values share a tick-rule proxy, and a near-zero
+average is also what a proxy unrelated to the true direction would give.
+The FBA's Kyle's lambda is built on a different order-flow scale and cannot
+serve as an independent check. The finding is therefore that the cost does
+not fall on one side in the FBA, not proof that it is absent.
 
-This gain is not free, and it does not come from trading less or at a
-different price --- both engines clear statistically the same volume, at
-prices that track each other closely. What it costs instead is depth and
-time. Depth within a fixed distance of the reference price, the one depth
+This result does not come from trading less or at a different price ---
+both engines clear statistically the same volume, at prices that track
+each other closely, and this is the firmest finding of the comparison.
+What the FBA gives up instead is depth and time. Depth within a fixed distance of the reference price, the one depth
 measure genuinely comparable across the two engines, is slightly
 \emph{lower} for the FBA at every threshold, and a given amount of trading
 moves the FBA's price marginally more, not less (Amihud illiquidity) ---
@@ -83,8 +90,10 @@ such responses would be measured. Two further limitations bound what future
 work can build on: the engines are per-pair, so the multi-asset clearing
 problem is part of the design analysis but not of the measurement; and
 several metrics require adaptation to a batch setting, most notably the
-sign of the effective and realized spread, so an extension inherits that
-adaptation rather than a clean continuous-market baseline
+sign of the effective and realized spread and the order-flow measure
+behind Kyle's lambda, which in this run covers the whole rolled-over book
+and so is not comparable with the CDA's; an extension inherits these
+adaptations rather than a clean continuous-market baseline
 (\Cref{sec:metricreliability} works through this case by case).
 
 The sample itself bounds the claims further. The data come from one

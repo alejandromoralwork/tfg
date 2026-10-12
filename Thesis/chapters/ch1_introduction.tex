@@ -40,7 +40,10 @@ the interval no longer matters, and all trades settle at the same price, so
 a participant cannot obtain a better price by being earlier. Speed retains
 value only across intervals, the marginal return to shaving another
 nanosecond off a network path collapses to approximately zero, and
-competition is redirected from latency to price.
+competition is redirected from latency to price. As \Cref{ch:design}
+shows, this holds only under particular design choices: a predictable
+batch close and time priority inside the batch each give speed value
+again.
 
 The idea is not exotic: most equity exchanges already run uniform-price
 call auctions at the open and close. What is new is the frequency --- an
@@ -124,7 +127,7 @@ order flow?
 \end{quote}
 
 RQ2 is decomposed into three measurable dimensions, each operationalised by
-a set of metrics defined in \Cref{app:formulas}:
+a set of metrics defined in \Cref{sec:metricdefs}:
 
 \begin{itemize}
   \item \textbf{RQ2.1 Liquidity and transaction costs.} Which mechanism
@@ -158,3 +161,22 @@ mechanism's mechanical effect on one dataset, not how participants would
 have behaved had they known they were trading under it
 (\Cref{sec:metricreliability,sec:limitations} set out exactly where that
 line falls).
+
+\section{Structure of the Thesis}
+\label{sec:structure}
+
+\Cref{ch:background} introduces the terminology and notation, defines the
+continuous double auction and the frequent batch auction precisely, and
+gives the formal definition of every metric used in the comparison.
+\Cref{ch:foundations} reviews the theory and literature the thesis builds
+on and links each strand to a design block and to the metrics that
+measure it. \Cref{ch:design} answers RQ1 by decomposing the batch auction
+engine into its five design blocks, derives the boundary repricing race
+that a predictable batch close produces, and summarises the consequences
+of every design option in one table. \Cref{ch:simulation} describes the
+simulation, the data and the experimental design, and \Cref{ch:results}
+answers RQ2 with the paired comparison of the two engines.
+\Cref{ch:conclusion} summarises the answers and the limitations. The
+appendices document the clearing algorithm, the engine configuration,
+reproducibility, testing, and the comparability of the FBA's unmatched
+orders with a CDA book.

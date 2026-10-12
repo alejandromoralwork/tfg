@@ -23,14 +23,13 @@ computed by engine-specific code.
 \begin{sloppypar}
 The full source, in Rust, is public \citep{moral2026marketsim}. It lives at
 \url{https://github.com/alejandromoralwork/tfg}, branch \texttt{main}, commit
-\ph[to be inserted before submission].
+\texttt{17330571d35b05b4608d8c6a8379d92accb4541c}.
 \end{sloppypar}
-It is one crate, \texttt{market\_sim}, with no engine-specific dependency beyond
-the standard Rust toolchain (edition 2021). Both matching engines, the binary
-decoder, the metrics recorder and the command-line interface used below are
-plain Rust source files in that one repository, not a package pulled from
-elsewhere.
-Cloning and building it is the same on any platform:
+It is a single program, \texttt{market\_sim}, that needs nothing beyond the
+standard Rust toolchain. Both matching engines, the decoder for the binary
+data format, the metrics code and the command-line interface used below are
+part of it; none of them is an external package. Cloning and building it is
+the same on any platform:
 
 \begin{lstlisting}[language=,caption={Getting and building the simulator.}]
 git clone https://github.com/alejandromoralwork/tfg.git
@@ -39,20 +38,9 @@ cargo build --release
 # binary at target/release/market_sim (market_sim.exe on Windows)
 \end{lstlisting}
 
-With no arguments the binary drops into an interactive prompt; given arguments it
-runs one command and exits, the form every automated run in this thesis used
-(\texttt{main.rs}, the whole entry point):
-
-\begin{lstlisting}[caption={The crate's entry point, in full.}]
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() {
-        inputs::cli::run();                          // interactive prompt
-    } else {
-        std::process::exit(inputs::cli::run_once(&args));   // one command, then exit
-    }
-}
-\end{lstlisting}
+Started without arguments, the program opens an interactive prompt; started
+with arguments, it runs that one command and exits, which is the form every
+run in this thesis used.
 
 \section{Running It Without Downloading Any Data}
 \label{sec:repro_quick}
@@ -70,7 +58,7 @@ market_sim test engine all
 
 \Cref{fig:cliscreenshot} shows the same binary's interactive prompt: switching
 engine, adding orders by hand, reading back the book, and clearing an FBA batch,
-exactly the commands and output described in \Cref{app:algorithm,tab:config}.
+exactly the behaviour described in \Cref{app:algorithm,app:config}.
 This is a real captured session; the terminal colours shown are reapplied from
 the command-line interface's colour calls because the ANSI codes themselves are
 dropped when the output is piped into a file rather than shown on a real terminal.
@@ -96,9 +84,10 @@ market_sim download sol            # fetches + extracts into data/order_statuses
 market_sim simulate sol 1          # the exact run behind this thesis; ~45h on one machine
 \end{lstlisting}
 
-A single machine is slow only because the replay is single-threaded by design
-(\Cref{sec:environment}); the run can be stopped and resumed at any point, since
-it checkpoints after every hourly file (\Cref{tab:config} above). For a faster
+A single machine is slow only because the replay is single-threaded by design:
+it feeds every record to both engines one at a time, in timestamp order
+(\Cref{sec:environment}), so it cannot be split across processor cores; the run can be stopped and resumed at any point, since
+it checkpoints after every hourly file. For a faster
 turnaround, the repository includes a complete, copy-paste walkthrough for
 running the identical container on Google Cloud Batch, including the exact
 job specification used by this thesis's own cloud run. It takes a reader who
@@ -135,8 +124,8 @@ ad hoc link that can move or expire. The record contains:
 \begin{itemize}
   \item \textbf{FBA timeseries} (\texttt{fba\_timeseries.csv}, about 630\,MB);
   \item \textbf{CDA timeseries} (\texttt{cda\_timeseries.csv}, about 640\,MB);
-  \item \textbf{Summary report} (\texttt{summary.txt}, a few kilobytes, the
-  per-column min/mean/max totals quoted throughout this appendix).
+  \item \textbf{Summary report} (\texttt{summary.txt}, a few kilobytes,
+  with per-column minimum, mean and maximum and the run's running totals).
 \end{itemize}
 
 Each file is exactly what \texttt{market\_sim simulate sol 1} writes to the

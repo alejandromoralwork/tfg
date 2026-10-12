@@ -3,151 +3,13 @@
 
 This chapter breaks a batch auction engine into five design blocks, lists the
 options available in each block, and explains from theory how participants
-should be expected to behave under each option. It opens with the one piece
-of notation every later chapter reuses: a precise, self-contained definition
-of the clearing mechanism itself.
-
-\section{The FBA Mechanism: Notation and Formal Definition}
-\label{sec:fbanotation}
-
-A frequent batch auction collects orders over a half-open window $[0,\tau)$
-of length $\tau$ and, at the end of the window, considers all of them
-together instead of one at a time. Let $\mathbb{B}$ and $\mathbb{A}$ denote
-the sets of bids and asks submitted in the window. Each order $k$ has a
-quantity $q_k$ and a submission time $t_k$. A limit order also has a limit
-price $\pi_k$; a market bid is treated as having no upper price limit and a
-market ask as having no lower price limit, so it never falls out of either
-schedule below on grounds of price.
-
-\subsection{Demand and Supply}
-
-The batch is cleared the same way an economics textbook clears a market: by
-lining up how much would be bought against how much would be sold at every
-possible price, and finding where the two balance. For any price $p$, the
-bid side gives the cumulative \emph{demand} at that price and the ask side
-gives the cumulative \emph{supply}, exactly as in that textbook picture.
-Demand is the quantity buyers are willing to take at $p$ or less, so it can
-only fall as $p$ rises: a bid counts toward it once its limit price is at
-least $p$, and drops out as soon as $p$ climbs past that limit. Supply is
-the mirror image: the quantity sellers are willing to give up at $p$ or
-more, which can only rise as $p$ rises, since an ask counts once its limit
-price is at most $p$. Written out, with the market-order convention above,
-\begin{equation}
-  \label{eq:demandsupply}
-  D(p) = \sum_{k \in \mathbb{B}} q_k \mathbf{1}\{\pi_k \ge p\},
-  \qquad
-  S(p) = \sum_{k \in \mathbb{A}} q_k \mathbf{1}\{\pi_k \le p\},
-\end{equation}
-Plotted against price, $D$ and $S$ are \emph{step} curves rather than
-smooth ones, because each order adds its whole quantity at once, the
-moment its limit price is reached, rather than a little at a time: $D$
-steps down as price rises, $S$ steps up. \Cref{fig:fbaschedule} shows
-exactly this picture for a small worked example, and is worth keeping in
-mind through the rest of this section. At any price $p$, only the smaller
-of the two sides can actually trade, so the volume executable at that
-price is
-\begin{equation}
-  V(p) = \min\{D(p), S(p)\}.
-\end{equation}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.72\textwidth]{figures/fig_fba_schedule.png}
-\caption[FBA clearing as a supply/demand diagram]{The FBA clearing
-mechanism drawn as a classical demand/supply diagram: $D(p)$ and $S(p)$
-as step functions of price. Reading it: pick any price on the horizontal
-axis; the height of the demand step there is how much would be bought at
-that price or cheaper, the height of the supply step is how much would be
-sold at that price or dearer. The two curves bind, i.e.\ reach their
-largest common height, at the clearing price $\clr$, marked where they
-meet. Drawn from a small illustrative example (four orders, three buys
-and one sell), chosen because it clears without a tie and so needs no
-tie-break cascade (below) to illustrate the basic mechanism cleanly; a
-real batch from the simulated month has dozens of orders and does not
-render legibly at this scale.}
-\label{fig:fbaschedule}
-\end{figure}
-
-\subsection{Finding the Clearing Price}
-
-In the figure, and in general, the two curves do not have to cross at one
-exact price: they can run side by side, both holding the same height,
-across several price ticks at once, which happens often when the book is
-thin. Every price in that stretch executes the same maximum volume, so
-volume by itself cannot say which one is actually used. The clearing rule
-therefore works in two stages. First, it finds every price that reaches
-the greatest executable volume, the volume-maximising set
-\begin{equation}
-  \mathcal{P}^{*} = \argmax_{p \in \mathbb{R}_{+}} V(p),
-  \qquad V^{*} = \max_{p} V(p),
-\end{equation}
-which, since $D$ is non-increasing and $S$ is non-decreasing, is a single
-closed interval $[\underline{p}, \overline{p}]$ whenever the book crosses
-at all ($V^{*} > 0$). When that interval holds more than one price, a
-second, tie-breaking stage is needed to pick exactly one of them:
-\begin{equation}
-  \label{eq:clearing}
-  \clr = \sigma\bigl(\mathcal{P}^{*}\bigr) \in \mathcal{P}^{*}.
-\end{equation}
-Real auctions resolve this indeterminacy with a fixed cascade of
-tie-breaking steps, applied in order until one price remains
-\citep{haynes2020precedence}, and the engine used in this thesis follows
-exactly this cascade (\Cref{app:config}):
-\begin{enumerate}
-  \item choose the price (or prices) that maximise $V(p)$ --- this is
-  $\mathcal{P}^{*}$ itself;
-  \item if $\mathcal{P}^{*}$ is not a singleton, choose the price that
-  minimises the residual imbalance $|D(p) - S(p)|$;
-  \item if still tied, choose the price closest to the auction's own
-  previous clearing price;
-  \item if still tied, choose the lowest such price.
-\end{enumerate}
-
-Let $x_k \ge 0$ denote the executed quantity of order $k$ under a
-volume-maximising allocation, so that $\sum_{k \in \mathbb{B}} x_k =
-\sum_{k \in \mathbb{A}} x_k = V^{*}$.
-
-\subsection{Price Improvement and Surplus}
-
-Uniform pricing gives every executed order a better price than it asked
-for, and the figure above already shows exactly how much better. A buyer
-with limit price $\pi_k$ above $\clr$ does not pay $\pi_k$; the whole
-batch pays $\clr$, so this order keeps the gap $\pi_k - \clr$ for every
-unit it trades. In \Cref{fig:fbaschedule} this gap is the shaded
-rectangle: its width is how far that order's limit sits above the
-clearing price, its height is how much of it trades, and its area is
-what that order gains by not having to pay what it was willing to.
-Sellers gain the mirror amount, $\clr - \pi_k$, the gap between the
-clearing price and their own limit. Summed over every executed order,
-these gaps are the familiar consumer- and producer-surplus areas from an
-introductory supply/demand diagram, just read off a single discrete
-batch instead of a continuous market: the buyers' share sits above
-$\clr$, under the demand curve; the sellers' share sits below $\clr$,
-above the supply curve.
-
-Formally, each side's surplus at a candidate price $p$ is
-\begin{equation}
-  \label{eq:surplus}
-  \mathrm{PI}^{\mathbb{B}}(p) = \sum_{k \in \mathbb{B}} (\pi_k - p)\, x_k,
-  \qquad
-  \mathrm{PI}^{\mathbb{A}}(p) = \sum_{k \in \mathbb{A}} (p - \pi_k)\, x_k,
-\end{equation}
-and total surplus at the batch's own clearing price is $W =
-\mathrm{PI}^{\mathbb{B}}(\clr) + \mathrm{PI}^{\mathbb{A}}(\clr)$. Every
-term in both sums is non-negative for an executed order --- a buy only
-has $x_k>0$ if $\pi_k \ge \clr$, and a sell only if $\pi_k \le \clr$, so
-no order ever executes at a loss relative to its own limit. This is what
-\Cref{ch:results} measures as \emph{trader surplus}. The worked example
-also previews a point \Cref{sec:priceimprovement} returns to in full: the
-two sides need not split $W$ evenly, or even at all. Here the entire
-gain goes to the buyers, because the seller's own limit happens to equal
-the clearing price; a different clearing price within the same
-volume-maximising set $\mathcal{P}^{*}$ would have split it differently
-without changing who trades or how much.
-
-This notation --- $D$, $S$, $V$, $\mathcal{P}^{*}$, $\sigma$, $\clr$,
-$x_k$, $\mathrm{PI}^{\mathbb{B}}$, $\mathrm{PI}^{\mathbb{A}}$ --- is used
-without redefinition for the rest of this thesis.
+should be expected to behave under each option. The most consequential of
+these behaviours, the boundary repricing race that a predictable close
+produces, is developed in full as part of Block~1
+(\Cref{sec:priceimprovement}), and \Cref{sec:consequences} closes the
+chapter with a summary of every option and its consequences. The chapter
+uses the notation of \Cref{ch:background}, in particular the clearing
+mechanism defined in \Cref{sec:fbanotation}.
 
 \section{The Engine as a Set of Design Blocks}
 \label{sec:blocks}
@@ -182,7 +44,7 @@ never has to make, because serial processing settles them automatically:
 orders, cancels and modifies buffered; nothing executes\\
 $\downarrow$ \quad \emph{governed by Block 1 (interval) and Block 2 (disclosure)}\\[0.5em]
 \textbf{[2] Gate closes}\\
-buffer frozen; late messages routed to batch $n+1$\\
+buffer frozen; late messages routed to the next batch\\
 $\downarrow$\\[0.5em]
 \textbf{[3] Partition into auctions}\\
 one pool, or maker/taker and retail/institutional partitions\\
@@ -246,15 +108,18 @@ depends on the instrument:
 
 If everyone knows when the batch closes, that moment becomes a target. A fast
 participant can wait until the last possible moment, see as much information
-as possible, and only then submit or cancel. This is \emph{boundary sniping}.
-It is the same speed race as in continuous trading, moved to the end of the
-interval; what is won is a place in a batch whose contents are now partly
-known, rather than a single stale quote.
+as possible, and only then submit, reprice or cancel. This is the
+\emph{boundary repricing race} (sometimes called boundary sniping). It is the
+same speed race as in continuous trading, moved to the end of the interval;
+what is won is a better share of the surplus of a batch whose contents are
+now partly known, rather than a single stale quote. \Cref{sec:priceimprovement}
+derives it formally; the options below differ in how exposed they are to it.
 
 \begin{itemize}
   \item \textbf{Fixed closing time.} Simple, easy to audit, and compatible with
   clock-aligned reporting, but easy for participants to plan around and fully
-  exposed to boundary sniping.
+  exposed to the boundary repricing race. This is the option the simulated
+  engine implements (\Cref{tab:fbachoices}).
   \item \textbf{Random closing time.} The batch closes at a time drawn from a
   publicly announced range, for example uniformly between $\tau_{\min}$ and
   $\tau_{\max}$. Waiting until the last moment now risks missing the batch,
@@ -271,6 +136,204 @@ known, rather than a single stale quote.
   closing auctions. It is predictable in normal conditions and unpredictable
   exactly when predictability would be exploited.
 \end{itemize}
+
+\subsection{Consequence of the Time Window: Price Improvement and the
+Boundary Repricing Race}
+\label{sec:priceimprovement}
+
+Choosing a time window, and in particular a window whose end everyone can
+predict, has a consequence that the option list above only names. This
+subsection derives it. The argument is, to the author's knowledge, not
+stated in this form in the existing literature. Its components are
+individually familiar: the residual value of low latency near a batch
+boundary is established by \citet{schlegel2023transaction}, the tendency of
+sophisticated traders to submit late in transparent call auctions is
+documented by \citet{daures2026click}, and the strategic consequences of
+the clearing-price selection rule in uniform-price auctions are studied by
+\citet{burkett2020uniform}. What has not been made is the connection
+between them. The frequent batch auction literature treats the price
+improvement that uniform clearing confers on inframarginal orders as a
+benefit of the design; this subsection argues that the treatment rests on a
+category error. Price improvement measured on one side of the book is not
+a welfare quantity but a transfer, and the rule that determines its size
+is manipulable by the timing of order submission. A batch with a
+predictable close therefore does not remove the incentive to compete on
+speed: it converts a race for priority into a race for proximity to the
+batch boundary, independently of the informational motives usually
+invoked to explain late submission.
+
+The argument considers a single batch and uses the objects of
+\Cref{sec:fbanotation}: the schedules $D(p)$ and $S(p)$, the
+volume-maximising set $\mathcal{P}^{*} = [\underline{p}, \overline{p}]$,
+the clearing price $\clr = \sigma(\mathcal{P}^{*})$, the executed
+quantities $x_k$ with $\sum_{k \in \mathbb{B}} x_k = \sum_{k \in \mathbb{A}}
+x_k = V^{*}$, and the buyer and seller surplus $W^{\mathbb{B}}(p)$ and
+$W^{\mathbb{A}}(p)$ of \eqref{eq:surplus}.
+
+\subsubsection{Price Improvement Is a Transfer}
+
+\textbf{Total surplus does not depend on which clearing price is chosen.}
+For any $p \in \mathcal{P}^{*}$ with allocation $x$ held fixed,
+\begin{equation}
+\label{lem:invariance}
+  W = W^{\mathbb{B}}(p) + W^{\mathbb{A}}(p)
+    = \sum_{k \in \mathbb{B}} \pi_k x_k
+      - \sum_{k \in \mathbb{A}} \pi_k x_k ,
+\end{equation}
+which does not depend on $p$.
+
+Expanding the two sums, the terms in $p$ enter as
+$p\left(\sum_{\mathbb{A}} x_k - \sum_{\mathbb{B}} x_k\right)$, which
+vanishes by flow conservation. Two consequences follow immediately.
+First, $\partial W^{\mathbb{B}} / \partial p = -V^{*}$ and
+$\partial W^{\mathbb{A}} / \partial p = +V^{*}$: every unit of
+price improvement conferred on one side is subtracted from the other.
+Second, a measured increase in buy-side price improvement is not evidence
+that the mechanism created value: total gains from trade are fixed by the
+allocation, and the clearing price only divides them. The metric must
+therefore be read as a distributive statistic, reported for both sides
+jointly. If $\mathcal{P}^{*}$ were a singleton, the division would be
+pinned down by the submitted limits and there would be nothing to
+contest; because it is frequently an interval, especially in thin
+batches, the surplus split depends on a rule, and any participant able to
+influence the position of $\mathcal{P}^{*}$ or of $\sigma$ within it has an
+incentive to do so.
+
+\subsubsection{The Last-Mover Advantage}
+
+Suppose the engine operates under the fully open disclosure regime of
+Block~2 (\Cref{tab:disclosure}), so that a participant submitting at time
+$t$ observes the schedules formed by all orders with $t_k < t$.
+
+\textbf{Late submission weakly dominates.} Suppose a participant can see
+the orders already submitted by others, and hence the residual supply or
+demand it faces, and that the selection rule $\sigma$ responds
+monotonically to submitted limit prices, so that a participant can shift
+the clearing price within $\mathcal{P}^{*}$ by adjusting its own limit.
+The participant's best response is then to set its limit so that the
+clearing price moves to the edge of $\mathcal{P}^{*}$ most favourable to it,
+\begin{equation}
+\label{prop:lastmover}
+  \clr \to \underline{p} \text{ for a buyer,} \qquad
+  \clr \to \overline{p} \text{ for a seller,}
+\end{equation}
+while still keeping its order executed. Because this manoeuvre requires
+knowing the other orders, a participant's surplus can only grow with the
+information it has when it submits. Submitting later is therefore never
+worse than submitting earlier, and it is strictly better whenever the
+extra information changes the participant's optimal limit.
+
+The argument is the standard one for sequential-move bargaining over a
+fixed surplus, applied to the division established in
+\eqref{lem:invariance}. A seller who observes a resting buy limit of
+$\pi_{\mathbb{B}}$ knows that any ask weakly below it will execute, and
+therefore submits just below $\pi_{\mathbb{B}}$ rather than at its own
+valuation, capturing the interval. Truthfulness
+(\Cref{sec:auctiontheory}) is not violated in its own terms, since it is
+stated for a participant that cannot move the clearing price; what
+disclosure does is make the boundaries of $\mathcal{P}^{*}$ computable, and
+hence make deviation actionable for any participant whose order is large
+enough to reach them.
+
+This identifies the source of the incentive to wait. When several prices
+clear the same maximum volume, the choice among them is not neutral: it
+transfers surplus between buyers and sellers. Under a monotone $\sigma$,
+the participant who moves last can capture this transfer by pushing the
+price to the boundary of $\mathcal{P}^{*}$ in its own favour. The prize
+goes to whoever submits closest to the deadline with the fullest view of
+the book: a reward for speed and timing rather than for providing
+liquidity or information.
+
+Two conditions expose a participant to being the donating side of the
+transfer: submitting without observing the accumulated batch, as an
+uninformed participant does, and submitting early without repricing. Since
+the transfer is zero-sum by \eqref{lem:invariance}, every participant
+exposed in this way is matched by one with an incentive to exploit it. An
+order resting in an open batch is thus a free option written to every
+subsequent submitter in the window. This is the same option
+\citet{copeland1983information} describe for a resting limit order in a
+continuous book: there, it is written to traders reacting to news; here,
+the same option is written to traders reacting to the accumulating batch
+itself.
+
+\subsubsection{Cancellation, Repricing and the Deadline}
+
+The natural defence against the last-mover advantage \eqref{prop:lastmover}
+is to withdraw or reprice an order that has become adversely positioned.
+This is where the speed race re-enters.
+
+\textbf{Latency monotonicity.} Let participant $i$ face message latency
+$\ell_i > 0$ and let the batch close deterministically at $\tau$, so that
+the window is $[0, \tau)$ as in \Cref{sec:fbanotation}. A message
+dispatched at time $t$ is included in the batch if and only if
+\begin{equation}
+\label{prop:latency}
+  t + \ell_i < \tau,
+\end{equation}
+so the latest observable state on which $i$ can act is that prevailing
+just before $\tau - \ell_i$. The information set available to $i$ at the
+moment of its final decision is therefore ordered by $\ell_i$, and
+expected surplus is non-increasing in $\ell_i$.
+
+The structure of the advantage differs from the continuous case but its
+source does not. In a continuous book, lower latency wins a contest for
+priority; in a batch, priority within the window has no effect on the
+price by construction (and affects the allocation only if the rationing
+rule rewards it, \Cref{sec:rationing}), and lower latency instead buys a
+later decision point. The fast trader observes more of the batch before
+committing, can reprice on more recent information, and can place its
+final message closer to the boundary while retaining the same probability
+of inclusion. Speed is not neutralised; its payoff is relocated from
+ordering to deadline precision. That some speed advantage survives
+batching is consistent with the experimental evidence of
+\citet{aldrich2020experiments}, who find that investment in speed falls but
+does not disappear under batch clearing, and with the model of
+\citet{zoican2021speed}.
+
+Three remarks bound the mechanism. Prohibiting cancellation within the
+batch does not close the channel: a participant with two-sided access can
+still neutralise an adverse position with an offsetting order, a
+synthetic cancellation that needs no cancel message at all (true
+enforcement would require account-level self-match prevention). Banning
+cancellation outright would, if anything, strengthen the last-mover
+advantage \eqref{prop:lastmover}, by raising the cost of correcting an
+early submission instead of removing it. And the channel is
+disclosure-conditional: the informational component of the last-mover
+advantage requires an observable accumulating batch and is absent under a
+sealed-bid regime.
+
+\subsubsection{Equilibrium Implication and Design Responses}
+
+If late submission weakly dominates and lateness is bounded only by
+$\ell_i$, submissions concentrate near the boundary and are ordered by
+latency. In the limit the accumulation phase carries no orders and
+therefore no information, and the auction degenerates into a sealed tender
+conducted in the final microseconds of the window: the batch retains its
+length nominally while losing the property the length was chosen to
+deliver.
+
+Three design responses follow, one in this block and two in later ones.
+Randomising the close time (the random closing option above) makes waiting
+costly, since an order dispatched at $t$ is included only if the drawn
+close exceeds $t + \ell_i$; the participant then solves an interior
+optimum trading the value of information against the risk of exclusion,
+which justifies randomisation independently of the sniping argument
+usually advanced for it. Restricting disclosure to an aggregate imbalance
+or to nothing (Block~2, \Cref{sec:disclosure}) removes the informational
+component of the last-mover advantage while leaving bid shading, so the
+choice is between two costs rather than between one cost and none.
+Finally, and least discussed in the literature, $\sigma$ can be made
+insensitive to the marginal submitted limits (Block~4,
+\Cref{sec:clearing}), for instance by choosing the point of
+$\mathcal{P}^{*}$ closest to an external reference price. This removes the
+lever without reducing gains from trade, since by \eqref{lem:invariance}
+the choice of price within $\mathcal{P}^{*}$ does not change total surplus
+for a given allocation.
+
+The prediction that submissions bunch near the close is what boundary
+concentration (\Cref{sec:metrics23}) would detect. In the replay it can
+only provide the baseline, since the replayed orders were never timed
+against a batch boundary (\Cref{sec:testable}).
 
 \section{Block 2: Information Disclosure}
 \label{sec:disclosure}
@@ -297,7 +360,7 @@ consequences.}
 Fully open book & All accumulated orders, continuously updated &
 Strong within-batch price discovery; early submitters expose intent and
 are exploited by later ones; incentive to submit as late as possible,
-which compounds boundary sniping\\
+which compounds the boundary repricing race (\Cref{sec:priceimprovement})\\
 Indicative clearing price & The price at which the batch would clear if
 it closed now & Coordination on a common price estimate without exposing
 individual orders; some intent leakage through price movement; the
@@ -317,8 +380,8 @@ Disclosure and interval design are linked. An open book gives participants a
 reason to submit late, which makes a random closing time more valuable. A
 sealed-bid design removes most of that reason and makes a fixed closing time
 easier to defend. Secrecy also does not remove information leakage; it only
-moves it. Under sealed bidding, the price and volume of batch $n$ become
-public before batch $n+1$ closes, and as $\tau$ gets shorter this sequence of
+moves it. Under sealed bidding, the price and volume of one batch become
+public before the next one closes, and as $\tau$ gets shorter this sequence of
 published prices approaches a continuous price signal.
 
 \section{Block 3: Order Flow Segregation}
@@ -401,16 +464,17 @@ definition the engine adopts is the behaviour it ends up paying for.
 Prices can only take values on a fixed grid of allowed steps, so the set
 $\mathcal{P}^{*}$ of prices that maximise traded volume is a short run of
 neighbouring steps. The engine finds it in one pass over the submitted
-limit prices and then picks one of them by the four-step tie-break
-cascade defined in \Cref{sec:fbanotation}: \eqref{eq:clearing}.
+limit prices and then picks one of them, $\clr = \sigma(\mathcal{P}^{*})$
+\eqref{eq:clearing}, by the four-step tie-break cascade defined in
+\Cref{sec:fbanotation}.
 
 The order of those steps matters. Minimising the residual imbalance
 (step 2) depends on the limit prices participants submit, so it is
-exactly the lever that a late participant exploits (\Cref{prop:lastmover}).
-The remaining two steps --- distance to the previous clearing price, then
-the lowest price --- do not depend on submitted orders. Putting one of
-those first would remove the lever without changing who trades or how
-much (\Cref{lem:invariance}).
+exactly the lever that a late participant exploits \eqref{prop:lastmover}.
+The remaining two steps --- distance to the previous clearing price
+$p_{\mathrm{prev}}$, then the lowest price --- do not depend on the orders
+of the current batch. Putting one of those first would remove the lever
+without changing total surplus \eqref{lem:invariance}.
 
 \subsection{Why the Price Is Uniform}
 
@@ -446,10 +510,15 @@ variable they control encourages them to inflate that variable
 
 \begin{description}
   \item[Price-time priority within the batch.] Orders at $\clr$ are filled in
-  order of submission, which keeps continuity with continuous markets but
-  brings back a speed race at the scale of the interval: if being early
-  inside the batch improves the fill, participants pay to be early, which is
-  the incentive the mechanism was built to remove.
+  order of submission (market orders first, then by limit price, then by
+  time), which keeps continuity with continuous markets but brings back a
+  speed race at the scale of the interval: if being early inside the batch
+  improves the fill, participants pay to be early, which is the incentive
+  the mechanism was built to remove. Under a fixed close it also pulls
+  against the boundary repricing race (\Cref{sec:priceimprovement}), which
+  rewards submitting late: a participant must trade queue position against
+  information. This is the rule the simulated engine uses
+  (\Cref{tab:fbachoices}).
   \item[Pro rata.] Each order at $\clr$ receives a share proportional to its
   size, the rule the DFBA uses after price priority. It ignores timing, but
   because a bigger order gets a bigger fill, participants submit more than they
@@ -515,3 +584,173 @@ over the price grid can solve into one that must test many combinations of
 orders. That is why venues supporting them limit order sizes, and why
 decentralised batch exchanges with rich order types use competitions between
 solvers instead of one fixed algorithm \citep{harrison2025hybrid}.
+
+\section{Summary: Design Options and Their Consequences}
+\label{sec:consequences}
+
+\Cref{tab:consequences} collects every option discussed in this chapter,
+block by block, with the behaviour it is predicted to induce and the cost it
+carries. The last column marks the option the simulated engine implements
+(\Cref{tab:fbachoices}); ``n/a'' marks a block whose choice cannot affect a
+replay.
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.0cm}
+  >{\raggedright\arraybackslash}p{6.6cm}
+  >{\raggedright\arraybackslash}p{4.7cm}
+  >{\centering\arraybackslash}p{1.1cm}@{}}
+\caption[Design options and their consequences]{Every design option of
+\Cref{ch:design}, the behaviour it is predicted to induce, and its main
+cost. Run: the option implemented in the simulated engine.}
+\label{tab:consequences}\\
+\toprule
+\textbf{Option} & \textbf{Predicted consequence} & \textbf{Main cost or risk} & \textbf{Run}\\
+\midrule
+\endfirsthead
+\multicolumn{4}{@{}l}{\emph{\Cref{tab:consequences}, continued}}\\
+\toprule
+\textbf{Option} & \textbf{Predicted consequence} & \textbf{Main cost or risk} & \textbf{Run}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\multicolumn{4}{@{}l}{\emph{Block 1: batch interval (\Cref{sec:interval})}}\\
+Short $\tau$ &
+prices stay current; a speed difference $\delta$ still decides the batch with probability $\delta/\tau$ &
+thin, one-sided batches that often do not cross; truthfulness weakens as orders become pivotal &
+\checkmark\ (1\,s)\\
+Long $\tau$ &
+speed differences become irrelevant; fuller batches &
+delay of $\tau/2$ on average; stale orders; market makers cannot withdraw in time &
+---\\
+Fixed close &
+predictable boundary; late submission weakly dominates, producing the boundary repricing race (\Cref{sec:priceimprovement}) &
+speed regains value as deadline precision; accumulation phase can empty out &
+\checkmark\\
+Random close &
+waiting becomes a gamble; interior optimum between information and risk of exclusion &
+imprecise timing for everyone; random draw must be verifiable &
+---\\
+Volume- or event-triggered close &
+interval adapts to activity &
+close can be triggered strategically by submitting volume &
+---\\
+Random extension &
+predictable in normal conditions, unpredictable when late activity appears &
+close becomes unpredictable exactly when activity is high &
+---\\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Block 2: information disclosure (\Cref{sec:disclosure})}}\\
+Fully open book &
+strong within-batch price discovery; early orders are exploited by later ones &
+strongest incentive to submit late; amplifies the boundary race &
+n/a\\
+Indicative price &
+coordination on a common price estimate &
+some intent leakage through price moves &
+n/a\\
+Aggregate imbalance &
+attracts offsetting liquidity without revealing limits &
+weaker price anchoring &
+n/a\\
+Sealed bid &
+no exploitation of submitted orders; no informational reason to wait &
+bid shading under price uncertainty, which can reduce cleared volume &
+n/a\\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Block 3: order flow segregation (\Cref{sec:segregation})}}\\
+Unified pool &
+all liquidity meets in one auction; simplest to regulate &
+uninformed flow pays for losses to informed flow &
+\checkmark\\
+By participant class &
+tighter prices for flow believed uninformed &
+labels can be gamed; different prices for the same asset at the same time &
+---\\
+By intent (DFBA) &
+makers never trade with each other; no queue to pick off makers &
+liquidity split across two thinner auctions; labels must be enforced &
+---\\
+Maker--taker by declared intent &
+simple to operate &
+self-declared unless enforced &
+---\\
+Maker--taker by price aggressiveness &
+observable and hard to game &
+penalises demand for certainty of execution &
+---\\
+Maker--taker by marginality &
+ties the fee to price setting &
+fee unknown before the batch clears &
+---\\
+Maker--taker by persistence &
+rewards liquidity that stays available across batches &
+needs order age tracked; every new order starts as a taker &
+---\\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Block 4: clearing and rationing (\Cref{sec:clearing})}}\\
+Tie-break led by minimum imbalance &
+price responds to marginal submitted limits &
+the lever for the last-mover advantage \eqref{prop:lastmover} &
+\checkmark\\
+Tie-break led by a reference price &
+price insensitive to marginal limits; removes the lever &
+needs a reference (previous clear or external price) &
+---\\
+Price-time priority &
+continuity with continuous markets &
+rewards being early in the batch: a speed race at the interval scale, pulling against the boundary race &
+\checkmark\\
+Pro rata &
+ignores timing &
+order stuffing; displayed sizes less informative &
+---\\
+Size priority or maximal fill &
+favours block orders &
+threshold incentive to inflate size &
+---\\
+Random allocation &
+removes timing and size incentives; size becomes an honest statement &
+unmanageable execution uncertainty; verifiable randomness needed &
+---\\
+Hybrid ($\kappa$ pro rata, $1-\kappa$ lottery) &
+balances the two distortions &
+inherits a share of both &
+---\\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Block 5: settlement and residual (\Cref{sec:settlement})}}\\
+Gross settlement &
+clear record of every fill &
+one transfer per matched pair &
+\checkmark\\
+Net settlement &
+fewer transfers; large saving where each transfer has a fee &
+hides which order led to which transfer; harder per-fill fees &
+---\\
+Roll over residual &
+natural for resting limit orders; residual keeps its limit price &
+unmatched orders accumulate across batches &
+\checkmark\\
+Cancel residual (IOC) &
+no stale residual &
+participants must resubmit every batch &
+---\\
+Fill-or-kill &
+all-or-nothing execution &
+turns clearing into a combinatorial problem; needs size limits or solvers &
+---\\
+\end{longtable}
+\endgroup
+
+Three cross-block interactions stand out. A fixed close is costly mainly
+under an open book: disclosure supplies the information that makes waiting
+pay, and an imbalance-led tie-break supplies the lever to use it, so the
+boundary repricing race needs Blocks~1, 2 and~4 to line up and can be
+broken at any one of them. Price-time rationing and the boundary race pull
+in opposite directions, early for queue position and late for
+information, so neither rule removes the speed incentive on its own. And a
+short $\tau$ makes every block's problems sharper at once, because thin
+batches make individual orders pivotal for the price, the rationing and the
+residual.

@@ -71,6 +71,11 @@
 
 \input{preamble}
 
+% Generated result and verification numbers, loaded once so that every
+% chapter can use them.
+\input{data/generated_numbers}
+\input{data/generated_verification}
+
 \begin{document}
 
 %------------------------- FRONT MATTER --------------------------------
@@ -83,6 +88,7 @@
 \setcounter{page}{1}
 
 \input{chapters/ch1_introduction}
+\input{chapters/ch_background}
 \input{chapters/ch2_foundations}
 \input{chapters/ch3_design}
 \input{chapters/ch4_simulation}
@@ -101,7 +107,6 @@
 \input{chapters/appendix_b_config}
 \input{chapters/appendix_c_reproducibility}
 \input{chapters/appendix_d_testing}
-\input{chapters/appendix_e_formulas}
 \input{chapters/appendix_f_comparability}
 
 \end{document}

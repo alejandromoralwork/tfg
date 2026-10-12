@@ -1,39 +1,209 @@
-\chapter{Engine Configuration Parameters}
+\chapter{Engine Implementation and Configuration}
 \label{app:config}
+
+This appendix explains how the two matching engines are built: how an
+order is represented, how the replay feeds the engines, which data
+structures each engine keeps and what it does with every incoming message,
+and which settings were fixed for the run. It describes the logic of the
+implementation rather than its source code; the clearing step is also given
+as pseudocode in \Cref{app:algorithm}.
+
+\section{Orders and Trades}
+\label{sec:implorders}
+
+Both engines work on the same two record types. An \emph{order} carries its
+order number, the participant that submitted it, its side, its type, its
+limit price, its size, its submission time in nanoseconds and the status of
+the record it came from. To these the engines add one field of their own,
+the \emph{remaining quantity}, which starts at the order's size and is the
+only field matching ever changes. A \emph{trade} records the price, the
+quantity, the order numbers and participants of the buyer and the seller,
+the time, and which engine produced it.
+
+Three conversions are applied when a record of the dataset is read.
+
+\begin{itemize}
+  \item \textbf{Prices are integers.} A price is stored as a whole number of
+  millionths of a dollar ($10^{-6}$\,USD). All comparisons between prices,
+  such as whether a limit price equals the clearing price, are therefore
+  exact, with no floating-point rounding.
+  \item \textbf{Quantities are whole SOL.} A size is rounded to the nearest
+  whole SOL, with halves rounded up. A record whose size rounds to zero, an
+  order smaller than 0.5\,SOL, is skipped; this affects \SampleSkippedPct\%
+  of all records (\Cref{tab:sample}) and both engines identically.
+  \item \textbf{Order types are reduced to two kinds.} Limit, stop-limit and
+  take-profit-limit orders become \emph{limit orders} at their limit price.
+  Market, stop-market, take-profit-market and vault-close orders become
+  \emph{market orders}, which have no limit price.
+\end{itemize}
+
+The status of a record decides what the engines do with it
+(\Cref{sec:cancellations}): an \texttt{open} record of an ordinary order or
+a \texttt{triggered} record of a conditional order becomes a new order, a
+record with one of the eight cancel statuses removes the order with the same
+number, and every other record is ignored.
+
+\section{The Replay Loop}
+\label{sec:implreplay}
+
+The replay reads the hourly files in time order and handles one record at a
+time. Each record goes through the same four steps.
+
+\begin{enumerate}
+  \item \textbf{Start the clock.} The first record of the run sets the
+  origin $t_0$ of the measurement grid \eqref{eq:bucket} and opens the first
+  batch, which is due to close at $t_0 + \tau$.
+  \item \textbf{Close due batches.} While the record's timestamp is at or
+  after the next closing time, the current FBA batch is cleared and the
+  closing time moves forward by $\tau$. The FBA therefore has no clock of
+  its own: a batch closes when the first record at or after its closing
+  time arrives, and after a silence in the data several empty batches are
+  closed one after another. Because the check comes before the record is
+  handed over, a record stamped exactly at a closing time belongs to the
+  next batch, which is the half-open window $[0, \tau)$ of
+  \Cref{sec:fbanotation}.
+  \item \textbf{Hand the record to both engines.} A new order or a
+  cancellation is given first to the FBA, which only stores it, and then to
+  the CDA, which matches it at once.
+  \item \textbf{Record the state.} The CDA's best bid and ask, their sizes,
+  its total depth and any trades are passed to the metrics code after every
+  record. The FBA's outcome is passed on at every clear.
+\end{enumerate}
+
+Computing time is measured around each CDA submission and around each FBA
+clear. These are the only two wall-clock measurements in the run, and they
+produce the throughput and clearing-latency controls of
+\Cref{sec:metricscontrol}.
+
+\section{The Continuous Engine}
+\label{sec:implcda}
+
+\paragraph{Data structures.} Each side of the book is a sorted map from a
+price to a queue of the orders resting at that price. The best ask is the
+lowest key of the ask map and the best bid the highest key of the bid map,
+so both are found without scanning the book. Within a queue, orders are kept
+in order of submission time, then order number, which is time priority. An
+index from order number to side and price lets a cancellation go straight
+to the right queue. Running totals of resting quantity and of the number of
+orders on each side are updated with every change, so depth is available at
+any moment without adding up the book.
+
+\paragraph{A new order.} For an incoming buy order (a sell is symmetric):
+\begin{enumerate}
+  \item Look at the first order in the queue of the lowest ask price. If the
+  incoming order is a limit order whose price is below that ask, stop.
+  \item Otherwise trade $\min(\text{remaining of both})$ at the
+  \emph{resting} order's price, stamped with the incoming order's time, and
+  reduce both remaining quantities by it.
+  \item If the resting order is now fully filled, remove it from its queue
+  and from the index, and remove the price level if its queue is empty.
+  Repeat from step~1 while the incoming order has quantity left.
+  \item If a limit order still has quantity left, it joins the back of the
+  queue at its own price. If its timestamp is earlier than that of the last
+  order already there, which happens when the data are slightly out of
+  order, it is inserted at its time-ordered position instead. Whatever
+  remains of a market order is discarded, because a market order never
+  rests.
+\end{enumerate}
+
+\paragraph{A cancellation.} The index gives the side and price of the order;
+the order is removed from that queue, together with the level if it becomes
+empty, and the running totals are reduced by its remaining quantity. A
+cancellation for an order that is not resting, because it was already
+filled or never entered, changes nothing.
+
+The book keeps one structural rule at all times: a price level exists in
+the map only while at least one order rests at it. A violation would stop
+the run (\Cref{sec:validation}).
+
+\section{The Batch Engine}
+\label{sec:implfba}
+
+\paragraph{Data structures.} The FBA keeps a single list of pending orders,
+which holds the new orders of the current batch together with everything
+rolled over from earlier batches. It also remembers the last price at which
+a batch actually traded, $p_{\mathrm{prev}}$, which the tie-break needs.
+
+\paragraph{A new order or a cancellation.} A new order is appended to the
+list and nothing else happens until the batch closes. A cancellation
+removes the order with that number from the list, including any part of it
+that was rolled over; as in the CDA, an unknown order number changes
+nothing.
+
+\paragraph{Clearing a batch.} At each close the engine runs the following
+steps (\Cref{lst:clearing}).
+\begin{enumerate}
+  \item \textbf{Candidate prices.} The candidates are the distinct limit
+  prices in the list. $D(p)$ and $S(p)$ only change value at these prices,
+  so the volume-maximising price is always one of them. If there is no
+  candidate, because the list is empty or holds only market orders, nothing
+  trades and every order stays in the list.
+  \item \textbf{Demand and supply.} The quantities of market buy and sell
+  orders are added up once, since they count at every price. Bid limits and
+  ask limits are each sorted by price and given a running cumulative sum,
+  so $D(p)$ and $S(p)$ at any candidate are read off with one binary search
+  instead of a pass over the whole list.
+  \item \textbf{Price selection.} The candidates are compared one after
+  another under the cascade of \Cref{sec:fbanotation}: larger $V(p)$ first,
+  then smaller $|D(p) - S(p)|$, then smaller distance to $p_{\mathrm{prev}}$,
+  then the lower price. The winner is $\clr$.
+  \item \textbf{Eligible orders.} On each side the orders that accept
+  $\clr$ are selected: every market order and every limit order priced at or
+  better than $\clr$. They are sorted by priority: market orders first, then
+  the better limit price, then the earlier submission time, then the order
+  number.
+  \item \textbf{Matching.} Two pointers walk down the sorted buy list and
+  the sorted sell list together. At each step the two current orders trade
+  $\min(\text{remaining of both})$ at $\clr$, and the pointer of whichever
+  order is used up moves on. The walk stops when one side runs out, which
+  happens after exactly $V^{*} = \min\{D(\clr), S(\clr)\}$ has traded,
+  because every eligible buyer accepts every eligible seller at $\clr$. All
+  trades of the batch are stamped with the latest submission time among the
+  batch's orders.
+  \item \textbf{Residual.} Every order with quantity left, whether eligible
+  but rationed out or not eligible at all, stays in the list for the next
+  batch with its original limit price and submission time, so it keeps its
+  time priority. $p_{\mathrm{prev}}$ is updated only if the batch traded.
+\end{enumerate}
+
+The cost of a clear grows with the size of the whole list, not only with the
+orders that arrived in the last second, because rolled-over orders are
+evaluated again in every batch. This is why one FBA clear takes far longer
+than one CDA submission (\Cref{sec:res23}).
+
+\section{Fixed Configuration of the Run}
+\label{sec:implconfig}
+
+\Cref{tab:config} lists the settings of the run. The batch interval is the
+only one that can be changed when the simulator is started; every other
+entry is built into the engines, so there is no switch that would select a
+different rule.
 
 \begin{table}[htbp]
 \centering
-\caption[Engine configuration]{The engines' fixed configuration and
-behaviour, as actually implemented. This thesis used one configuration
-throughout; apart from \texttt{tau\_ns}, none of the rows below is
-adjustable at run time.}
+\caption[Engine configuration]{Configuration of the run reported in this
+thesis.}
 \label{tab:config}
 \small
-\begin{tabularx}{\textwidth}{@{}p{3.2cm} L p{3.2cm}@{}}
+\begin{tabularx}{\textwidth}{@{}p{4.2cm} L@{}}
 \toprule
-\textbf{Parameter} & \textbf{Meaning} & \textbf{Value}\\
+\textbf{Setting} & \textbf{Value}\\
 \midrule
-\texttt{engine}            & CDA or FBA & both, paired\\
-\texttt{tau\_ns}           & Batch interval, in nanoseconds; the same
-value also sets the metrics CSV's bucket width (\Cref{sec:environment})
-& 1{,}000{,}000{,}000 (1\,s)\\
-\texttt{boundary}          & Batch-close timing & fixed only --- no
-randomised-boundary code path exists\\
-\texttt{rationing}         & Allocation of the marginal quantity at
-$\clr$ & fixed: price-time-within-the-batch (rank by aggressiveness,
-then submission time, then order id) --- not pro rata, not a runtime
-choice\\
-\texttt{tie\_break}        & Cascade for selecting $\clr$ from the
-volume-maximising set & fixed: (1)~maximise matched volume, (2)~minimise
-residual imbalance, (3)~minimise distance from the auction's own
-previous clearing price, (4)~lowest price\\
-\texttt{residual\_policy}  & Disposition of unmatched quantity at $\clr$
-& fixed: always rolled into the next batch --- no cancel-on-no-clear
-path exists\\
+Engines & CDA and FBA, fed in one pass with the same records\\
+Batch interval $\tau$ & 1\,s; also the width of a measurement bucket\\
+Batch close & fixed, triggered by event time; no randomisation\\
+Candidate prices & the submitted limit prices of the batch\\
+Tie-break cascade & volume, then imbalance, then distance to $p_{\mathrm{prev}}$, then lowest price\\
+Rationing & price-time priority within the batch\\
+Residual & always rolled over; never cancelled by the engine\\
+Price unit & $10^{-6}$\,USD (exact integer arithmetic)\\
+Quantity unit & 1\,SOL; sizes rounded half-up, below 0.5\,SOL skipped\\
+Not implemented & time-in-force, post-only, self-trade prevention, fees and rebates, netting\\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-Self-trade prevention is not implemented in either engine. This is a
-genuine limitation, not a controlled-for policy shared by both engines
-(\Cref{sec:experiments}).
+The missing self-trade prevention is a genuine limitation, not a policy
+applied to both engines on purpose (\Cref{sec:experiments}); the effect of
+the missing time-in-force and post-only rules is measured in
+\Cref{sec:testfidelity}.

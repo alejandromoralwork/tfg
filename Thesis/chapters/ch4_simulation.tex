@@ -1,7 +1,8 @@
 \chapter{Simulation Design and Data}
 \label{ch:simulation}
 
-The idea behind Part~II is simple: one historical stream of orders is replayed
+The idea behind the empirical part of the thesis is simple: one historical
+stream of orders is replayed
 twice, once through a continuous engine and once through a batch engine.
 Because both engines receive exactly the same events, everything that could
 otherwise distort the comparison is held fixed, and the matching engine is the
@@ -43,9 +44,9 @@ price, as in \eqref{eq:demandsupply}, using only submitted limit prices. A
 market order counts as demand or supply at every price but never proposes a
 price itself, so a batch made only of market orders does not trade. The engine
 then picks the price with the largest traded volume. If several prices tie, it
-applies four rules in turn: largest matched volume, then smallest leftover
-imbalance, then the price closest to the previous batch's clearing price, and
-finally the lowest price, so the outcome is always the same. Orders priced
+applies three further rules in turn: smallest leftover imbalance, then the
+price closest to the previous batch's clearing price, and finally the lowest
+price, so the outcome is always the same. Orders priced
 strictly better than the clearing price are filled completely, except in the
 rare case where a range of prices supports the same volume (\Cref{sec:testfba}).
 Orders priced exactly at it are served in order of aggressiveness (a market order before any
@@ -61,9 +62,9 @@ interval.
 \subsection{The Design Choices Used for the FBA}
 \label{sec:fbachoices}
 
-The design chapter describes a space of possible batch auctions in five blocks.
-The engine that was run makes one fixed choice in each block, listed in
-\Cref{tab:fbachoices}. None of them can be changed at run time
+\Cref{ch:design} describes a space of possible batch auctions in five blocks,
+summarised in \Cref{tab:consequences}. The engine that was run makes one fixed
+choice in each block, listed in \Cref{tab:fbachoices}. None of them can be changed at run time
 (\Cref{app:config}), and every result in this thesis is for exactly this
 combination.
 
@@ -144,11 +145,20 @@ trade and post-trade inventory, all at nanosecond resolution. Because it is
 recorded at the node and not sampled from snapshots, the book does not have
 to be reconstructed, which removes an important source of error.
 
+Two conversions are applied as the records are read
+(\Cref{sec:implorders}). Prices are kept exactly, as whole numbers of
+$10^{-6}$\,USD. Sizes are rounded to whole SOL, and a record whose size
+rounds to zero, an order smaller than 0.5\,SOL, is skipped; this removes
+\SampleSkippedPct\% of the records (\Cref{tab:sample}). Both engines receive
+the same rounded stream, so the conversion cannot favour either of them, but
+the smallest orders of the venue are not part of the comparison.
+
 Since the engines are the author's own, some quantities that are invisible in
 real markets can be observed directly: every submitted price, including those
 of orders that never trade, the exact rationing outcome, and the volume left
 unmatched after each batch. Some things remain unknown. The dataset has no
-oracle or mark price, so pricing error cannot be computed for either engine.
+oracle or mark price, so neither engine's price can be measured against an
+external reference within the replay.
 Orders that were never submitted visibly cannot be recovered. And timestamps
 show when the node saw a message, not when the participant chose to send it.
 
@@ -168,7 +178,9 @@ else identical, stating where it could not:
   order that would fill against the same participant's own resting order is
   executed like any other. This is a real limitation, not a shared policy.
   \item \textbf{Determinism.} The same input always produces the same output,
-  since nothing in either engine depends on randomness or on the clock. This
+  since nothing in either engine depends on randomness or on the clock; the
+  only exceptions are the two columns that measure computing time
+  (\Cref{sec:testdeterminism}). This
   holds for an uninterrupted replay; the month result was restarted several
   times in its first days (\Cref{sec:testresets}).
 \end{enumerate}
@@ -203,8 +215,9 @@ different question, and this one is built to answer RQ2
 \label{sec:metrics}
 
 The results report three groups of metrics, one for each part of RQ2: liquidity
-and cost, price discovery, and execution and timing. The appendix defines every
-metric with its exact formula.
+and cost, price discovery, and execution and timing, plus two engine controls.
+\Cref{sec:metricdefs} defines every metric formally, and \Cref{sec:quality}
+explains why each is used.
 
 \subsection{Interpretive Status of the RQ2.3 Metrics}
 \label{sec:testable}

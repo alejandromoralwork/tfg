@@ -4,8 +4,8 @@ Eight figures, picked to each tell one specific story rather than
 dumping all ~30 metrics:
 
   fig_latencycontrol.png -- engine-control finding: clearing/match latency
-  fig_kylelambda.png      -- headline finding: Kyle's lambda + the FBA
-                             intra-interval-dispersion uniform-pricing check
+  fig_kylelambda.png      -- CDA Kyle's lambda (the FBA's is not comparable)
+                             + the FBA intra-interval-dispersion uniform-pricing check
   fig_matchedvol.png       -- matched-timestamp volatility by calendar day
                              (RQ2.2), plus matched-return coverage per day
   fig_spreaddecomp.png     -- effective spread decomposed into realized
@@ -82,18 +82,21 @@ def fig_latencycontrol(m):
 def fig_kylelambda(m):
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.6))
 
+    # CDA only: the FBA's regressor spans the whole rolled-over book, so its
+    # slope is on a different scale and overlaying the two would imply a
+    # comparison the data do not support.
     ax = axes[0]
-    lo, hi = m[["kyle_lambda_cda", "kyle_lambda_fba"]].stack().quantile([0.01, 0.99])
-    for col, color, label in [("kyle_lambda_cda", CDA_COLOR, "CDA"),
-                                ("kyle_lambda_fba", FBA_COLOR, "FBA")]:
-        vals = m[col].dropna()
-        vals = vals[(vals >= lo) & (vals <= hi)]
-        ax.hist(vals, bins=100, alpha=0.6, color=color, label=label, density=True)
+    vals = m["kyle_lambda_cda"].dropna()
+    lo, hi = vals.quantile([0.01, 0.99])
+    vals = vals[(vals >= lo) & (vals <= hi)]
+    ax.hist(vals, bins=100, alpha=0.8, color=CDA_COLOR, density=True)
     ax.axvline(0, color="black", linewidth=0.8, linestyle="--")
-    ax.set_xlabel("Kyle's lambda (bps per SOL)")
+    ax.axvline(vals.mean(), color=CDA_COLOR, linewidth=1.2, linestyle=":",
+               label=f"mean {m['kyle_lambda_cda'].mean():.2f}")
+    ax.set_xlabel("Kyle's lambda (bps per SOL of net executed flow)")
     ax.set_ylabel("density")
-    ax.set_title("Price impact of order flow, per interval")
-    ax.legend(frameon=False)
+    ax.set_title("CDA: price impact of order flow, per interval")
+    ax.legend(frameon=False, fontsize=8)
 
     ax = axes[1]
     cda_disp = m["intra_interval_price_dispersion_cda"].dropna()
@@ -271,15 +274,13 @@ def fig_residualshare(m):
     _save(fig, "fig_residualshare")
 
 
-def fig_matchedvol(window_df, min_count, intraday_df):
-    """Matched-timestamp volatility, both granularities together: daily RMS
-    by calendar day (top), the intraday per-return distribution the daily
-    RMS is summarising over (middle), and, since the daily figure's
-    credibility depends on it, the per-day matched-return count against
-    the exclusion threshold (bottom)."""
-    fig, (ax1, ax2, ax3) = plt.subplots(
-        3, 1, figsize=(9, 7.6),
-        gridspec_kw={"height_ratios": [2, 1.6, 1]},
+def fig_matchedvol(window_df, min_count):
+    """Matched-timestamp volatility: daily RMS by calendar day (top) and,
+    since the daily figure's credibility depends on it, the per-day
+    matched-return count against the exclusion threshold (bottom)."""
+    fig, (ax1, ax3) = plt.subplots(
+        2, 1, figsize=(9, 5.4),
+        gridspec_kw={"height_ratios": [2, 1]},
     )
 
     ax1.plot(window_df.index, window_df["vol_cda_bps"], color=CDA_COLOR,
@@ -290,19 +291,6 @@ def fig_matchedvol(window_df, min_count, intraday_df):
     ax1.set_title("Matched-timestamp volatility by calendar day, both mechanisms")
     ax1.legend(frameon=False)
     ax1.tick_params(axis="x", rotation=30)
-
-    intraday_ts = pd.to_datetime(intraday_df["interval_start_ns"], unit="ns")
-    intraday_indexed = intraday_df.set_index(intraday_ts).sort_index()
-    rolling_cda = intraday_indexed["vol_cda_bps"].rolling("6H", min_periods=1).mean()
-    rolling_fba = intraday_indexed["vol_fba_bps"].rolling("6H", min_periods=1).mean()
-    ax2.plot(rolling_cda.index, rolling_cda.to_numpy(), color=CDA_COLOR,
-             linewidth=0.8, label="CDA")
-    ax2.plot(rolling_fba.index, rolling_fba.to_numpy(), color=FBA_COLOR,
-             linewidth=0.8, label="FBA")
-    ax2.set_ylabel("6h rolling mean\n$|r|$ (bps)")
-    ax2.set_title("Intraday variant: every matched return, 6-hour rolling mean over the month")
-    ax2.legend(frameon=False)
-    ax2.tick_params(axis="x", rotation=30)
 
     ax3.bar(window_df.index, window_df["n_returns"], color=DIFF_COLOR, alpha=0.7)
     ax3.axhline(min_count, color="black", linewidth=0.8, linestyle="--",
@@ -329,7 +317,7 @@ def main():
     fig_latencycontrol(m)
     fig_kylelambda(m)
     mv = matched_volatility.compute(m)
-    fig_matchedvol(mv["window_df"], mv["min_count"], mv["intraday_df"])
+    fig_matchedvol(mv["window_df"], mv["min_count"])
     fig_spreaddecomp(m, signed["signed_df"])
     fig_pricepaths(m, ts, day, busiest_day)
     diffinfo = fig_pricediff(m, ts, day, busiest_day)

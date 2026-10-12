@@ -4,8 +4,15 @@
 This chapter sets out the bodies of theory the thesis relies on --- latency
 arbitrage and discrete-time market design, adverse selection, market
 transparency, uniform-price auction theory and the measurement of market
-quality --- and closes with the price-improvement argument that motivates
-the boundary-timing problem of batch auctions.
+quality. The thesis's own argument that a predictable batch close turns
+price improvement into a boundary repricing race builds on these strands,
+but is a consequence of a design choice and is therefore developed in the
+design chapter (\Cref{sec:priceimprovement}). Each strand is used later
+in one of two ways: it shapes a design block of \Cref{ch:design}, or it
+motivates a metric of the empirical comparison and predicts its sign. Each
+section states that link explicitly, and \Cref{sec:theorylinks} collects
+them in one table. Notation and the formal definition of every metric are
+in \Cref{ch:background}.
 
 \section{Discrete-Time Market Design}
 \label{sec:discretetime}
@@ -50,7 +57,9 @@ shorter than any batch interval measured in milliseconds; a large share of
 the volume at the exact moment of a price change is race volume; and the
 aggregate transfer, small relative to total volume but large in absolute
 terms, concentrates in the effective spread paid by liquidity demanders.
-Removing the race therefore removes a component of the spread.
+Removing the race therefore removes a component of the spread. This is why
+the effective spread, and its split into realized spread and price impact
+(\Cref{sec:metrics21}), is the central cost measure of RQ2.1.
 
 \subsection{Batching as the Response}
 
@@ -58,20 +67,32 @@ Frequent batch auctions change two rules at once, and the two do
 different work. \emph{Discrete time} removes the informational value of
 within-interval arrival order: if orders are collected over $[t,
 t+\tau)$ and matched only at $t+\tau$, any two orders inside the window
-are symmetric with respect to time. \emph{Uniform pricing} removes the
+are symmetric with respect to time as far as the price is concerned
+(whether they stay symmetric in allocation depends on the rationing rule,
+\Cref{sec:rationing}). \emph{Uniform pricing} removes the
 value of queue position within the matched set: if all executions occur
 at one price $\clr$, no participant obtains a better price by being
 earlier. Either rule alone is insufficient --- discrete time with
 discriminatory pricing would still reward earlier submission, and uniform
 pricing in continuous time is not well defined. Together they imply that
-speed pays only for crossing an interval boundary, getting into batch $n$
-rather than batch $n+1$: the value of a marginal nanosecond falls from
-``wins the race'' to ``matters only in the vanishingly rare case that it
-changes which batch an order lands in''. In the model of
+speed pays only for crossing an interval boundary, getting into the
+current batch rather than the next: the value of a marginal nanosecond
+falls from ``wins the race'' to ``matters only in the vanishingly rare
+case that it changes which batch an order lands in''. This conclusion
+assumes that waiting inside the window gains nothing;
+\Cref{sec:priceimprovement} shows that with a predictable close and a
+visible batch it does, and that speed then regains value near the
+boundary. In the model of
 \citet{budish2015hft}, liquidity providers then no longer need to price
 sniping risk into their quotes and spreads narrow. The residual cost is
 delay, an average of $\tau/2$ if orders arrive uniformly, so the choice of
 $\tau$ trades speed neutralisation against delay imposed on everybody.
+
+Both halves of this trade-off are followed up later. The choice of $\tau$
+and of its closing rule is design Block~1 (\Cref{sec:interval}). The
+benefit, a lower adverse-selection cost, is measured by the spread
+decomposition (RQ2.1), and the cost, delay, by the time to execution
+(RQ2.3, \Cref{sec:metrics23}).
 
 \section{Information Asymmetry and Adverse Selection}
 \label{sec:adverse}
@@ -94,7 +115,10 @@ with the proportion of informed traders and the precision of their
 information, and narrows when the market maker can identify a subset of
 flow as uninformed. This is the theoretical foundation of order flow
 segregation: separating benign flow lets a liquidity provider quote
-tighter against it without cross-subsidising losses on the rest.
+tighter against it without cross-subsidising losses on the rest. It
+underlies design Block~3 (\Cref{sec:segregation}). The simulated engine
+clears a single pool (\Cref{tab:fbachoices}), so segregation is analysed
+in the design part but not measured.
 
 \subsection{Strategic Informed Trading and Market Depth}
 
@@ -103,7 +127,8 @@ trader's side: a single informed agent chooses how much to trade, knowing
 that trading more reveals more, while noise traders provide cover and a
 competitive market maker sets the price as the conditional expectation of
 value given total order flow. The equilibrium price function is linear,
-$p = \mu + \lambda \cdot y$, where $y$ is aggregate order flow and
+$p = \mu + \lambda f$, where $\mu$ is the prior expected value, $f$ is
+aggregate order flow and
 $\lambda$ measures price impact per unit of flow; its reciprocal, market
 depth, is the volume required to move the price by one unit. Kyle's model
 is a batch model --- the market maker observes aggregate flow and sets a
@@ -111,31 +136,22 @@ single price, the structure of a uniform-price call auction --- so the FBA
 literature can be read as asking what happens when a real market is
 organised the way Kyle already assumes. $\lambda$ also supplies the
 empirical bridge: price impact is the operational measure of adverse
-selection.
+selection. The thesis estimates $\lambda$ for each engine as the slope of
+price change on order flow (\Cref{sec:formularq22}); a lower $\lambda$
+would mean prices react less to one-sided flow. As defined there, the two
+engines' order-flow measures differ in scale, so only the CDA's estimate
+is interpreted (\Cref{sec:res22}).
 
 \subsection{Decomposing the Spread}
 \label{sec:spread-decomposition}
 
 The adverse selection premium is not directly observable; only the total
 cost of a trade is. The standard strategy is to decompose the effective
-spread into a realised spread and a price impact component
-\citep{hasbrouck1993assessing,hendershott2011algorithmic}. Let $p_k$ be
-the execution price of trade $k$, $D_k \in \{+1,-1\}$ its direction
-(buyer- or seller-initiated), $m_k$ the midpoint immediately before the
-trade, and $m_{k+\Delta}$ the midpoint a markout horizon $\Delta$
-afterwards. In proportional form,
-\begin{align}
-  S^{\mathrm{eff}}_k &= \frac{2 D_k (p_k - m_k)}{m_k},
-    \label{eq:effspread}\\[3pt]
-  S^{\mathrm{real}}_k(\Delta) &= \frac{2 D_k (p_k - m_{k+\Delta})}{m_k},
-    \label{eq:realspread}\\[3pt]
-  \mathrm{PI}_k(\Delta) &= \frac{2 D_k (m_{k+\Delta} - m_k)}{m_k},
-    \label{eq:priceimpact}
-\end{align}
-so that $S^{\mathrm{eff}}_k = S^{\mathrm{real}}_k(\Delta) +
-\mathrm{PI}_k(\Delta)$ trade by trade and in any volume-weighted
-aggregate. The effective spread is what the liquidity demander paid relative to the
-midpoint; the realised spread is what the provider still holds once the
+spread into a realized spread and a price impact component
+\citep{hasbrouck1993assessing,hendershott2011algorithmic}, as defined in
+\eqref{eq:effspread}--\eqref{eq:priceimpact}, with $S^{\mathrm{eff}}_k =
+S^{\mathrm{real}}_k(\Delta) + \mathrm{PI}_k(\Delta)$. The effective spread
+is what the liquidity demander paid relative to the midpoint; the realized spread is what the provider still holds once the
 market has revised its valuation, the gross compensation for supplying
 liquidity; the price impact is the permanent revision of the midpoint in the
 direction of the trade, the part lost to the information the order carried.
@@ -149,10 +165,13 @@ informed trader can still price aggressively into a batch
 \citep{eibelshauser2022fba} --- so the prediction is a reduction in
 price impact, not its elimination. A fall in effective spread driven by
 price impact is therefore the result theory predicts; a fall driven by
-realised spread would mean providers simply earn less with the
+realized spread would mean providers simply earn less with the
 informational component untouched, and a fall in price impact with no
 change in effective spread would mean the benefit is captured by
-providers rather than passed on.
+providers rather than passed on. These three readings are what the
+RQ2.1 comparison in \Cref{sec:res21} is designed to tell apart, which is
+why all three components are reported rather than the effective spread
+alone.
 
 \section{Market Transparency Theory}
 \label{sec:transparency}
@@ -189,6 +208,12 @@ the submitter itself. An observer can buy ahead of a pending swap and
 sell into the price it moves, sandwiching the submitter. Batch
 clearing removes this by construction: if every order in the interval
 settles at one uniform price, position within the batch carries no value.
+
+This strand shapes design Block~2 (\Cref{sec:disclosure}). It cannot be
+tested in the replay: the replayed orders never see what the engine
+publishes, so the disclosure regime cannot change any result
+(\Cref{tab:fbachoices}), and bid shading is listed among the behavioural
+predictions out of reach (\Cref{sec:limitations}).
 
 \section{Auction Theory and Uniform-Price Clearing}
 \label{sec:auctiontheory}
@@ -234,31 +259,70 @@ improvement relative to the submitted limit: a buyer willing to pay
 $\pi_k$ who clears at $\clr < \pi_k$ captures $(\pi_k - \clr) q_k$ of
 surplus that, under continuous discriminatory execution at the resting
 price, would in general have accrued differently. Aggregating this across
-executed orders gives the realised trader surplus metric.
+executed orders gives the realized trader surplus metric
+(\Cref{sec:metrics23}). \Cref{sec:priceimprovement} shows that for a given
+set of executed orders the total of this surplus does not depend on the
+price: the price only decides how it is split between buyers and sellers,
+so price improvement on one side is a transfer from the other, not a gain.
 
-\section{Measurement of Market Quality}
+These results inform design Block~4, the clearing and rationing rule
+(\Cref{sec:clearing}). The link between interval length and pivotality
+also has an empirical counterpart: thin batches show up as batches that
+do not cross and as a high unexecuted residual share (\Cref{sec:metrics23}).
+
+\section{Measurement of Market Quality: Motivating the Metrics}
 \label{sec:quality}
 
-The empirical comparison relies on the standard microstructure toolkit.
-Quoted spread and depth describe the cost a hypothetical trade would face;
-effective spread describes what an actual trade cost; realised spread and
-price impact decompose that cost into the part retained by the liquidity
-provider and the part lost to adverse selection
-\citep{hasbrouck1993assessing}. \citet{amihud2002illiquidity} provides a
-low-frequency summary of price impact per unit of volume, robust and easy
-to compare across mechanisms, and \citet{hasbrouck1995onesecurity}
-supplies the framework for attributing price discovery across venues.
-Hyperliquid publishes its own oracle price for margin and liquidation, but
-the order-status dataset replayed here does not carry it, so pricing error
-against an external reference is defined but uncomputable in this thesis.
+The empirical comparison relies on the standard microstructure toolkit,
+and each metric of \Cref{sec:metricdefs} is chosen because one of the
+theories above makes a prediction about it.
 
-Two adaptations are required for a batch mechanism. Measures that reference
+\textbf{Liquidity and transaction costs (RQ2.1).} Quoted spread and depth
+describe the cost a hypothetical trade would face: if batching pools
+liquidity, as its proponents argue, the FBA should be at least as deep.
+Effective spread describes what an actual trade cost, and realized spread
+and price impact decompose that cost into the part retained by the
+liquidity provider and the part lost to adverse selection
+\citep{hasbrouck1993assessing}; \Cref{sec:spread-decomposition} gives the
+prediction for each. \citet{amihud2002illiquidity} provides a
+low-frequency summary of price impact per unit of volume, robust and easy
+to compare across mechanisms because it needs neither a book nor a trade
+direction.
+
+\textbf{Price discovery (RQ2.2).} Batching aggregates orders before
+setting a price, so it should change how much prices move and how they
+respond to order flow. Kyle's lambda (\Cref{sec:adverse}) measures the
+price response to flow directly, intra-interval dispersion checks the
+mechanical promise of uniform pricing, and volatility measures how much
+the price varies. \citet{hasbrouck1995onesecurity} supplies a framework
+for attributing price discovery across venues, but it needs venues that
+trade the same asset simultaneously and influence each other; the two
+engines here never interact, so the thesis compares their price series on
+a common time grid instead (matched-timestamp volatility).
+
+\textbf{Execution and timing (RQ2.3).} The cost of batching is delay
+(\Cref{sec:discretetime}), measured by the time to execution. Uniform
+pricing promises price improvement (\Cref{sec:auctiontheory}), measured by
+trader surplus. The boundary argument of the design chapter
+(\Cref{sec:priceimprovement}) predicts that, under a fixed and visible
+close, orders bunch near the batch close, measured by boundary
+concentration. And short intervals produce thin, one-sided batches,
+measured by the unexecuted residual share. Executed volume and trade count
+have no theoretical prediction of their own: they check that the two
+engines trade the same flow, so that any other difference can be
+attributed to the mechanism.
+
+Three adaptations are required for a batch mechanism. Measures that reference
 the prevailing midpoint at the moment of the trade have no book to take a
 midpoint from during accumulation, so the reference is the previous batch's
 own clearing price as of the order's submission --- stale by up to $\tau$,
-never a same-instant quantity as the CDA's midpoint is. And the quoted
-spread has no direct analogue during accumulation, defined here as the
-implied spread between the marginal unexecuted buy and sell of the batch.
+and longer when recent batches did not trade, never a same-instant quantity
+as the CDA's midpoint is. And the quoted
+spread has no direct analogue during accumulation, so it is defined here
+as the gap between the best unfilled buy and the best unfilled sell left
+after a batch clears. The third follows from \Cref{sec:fbanotation}: an
+FBA trade has no aggressor, so the direction $\varepsilon_k$ in
+\eqref{eq:effspread} has to be estimated (\Cref{sec:metrics21}).
 
 Finally, the experimental convention is that of \citet{gode1993allocative}:
 hold the induced order flow constant and vary only the mechanism. Their
@@ -268,196 +332,33 @@ since much of what a mechanism does is mechanical rather than behavioural;
 \citet{lebaron2006agent} surveys the agent-based alternative in which
 behaviour is modelled and allowed to adapt.
 
-\newpage
-\section{Price Improvement produces the Boundary
-Repricing Race}
-\label{sec:priceimprovement}
+\section{From Theory to Design and Measurement}
+\label{sec:theorylinks}
 
-The argument developed here is, to the author's knowledge, not stated in
-this form in the existing literature. Its components are individually
-familiar: the residual value of low latency near a batch boundary is
-established by \citet{schlegel2023transaction}, the tendency of
-sophisticated traders to submit late in transparent call auctions is
-documented by \citet{daures2026click}, and the strategic consequences of
-the clearing-price selection rule in uniform-price auctions are studied by
-\citet{burkett2020uniform}. What has not been made is the connection
-between them. The frequent batch auction literature treats the price
-improvement that uniform clearing confers on inframarginal orders as a
-benefit of the design; this section argues that the treatment rests on a
-category error. Price improvement measured on one side of the book is not
-a welfare quantity but a transfer, and the rule that determines its size
-is manipulable by the timing of order submission. The FBA therefore does
-not remove the incentive to compete on speed: it converts a race for
-priority into a race for proximity to the batch boundary, independently of
-the informational motives usually invoked to explain late submission.
+\Cref{tab:theorylinks} summarises how each strand of this chapter, and
+the boundary argument of the design chapter that builds on them, is used
+later: the design block it shapes in \Cref{ch:design}, the metric that
+measures it in \Cref{ch:results}, and what this thesis can test. Two
+strands, transparency and segregation, inform only the design analysis,
+because the replay holds behaviour and the single order pool fixed.
 
-\subsection{Setup}
-
-This argument considers a single batch, using the demand and supply
-schedules $D(p)$/$S(p)$, the volume-maximising set $\mathcal{P}^{*}$, and
-the clearing price $\clr = \sigma(\mathcal{P}^{*})$ defined in
-\Cref{sec:fbanotation}, plus the executed quantity $x_k \ge 0$ of order
-$k$ under a volume-maximising allocation, so that $\sum_{k \in \mathbb{B}}
-x_k = \sum_{k \in \mathbb{A}} x_k = V^{*}$.
-
-\subsection{Price Improvement Is a Transfer}
-
-Write the realised surplus of the two sides at clearing price $p$ as
-\begin{equation}
-  \mathrm{PI}^{\mathbb{B}}(p)
-    = \sum_{k \in \mathbb{B}} (\pi_k - p)\, x_k,
-  \qquad
-  \mathrm{PI}^{\mathbb{A}}(p)
-    = \sum_{k \in \mathbb{A}} (p - \pi_k)\, x_k .
-\end{equation}
-
-\textbf{Total surplus does not depend on which clearing price is chosen.}
-For any $p \in \mathcal{P}^{*}$ with allocation $x$ held fixed,
-\begin{equation}
-\label{lem:invariance}
-  W = \mathrm{PI}^{\mathbb{B}}(p) + \mathrm{PI}^{\mathbb{A}}(p)
-    = \sum_{k \in \mathbb{B}} \pi_k x_k
-      - \sum_{k \in \mathbb{A}} \pi_k x_k ,
-\end{equation}
-which does not depend on $p$.
-
-Expanding the two sums, the terms in $p$ enter as
-$p\left(\sum_{\mathbb{A}} x_k - \sum_{\mathbb{B}} x_k\right)$, which
-vanishes by flow conservation. Two consequences follow immediately.
-First, $\partial \mathrm{PI}^{\mathbb{B}} / \partial p = -V^{*}$ and
-$\partial \mathrm{PI}^{\mathbb{A}} / \partial p = +V^{*}$: every unit of
-price improvement conferred on one side is subtracted from the other.
-Second, a measured increase in buy-side price improvement is not evidence
-that the mechanism created value: total gains from trade are fixed by the
-allocation, and the clearing price only divides them. The metric must
-therefore be read as a distributive statistic, reported for both sides
-jointly. If $\mathcal{P}^{*}$ were a singleton, the division would be
-pinned down by the submitted limits and there would be nothing to
-contest; because it is generically an interval, the surplus split depends
-on a rule, and any participant able to influence the position of
-$\mathcal{P}^{*}$ or of $\sigma$ within it has an incentive to do so.
-
-\subsection{The Last-Mover Advantage}
-
-Suppose the engine operates under the fully open disclosure regime, so
-that a participant submitting at time $t$ observes the schedules formed by
-all orders with $t_k < t$.
-
-\textbf{Late submission weakly dominates.} Suppose a participant can see
-the orders already submitted by others, and hence the residual supply or
-demand it faces, and that the selection rule $\sigma$ responds
-monotonically to submitted limit prices, so that a participant can shift
-the clearing price within $\mathcal{P}^{*}$ by adjusting its own limit.
-Writing $\underline{p}=\min\mathcal{P}^{*}$ and
-$\overline{p}=\max\mathcal{P}^{*}$, the participant's best response is to
-set its limit so that the clearing price moves to the edge of
-$\mathcal{P}^{*}$ most favourable to it,
-\begin{equation}
-\label{prop:lastmover}
-  p^{*} \to \underline{p} \text{ for a buyer,} \qquad
-  p^{*} \to \overline{p} \text{ for a seller,}
-\end{equation}
-while still keeping its order executed. Because this manoeuvre requires
-knowing the other orders, a participant's surplus can only grow with the
-information it has when it submits. Submitting later is therefore never
-worse than submitting earlier, and it is strictly better whenever the
-extra information changes the participant's optimal limit.
-
-The argument is the standard one for sequential-move bargaining over a
-fixed surplus, applied to the division established in
-\Cref{lem:invariance}. A seller who observes a resting buy limit of
-$\pi_{\mathbb{B}}$ knows that any ask weakly below it will execute, and
-therefore submits just below $\pi_{\mathbb{B}}$ rather than at its own
-valuation, capturing the interval. Truthfulness is not violated in its own
-terms, since it is stated for a participant that cannot move the clearing
-price; what disclosure does is make the boundaries of $\mathcal{P}^{*}$
-computable, and hence make deviation actionable for any participant whose
-order is large enough to reach them.
-
-This identifies the source of the incentive to wait. When several prices
-clear the same maximum volume, the choice among them is not neutral: it
-transfers surplus between buyers and sellers. Under a monotone $\sigma$,
-the participant who moves last can capture this transfer by pushing the
-price to the boundary of $\mathcal{P}^{*}$ in its own favour. The prize
-goes to whoever submits closest to the deadline with the fullest view of
-the book. This is the \emph{boundary latency arbitrage}: a reward for
-speed and timing rather than for providing liquidity or information.
-
-Two conditions expose a participant to being the donating side of the
-transfer: submitting without observing the accumulated batch, as an
-uninformed participant does, and submitting early without repricing. Since
-the transfer is zero-sum by the result above (\Cref{lem:invariance}), every participant exposed
-in this way is matched by one with an incentive to exploit it. An order
-resting in an open batch is thus a free option written to every subsequent
-submitter in the window. This is the same option \citet{copeland1983information}
-describe for a resting limit order in a continuous book: there, it is
-written to traders reacting to news; here, the same option is written to
-traders reacting to the accumulating batch itself.
-
-\subsection{Cancellation, Repricing, and the Deadline Race}
-
-The natural defence against the last-mover advantage above
-(\Cref{prop:lastmover}) is to withdraw or reprice an order that has become
-adversely positioned. This is where the speed race re-enters.
-
-\textbf{Latency monotonicity.} Let participant $i$ face message latency
-$\ell_i > 0$ and let the batch close deterministically at $\tau$. A
-message dispatched at time $t$ is included in the batch if and only if
-\begin{equation}
-\label{prop:latency}
-  t + \ell_i \le \tau,
-\end{equation}
-so the latest observable state on which $i$ can act is that prevailing at
-$\tau - \ell_i$. The information set available to $i$ at the moment of
-its final decision is therefore ordered by $\ell_i$, and expected surplus
-is non-increasing in $\ell_i$.
-
-The structure of the advantage differs from the continuous case but its
-source does not. In a continuous book, lower latency wins a contest for
-priority; in a batch, priority within the window is irrelevant by
-construction, and lower latency instead buys a later decision point. The
-fast trader observes more of the batch before committing, can reprice on
-more recent information, and can place its final message closer to the
-boundary while retaining the same probability of inclusion. Speed is not
-neutralised; its payoff is relocated from ordering to deadline precision.
-That some speed advantage survives batching is consistent with the
-experimental evidence of \citet{aldrich2020experiments}, who find that
-investment in speed falls but does not disappear under batch clearing, and
-with the model of \citet{zoican2021speed}.
-
-Three remarks bound the mechanism. Prohibiting cancellation within the
-batch does not close the channel: a participant with two-sided access can
-still neutralise an adverse position with an offsetting order, a
-synthetic cancellation that needs no cancel message at all (true
-enforcement would require account-level self-match prevention). And
-banning cancellation outright would, if anything, strengthen the incentive
-described above (\Cref{prop:lastmover}), by raising the cost of correcting
-an early submission instead of removing it. The channel is also
-disclosure-conditional: the informational component of the last-mover
-advantage requires an observable accumulating batch and is absent under a
-sealed-bid regime.
-
-\subsection{Equilibrium Implication and Design Responses}
-
-If late submission weakly dominates and lateness is bounded only by
-$\ell_i$, submissions concentrate near the boundary and are ordered by
-latency. In the limit the accumulation phase carries no orders and
-therefore no information, and the auction degenerates into a sealed tender
-conducted in the final microseconds of the window: the batch retains its
-length nominally while losing the property the length was chosen to
-deliver.
-
-Three design responses follow. Randomising the close time makes waiting
-costly, since an order dispatched at $t$ is included only if the realised
-$\tau$ exceeds $t + \ell_i$; the participant then solves an interior
-optimum trading the value of information against the risk of exclusion,
-which justifies randomisation independently of the sniping argument
-usually advanced for it. Restricting disclosure to an aggregate imbalance
-or to nothing removes the informational component of the result above
-(\Cref{prop:lastmover}) while leaving bid shading, so the choice is between
-two costs rather than between one cost and none. Finally, and least
-discussed in the literature, $\sigma$ can be made insensitive to the
-marginal submitted limits, for instance by choosing the point of
-$\mathcal{P}^{*}$ closest to an external reference price. This removes the
-lever without altering the allocation, since by \Cref{lem:invariance} the
-allocation is invariant on $\mathcal{P}^{*}$ in any case.
+\begin{table}[htbp]
+\centering
+\caption[From theory to design and measurement]{Each theoretical strand,
+its prediction for an FBA, the design block it shapes and the metric that
+measures it.}
+\label{tab:theorylinks}
+\small
+\begin{tabularx}{\textwidth}{@{}p{2.6cm} L p{1.9cm} p{3.2cm}@{}}
+\toprule
+\textbf{Strand} & \textbf{Prediction for the FBA} & \textbf{Design block} & \textbf{Metric (RQ)}\\
+\midrule
+Latency arbitrage (\ref{sec:discretetime}) & no speed race within $\tau$; lower adverse-selection cost; delay of about $\tau/2$ & 1 Interval & spread decomposition (2.1); time to execution (2.3)\\
+Adverse selection (\ref{sec:adverse}) & lower price impact, not zero; price reacts less to flow & 3 Segregation & price impact (2.1); Kyle's lambda (2.2)\\
+Transparency (\ref{sec:transparency}) & disclosure trades exploitation against bid shading & 2 Disclosure & not testable in a replay\\
+Auction theory (\ref{sec:auctiontheory}) & near-truthful limits; price improvement; thin batches at short $\tau$ & 4 Clearing & trader surplus; residual share (2.3)\\
+Market quality (\ref{sec:quality}) & batching pools liquidity and dampens price moves & --- & depth, Amihud (2.1); volatility, dispersion (2.2)\\
+Boundary repricing race (\ref{sec:priceimprovement}) & with a fixed, visible close, submissions bunch at the close; speed regains value there & 1, 2, 4 & boundary concentration (2.3), baseline only\\
+\bottomrule
+\end{tabularx}
+\end{table}
