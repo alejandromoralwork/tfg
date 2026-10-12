@@ -275,7 +275,7 @@ so price improvement on one side is a transfer from the other, not a gain.
 These results inform design Block~4, the clearing and rationing rule
 (\Cref{sec:clearing}). The link between interval length and pivotality
 also has an empirical counterpart: thin batches show up as batches that
-do not cross and as a high unexecuted residual share (\Cref{sec:metrics23}).
+do not cross at all (\Cref{sec:res23}).
 
 \section{Measurement of Market Quality: Motivating the Metrics}
 \label{sec:quality}
@@ -310,11 +310,14 @@ a common time grid instead (matched-timestamp volatility).
 \textbf{Execution and timing (RQ2.3).} The cost of batching is delay
 (\Cref{sec:discretetime}), measured by the time to execution. Uniform
 pricing promises price improvement (\Cref{sec:auctiontheory}), measured by
-trader surplus. The boundary argument of the design chapter
-(\Cref{sec:priceimprovement}) predicts that, under a fixed and visible
-close, orders bunch near the batch close, measured by boundary
-concentration. And short intervals produce thin, one-sided batches,
-measured by the unexecuted residual share. Executed volume and trade count
+trader surplus. Short intervals produce thin batches, which show up as
+batches that clear no trade at all; their share is reported as a
+descriptive statistic (\Cref{sec:sample}). The boundary argument of the design
+chapter (\Cref{sec:priceimprovement}) predicts that, under a fixed and
+visible close, orders bunch near the batch close; testing it needs
+participants who can see that close, which a replay of orders submitted
+to a continuous market cannot provide (\Cref{sec:limitsbehaviour}).
+Executed volume and trade count
 have no theoretical prediction of their own: they check that the two
 engines trade the same flow, so that any other difference can be
 attributed to the mechanism.
@@ -348,8 +351,11 @@ markets with simulated traders.
 the boundary argument of the design chapter that builds on them, is used
 later: the design block it shapes in \Cref{ch:design}, the metric that
 measures it in \Cref{ch:results}, and what this thesis can test. Two
-strands, transparency and segregation, inform only the design analysis,
-because the replay holds behaviour and the single order pool fixed.
+strands, transparency and the boundary repricing race, cannot be tested,
+because both need participants who react to the mechanism and the replay
+holds behaviour fixed. Segregation (Block~3) is analysed in the design
+part but not measured, because the simulated engine clears a single
+pool.
 
 \begin{table}[htbp]
 \centering
@@ -365,9 +371,9 @@ measures it.}
 Latency arbitrage (\ref{sec:discretetime}) & no speed race within $\tau$; lower adverse-selection cost; delay of about $\tau/2$ & 1 Interval & spread decomposition (2.1); time to execution (2.3)\\
 Adverse selection (\ref{sec:adverse}) & lower price impact, not zero; price reacts less to flow & 3 Segregation & price impact (2.1); Kyle's lambda (2.2)\\
 Transparency (\ref{sec:transparency}) & disclosure trades exploitation against bid shading & 2 Disclosure & not testable in a replay\\
-Auction theory (\ref{sec:auctiontheory}) & near-truthful limits; price improvement; thin batches at short $\tau$ & 4 Clearing & trader surplus; residual share (2.3)\\
+Auction theory (\ref{sec:auctiontheory}) & near-truthful limits; price improvement; thin batches at short $\tau$ & 4 Clearing & trader surplus (2.3); share of batches with no trade (descriptive)\\
 Market quality (\ref{sec:quality}) & batching pools liquidity and dampens price moves & --- & depth, Amihud (2.1); volatility, dispersion (2.2)\\
-Boundary repricing race (\ref{sec:priceimprovement}) & with a fixed, visible close, submissions bunch at the close; speed regains value there & 1, 2, 4 & boundary concentration (2.3), baseline only\\
+Boundary repricing race (\ref{sec:priceimprovement}) & with a fixed, visible close, submissions bunch at the close; speed regains value there & 1, 2, 4 & not testable in a replay\\
 \bottomrule
 \end{tabularx}
 \end{table}

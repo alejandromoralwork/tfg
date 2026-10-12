@@ -214,7 +214,9 @@ real markets can be observed directly: every submitted price, including those
 of orders that never trade, the exact rationing outcome, and the volume left
 unmatched after each batch. Some things remain unknown. The dataset has no
 oracle or mark price, so neither engine's price can be measured against an
-external reference within the replay.
+external reference second by second within the replay; only at an hourly
+scale can both be compared with the spot price, and they track it closely
+(\Cref{sec:testprice}).
 Orders that were never submitted visibly cannot be recovered. And timestamps
 show when the node saw a message, not when the participant chose to send it.
 
@@ -280,19 +282,18 @@ and cost, price discovery, and execution and timing, plus two engine controls.
 \Cref{sec:metricdefs} defines every metric formally, and \Cref{sec:quality}
 explains why each is used.
 
-\subsection{Interpretive Status of the RQ2.3 Metrics}
+\subsection{Interpretive Status of the Metrics}
 \label{sec:testable}
 
-Boundary concentration only makes sense as a \emph{reaction} to the
-mechanism, but the replayed orders were submitted on Hyperliquid's own
-continuous engine, not in reaction to batching. An order's position relative
-to a simulated batch boundary depends on where the boundary was placed, not on
-any choice by the participant. The metric therefore shows the mechanical effect
-of the rule that was implemented on fixed historical orders. That is a useful
-baseline, but it is not evidence of how participants would behave under real
-batching. Throughput and clearing latency
-have a different purpose: they are a control showing that both engines would
-be fast enough to run in real time. They cannot explain any other result,
+The replayed orders were submitted on Hyperliquid's own continuous engine,
+not in reaction to batching. Every metric therefore shows the mechanical
+effect of the batch rule on fixed historical orders, not how participants
+would behave under real batching. In particular, nothing can be learned
+from where orders fall relative to a simulated batch boundary, because
+that position depends on where the boundary was placed, not on any choice
+by the participant. Throughput and clearing latency have a different
+purpose: they are a control showing that both engines would be fast
+enough to run in real time. They cannot explain any other result,
 because the replay runs on the data's timestamps and not on the computer's
 clock.
 

@@ -137,11 +137,14 @@ a set of metrics defined in \Cref{sec:metricdefs}:
   lets participants trade at a lower cost and with more depth available?
   \item \textbf{RQ2.2 Price discovery and market quality.} Which mechanism
   produces a more stable, less dispersed price series?
-  \item \textbf{RQ2.3 Execution and order-arrival timing.} How much trades,
-  how quickly and at what price relative to the submitted limit, and how
-  does the batch mechanism reshape execution outcomes and arrival timing for
-  the same unchanged order flow?
+  \item \textbf{RQ2.3 Execution.} How much trades, how quickly and at what
+  price relative to the submitted limit, and how does the batch mechanism
+  reshape execution outcomes for the same unchanged order flow?
 \end{itemize}
+
+How participants would time their orders against a batch close cannot be
+measured this way: the replayed orders were submitted to a continuous
+market and never saw a batch boundary (\Cref{sec:limitsbehaviour}).
 
 \section{Contribution}
 \label{sec:contribution}
@@ -166,8 +169,9 @@ The thesis makes three contributions.
   feeds both with the same month of Level~4 order flow from the Hyperliquid
   exchange \citep{albers2026openbook}, at nanosecond resolution. The
   mechanism is the only treatment variable, and quantities that field data
-  never show, such as the exact rationing outcome and the volume left
-  unmatched after each batch, are observed directly (\Cref{ch:simulation,ch:results}).
+  never show, such as every submitted price, the exact rationing outcome
+  and which batches clear no trade, are observed directly
+  (\Cref{ch:simulation,ch:results}).
 \end{enumerate}
 
 All three are bounded by what a replay of fixed historical order

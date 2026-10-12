@@ -13,9 +13,13 @@ as a gap worth closing, not implied to already exist. Given identical
 input and configuration, an uninterrupted run reproduces identical
 output in all columns except the two that measure computing time
 (\Cref{sec:testdeterminism}); the month result is not such a run
-(\Cref{sec:testresets}). The analysis pipeline reads only the
-logged CSV output and is shared by both engines, so no metric is
-computed by engine-specific code.
+(\Cref{sec:testresets}). The analysis pipeline is shared by both
+engines, so no metric is computed by engine-specific code. It reads the
+logged CSV output, plus one series taken from the raw archive itself:
+the venue's net taker flow per second, the common regressor of Kyle's
+lambda (\Cref{sec:formularq22}), which the verification script
+\texttt{analysis/verify\_raw\_data.py} extracts from the order-status
+records.
 
 \section{Getting the Code}
 \label{sec:repro_code}
@@ -23,7 +27,7 @@ computed by engine-specific code.
 \begin{sloppypar}
 The full source, in Rust, is public \citep{moral2026marketsim}. It lives at
 \url{https://github.com/alejandromoralwork/tfg}, branch \texttt{main}, commit
-\texttt{17330571d35b05b4608d8c6a8379d92accb4541c}.
+\texttt{COMMIT-HASH-TO-FILL}.
 \end{sloppypar}
 It is a single program, \texttt{market\_sim}, that needs nothing beyond the
 standard Rust toolchain. Both matching engines, the decoder for the binary
@@ -131,4 +135,9 @@ ad hoc link that can move or expire. The record contains:
 Each file is exactly what \texttt{market\_sim simulate sol 1} writes to the
 results directory, byte for byte, from the run behind this thesis. The analysis
 pipeline recomputes every macro, table and figure in \Cref{ch:results} directly
-from them, without needing to replay the month at all.
+from them, without needing to replay the month at all, with one exception:
+Kyle's lambda also needs the venue's net taker flow per second, which comes
+from the raw archive rather than from the simulation. Running
+\texttt{analysis/verify\_raw\_data.py} once over the downloaded archive
+(\Cref{sec:repro_full}) writes it; this reads the records but does not replay
+them through either engine.

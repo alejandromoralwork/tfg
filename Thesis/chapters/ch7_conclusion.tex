@@ -46,14 +46,14 @@ much} trades or \emph{at what price} (\Cref{tab:rq2answers}).
   order in a batch trades at one price set after all orders are in. Standing
   liquidity, however, is slightly lower in the batch market, not higher.
   \item \textbf{Prices (RQ2.2).} Both engines arrive at the same price, and
-  volatility is about the same; uniform pricing removes the spread of prices
-  within a second. The same net order flow moves both prices by the same
+  volatility is slightly higher in the batch market, not dampened as
+  predicted; uniform pricing removes the spread of prices within a second. The same net order flow moves both prices by the same
   amount within five seconds, so batching neither slows the price's
   response to information nor dampens it, contrary to the prediction that
   a batch price reacts less to one-sided flow.
   \item \textbf{Execution (RQ2.3).} The same volume trades, but orders wait
   longer, because \FbaEmptyBatchShare\% of one-second batches do not cross at
-  all and even those that do leave most of their longer side unmatched.
+  all.
 \end{itemize}
 
 Put together, batching at one second protects resting orders from being
@@ -77,7 +77,7 @@ in \Cref{sec:rationing}), their arrival times
 were not chosen against a batch boundary, and their limit prices were not
 chosen under uncertainty about a clearing price. Every equilibrium
 prediction of the FBA literature --- narrower quoted spreads, size
-inflation, boundary concentration, bid shading --- is therefore out of
+inflation, orders bunching at the batch close, bid shading --- is therefore out of
 reach, and the simulation delivers the mechanical baseline against which
 such responses would be measured. A further limitation bounds what future
 work can build on: several metrics require adaptation to a batch setting,
@@ -90,12 +90,17 @@ exchange has a participant population, fee structure and latency profile
 that differ from an equity market, so magnitudes should not be carried
 over elsewhere without re-estimation, and the month gives day-by-day
 stability within the sample, not a cross-instrument or cross-regime one.
+Hyperliquid also processes cancellations before new orders within each
+block (\Cref{sec:venue}), so its continuous market already protects
+resting quotes to a degree; on a purely first-come, first-served
+exchange the cost that batching removes, and so the gain measured here,
+could be larger.
 And because the replay does not enforce post-only orders or self-trade
 prevention, it trades about \VerCdaOverVenue\ times the venue's own recorded
 volume (\Cref{sec:testfidelity}). Both engines receive this same input, so
 it does not favour either side of the paired comparisons in
 \Cref{ch:results}. Sizes are also rounded to whole SOL, which removes
-orders below 0.5\,SOL from both engines alike (\Cref{sec:data}). But the
+orders below 0.5\,SOL from both engines alike (\Cref{sec:dataset}). But the
 absolute volume, trade-count and latency levels reported there describe
 this replay, not Hyperliquid's live market. Finally, the month was not
 replayed in one uninterrupted run: \VerResetN\ restarts in its first five

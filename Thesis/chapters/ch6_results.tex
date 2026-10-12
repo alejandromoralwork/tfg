@@ -161,14 +161,20 @@ spread of \ResEffectiveSpreadFba\,bps, realized spreads of
 and price impacts of
 \ResPriceImpactOneSFba/\ResPriceImpactFiveSFba/\ResPriceImpactThirtySFba\,bps,
 all differences with $p<0.001$ (\Cref{fig:spreaddecomp}). The pattern holds
-on each of the 31 days (\Cref{fig:dailytrend}). The FBA values rest on the
+on each of the 31 days (\Cref{fig:dailytrend}). Of the three readings set
+out in \Cref{sec:spread-decomposition}, the data fit the first, the one
+theory predicts: the effective spread falls from \ResEffectiveSpreadCda\
+to \ResEffectiveSpreadFba\,bps almost entirely through the price impact
+(\ResPriceImpactThirtySCda\ to \ResPriceImpactThirtySFba\,bps at 30\,s),
+while the realized spread rises towards zero rather than falling, so
+liquidity providers do not simply earn less. The FBA values rest on the
 estimated direction; \Cref{sec:limitssign} sets out what they can and cannot
 show.
 
 \textbf{Amihud illiquidity}, the price movement per dollar traded, needs
-neither a book nor a trade direction. It is slightly higher for the FBA
-(\ResAmihudFba\ against \ResAmihudCda, $p$ \ResAmihudP), which agrees with
-the depth result: at $\tau = 1$\,s the FBA is slightly less liquid, not more.
+neither a book nor a trade direction. It is about a fifth higher for the
+FBA (\ResAmihudFba\ against \ResAmihudCda, $p$ \ResAmihudP), which agrees
+with the depth result: at $\tau = 1$\,s the FBA is less liquid, not more.
 
 \begin{figure}[htbp]
 \centering
@@ -241,6 +247,8 @@ instants for both engines, and their daily root mean square is similar for
 both, slightly higher for the FBA (\ResMatchedVolFba\ against
 \ResMatchedVolCda\,bps, $p$ \ResMatchedVolP\ over $n=\ResMatchedVolNPaired$
 days, \ResMatchedVolWindowsExcluded\ days excluded; \Cref{fig:matchedvol}).
+The prediction that batching dampens price moves (\Cref{tab:theorylinks})
+is therefore not borne out at $\tau = 1$\,s.
 The measure covers the busier seconds in which both engines trade; it is a
 comparison on common ground, not a volatility estimate for the whole month.
 
@@ -305,8 +313,9 @@ VWAP of each one-second interval, the price series the two engines have in
 common, over \PricepathsDay. This is the day with the highest mean CDA
 realized volatility among the days on which at least 80\% of the
 one-second buckets have a value, so that a day with little data cannot be
-selected by one extreme observation. No oracle or external reference price
-is available to plot alongside.}
+selected by one extreme observation. No external reference price is
+available at one-second resolution to plot alongside; at an hourly scale
+both prices track the spot price closely (\Cref{sec:testprice}).}
 \label{fig:pricepaths}
 \end{figure}
 
@@ -332,18 +341,16 @@ traded, clipped at the 0.5th/99.5th percentiles for legibility.}
 \label{fig:pricediff}
 \end{figure}
 
-\section{RQ2.3: Execution and Order-Arrival Timing}
+\section{RQ2.3: Execution}
 \label{sec:res23}
 
-\Cref{tab:res23} reports the execution and order-arrival-timing metrics.
+\Cref{tab:res23} reports the execution metrics.
 
 \begin{table}[htbp]
 \centering
-\caption[RQ2.3 results]{Execution and order-arrival timing
-under both mechanisms, plus engine controls. Diff.\ is mean
+\caption[RQ2.3 results]{Execution under both mechanisms, plus engine controls. Diff.\ is mean
 (Newey--West HAC standard error in parentheses); $n$ as in
-\Cref{tab:res21}. FBA-only rows report a one-sided mean, std.\ and $n$
-(no CDA analogue).}
+\Cref{tab:res21}.}
 \label{tab:res23}
 \small
 \begin{tabularx}{\textwidth}{@{}L c c c c c@{}}
@@ -354,10 +361,6 @@ Executed volume (SOL, per interval, mean) & \ResExecVolumeCda & \ResExecVolumeFb
 Trade count (per interval, mean) & \ResTradeCountCda & \ResTradeCountFba & \ResTradeCountDiff\ (\ResTradeCountHacSe) & \ResTradeCountP & \ResTradeCountNPaired\\
 Avg.\ time to execution (s) & \ResTimeToExecCda & \ResTimeToExecFba & \ResTimeToExecDiff\ (\ResTimeToExecHacSe) & \ResTimeToExecP & \ResTimeToExecNPaired\\
 Trader surplus (USD, per interval) & \ResTraderSurplusCda & \ResTraderSurplusFba & \ResTraderSurplusDiff\ (\ResTraderSurplusHacSe) & \ResTraderSurplusP & \ResTraderSurplusNPaired\\
-\midrule
-\multicolumn{6}{@{}l}{\emph{FBA-only (mean, std., $n$)}}\\
-Boundary concentration, final 10\% & \multicolumn{4}{l}{\DescBoundaryConcentrationFbaMean\ (\DescBoundaryConcentrationFbaStd)} & \DescBoundaryConcentrationFbaN\\
-Unexecuted residual share & \multicolumn{4}{l}{\DescResidualShareFbaMean\ (\DescResidualShareFbaStd)} & \DescResidualShareFbaN\\
 \midrule
 \multicolumn{6}{@{}l}{\emph{Engine controls}}\\
 Throughput (messages/s) & \ResThroughputCda & \ResThroughputFba & \ResThroughputDiff\ (\ResThroughputHacSe) & \ResThroughputP & \ResThroughputNPaired\\
@@ -382,7 +385,9 @@ clearing price splitting a large order among several counterparties.
 \ResTimeToExecFba\,s for the FBA against \ResTimeToExecCda\,s for the CDA, a
 gap of \ResTimeToExecDiff\,s ($p$ \ResTimeToExecP). Waiting for the next
 clear explains at most one second of it; the rest comes from orders that
-stay unmatched for longer, because most batches do not cross.
+stay unmatched for longer, because most batches do not cross:
+\FbaEmptyBatchShare\% of all one-second batches clear no trade at all,
+because no buy limit in them reaches any sell limit.
 
 \textbf{Trader surplus} is marginally higher for the FBA
 (\ResTraderSurplusFba\ against \ResTraderSurplusCda\,USD per interval, $p$
@@ -393,25 +398,6 @@ improvement add up to the gap between their limits whatever the trade price
 matched orders, and from trades with a market order, whose side has no
 limit and contributes nothing, so that only the limit side's improvement,
 which does depend on the price, is counted (\Cref{sec:metrics23}).
-
-\textbf{Boundary concentration}, the share of arrivals in the last 10\% of a
-batch window, has a mean of \DescBoundaryConcentrationFbaMean\ (10.1\%) and
-a median of \DescBoundaryConcentrationFbaMedian\ (6.6\%), in line with the
-10\% that evenly spread arrivals would give. These orders had no batch
-boundary to time against, so this is the baseline against which timing
-behaviour would be measured (\Cref{sec:limitsbehaviour}).
-
-\textbf{Unexecuted residual share}, defined in \eqref{eq:residualshare},
-measures how unbalanced the two sides are at the clearing price, not the
-share of submitted volume left unfilled. A batch in which no buy limit
-reaches any sell limit scores exactly $1$, and since \FbaEmptyBatchShare\%
-of batches are of this kind, the month median is
-\DescResidualShareFbaMedian\ and the mean \DescResidualShareFbaMean. The
-batches that do trade average roughly $0.84$, so even a batch that clears
-usually leaves most of its longer side unmatched. The 31 daily means lie
-between $0.93$ and $0.99$ (\Cref{fig:residualshare}): this is a structural
-feature of one-second batches on this instrument, not a few extreme
-episodes.
 
 \textbf{Engine controls} show whether each engine would keep up with the
 order flow in real time; they do not bear on any other result
@@ -433,16 +419,6 @@ magnitude shorter than the one-second interval it has to fit into
 compute time per operation, CDA (per message) versus FBA (per batch
 clear); log scale. A control, not a market-quality result.}
 \label{fig:latencycontrol}
-\end{figure}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{figures/fig_residualshare.png}
-\caption[FBA unexecuted residual share]{Left: distribution of
-unexecuted residual share per interval. Right: 6-hour rolling mean over
-the full month, showing the level is persistent rather than
-episode-driven.}
-\label{fig:residualshare}
 \end{figure}
 
 \section{Conclusions from the Simulation}
@@ -481,20 +457,18 @@ Amihud \ResAmihudCda\ vs.\ \ResAmihudFba\\
 RQ2.2 Price discovery and market quality &
 Both engines discover the same price and respond equally to the same
 order flow; uniform pricing removes price dispersion within a second, and
-volatility is about the same. &
+volatility is slightly higher in the FBA. &
 VWAP difference: median \PriceDiffMedianBps\,bps;
 Kyle's lambda at 5\,s \ResCommonFlowLambdaFiveSCda\ vs.\ \ResCommonFlowLambdaFiveSFba\,bps per 1{,}000 SOL;
 dispersion \ResDispersionCda\ vs.\ \ResDispersionFba\,bps;
 daily volatility \ResMatchedVolCda\ vs.\ \ResMatchedVolFba\,bps\\
 \addlinespace
-RQ2.3 Execution and order-arrival timing &
+RQ2.3 Execution &
 The same volume trades, but orders wait longer, and most one-second
-batches do not cross. Arrival timing shows no clustering, as expected for
-orders that could not see a boundary. &
+batches do not cross. &
 volume \ResExecVolumeCda\ vs.\ \ResExecVolumeFba\,SOL/s ($p=\ResExecVolumeP$);
 time to execution \ResTimeToExecCda\ vs.\ \ResTimeToExecFba\,s;
-\FbaEmptyBatchShare\% of FBA batches empty;
-boundary concentration \DescBoundaryConcentrationFbaMean\\
+\FbaEmptyBatchShare\% of FBA batches empty\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -512,22 +486,24 @@ From these answers the simulation supports three conclusions.
   per 1{,}000 SOL), so the information reaches the price in both
   mechanisms; what differs is who pays for it. In the FBA all three spread
   measures stay near zero on every
-  day of the month, while volume and price match the CDA. This is what
-  uniform clearing should do: every order in a batch trades at one price set
-  after all orders are in, so there is no stale quote to pick off.
+  day of the month, while volume and price match the CDA. Uniform clearing
+  is the mechanism that predicts a lower cost: every order in a batch trades
+  at one price set after all orders are in, so there is no stale quote to
+  pick off. That the cost falls to about zero, rather than merely lower, is
+  more than theory predicts and rests on the estimated trade direction
+  (\Cref{sec:limitssign}).
   \item \textbf{At one second, the batch market is too thin to work as
-  intended.} \FbaEmptyBatchShare\% of batches clear no trade, and even a
-  batch that clears leaves most of its longer side unmatched (a residual
-  share of roughly 0.84). This is why execution takes \ResTimeToExecDiff\,s
-  longer on average and why the FBA is slightly thinner, not deeper. The
+  intended.} \FbaEmptyBatchShare\% of batches clear no trade, which is why
+  execution takes \ResTimeToExecDiff\,s longer on average. The FBA is also
+  slightly thinner, not deeper, even though its depth is read just before
+  the close, when it is overstated (\Cref{sec:limitscomparable}). The
   pooling of liquidity that batching promises needs more two-sided flow per
   batch than one second of this market provides.
   \item \textbf{Several results confirm the rule rather than add new
   findings.} Price dispersion within a second disappears, trader surplus
   barely changes (\ResTraderSurplusCda\ against \ResTraderSurplusFba\,USD
   per second), as the transfer argument of \Cref{sec:priceimprovement}
-  implies, and arrivals show no clustering before a boundary they could not
-  see. These results show that the replay behaves as specified.
+  implies. These results show that the replay behaves as specified.
 \end{enumerate}
 
 \paragraph{What the simulation does not conclude.} It does not show that
@@ -543,9 +519,10 @@ only $\tau = 1$\,s was run.
 \label{sec:metricreliability}
 
 This section is the one place where the limits on reading the results are
-set out. They come from four sources: an estimated trade direction, metrics
-that cannot be compared across engines, behaviour the replay cannot show,
-and the fidelity of the replay itself. \Cref{tab:confidence} closes with how
+set out. They come from four sources: an estimated trade direction,
+metrics that cannot be compared across engines or are compared only with a
+caveat, behaviour the replay cannot show, and the fidelity of the replay
+itself. \Cref{tab:confidence} closes with how
 far each metric family can be relied on.
 
 \subsection{The FBA's Trade Direction Is Estimated}
@@ -584,42 +561,45 @@ What survives is the CDA side, which needs no estimate, and the weaker
 statement that under the best available direction the FBA shows no
 one-sided cost of the kind the CDA shows.
 
-\subsection{Metrics That Cannot Be Compared}
+\subsection{Which Metrics Can Be Compared}
 \label{sec:limitscomparable}
 
-\textbf{Depth at best} compares one CDA price level with the whole
-eligible side of the FBA schedule at the clearing price, $(D(\clr) +
-S(\clr))/2$, which adds up all orders priced at or better than $\clr$. The
-FBA's higher value is a consequence of this definition, not of more
-liquidity. Depth \emph{within} a threshold is defined the same way for both
-engines and carries the depth result. Its one asymmetry, that the FBA's
-value is read just before the batch clears and so includes orders about to
-execute, can only make the FBA look deeper, so the finding that it is
-thinner holds with margin.
+Most metrics are defined the same way for both engines and are compared
+directly: executed volume, trade count and VWAP, depth within a
+threshold, Amihud illiquidity, intra-interval dispersion,
+matched-timestamp volatility, Kyle's lambda, time to execution and trader
+surplus. The spread decomposition is compared too, with the limits set out
+in \Cref{sec:limitssign}. Two metrics cannot be compared at all, and three
+are compared with a caveat.
 
-\textbf{Quoted spread} is computed correctly for both engines, but the
-FBA's is read from the leftover orders between two clears, which is not
-the same kind of object as a CDA book that has continuously matched
-everything it could (\Cref{app:comparability}). It is therefore weaker
-evidence about liquidity than depth within a threshold.
-
-\textbf{Kyle's lambda} as the simulator records it is not comparable: the
-FBA's regressor is the net quantity of every order waiting in the batch,
-including the whole rolled-over book, while the CDA's is the net quantity
-of a single sweep, and the two differ in scale by orders of magnitude.
-The comparison therefore regresses both engines on the venue's own net
-taker flow per second (\Cref{sec:formularq22}). Two limits remain. The
-regressor is the flow that executed on the venue, not on either
-simulated engine. The CDA replays the same orders and its volume follows
-the venue's over time, though at about twice its level
-(\Cref{sec:testfidelity}); in the FBA the same orders may trade in a
-different second or not at all. And within one second the CDA's price is a VWAP and the FBA's a
-single clearing price, which can widen the same-second gap; the 5\,s
-horizon avoids this.
-
-\textbf{Realized volatility within a bucket} needs two prices in one
-second, which the FBA almost never has; matched-timestamp volatility
+\paragraph{Not comparable.} \textbf{Depth at best} compares one CDA price
+level with the whole eligible side of the FBA schedule at the clearing
+price, $(D(\clr) + S(\clr))/2$, which adds up all orders priced at or
+better than $\clr$. The FBA's higher value is a consequence of this
+definition, not of more liquidity, so the two are reported but not
+compared. \textbf{Realized volatility within a bucket} needs two prices in
+one second, which the FBA almost never has; matched-timestamp volatility
 replaces it.
+
+\paragraph{Compared with a caveat.} \textbf{Depth within a threshold}
+carries the depth result. Its one asymmetry, that the FBA's value is read
+just before the batch clears and so includes orders about to execute, can
+only make the FBA look deeper, so the finding that it is thinner holds
+with margin. \textbf{Quoted spread} is computed correctly for both
+engines, but the FBA's is read from the leftover orders just after a
+clear, which is not the same kind of object as a CDA book that has
+continuously matched everything it could (\Cref{sec:fbavscda,app:comparability}).
+It is therefore weaker evidence about liquidity than depth within a
+threshold. \textbf{Kyle's lambda} regresses both engines on the same
+regressor, the venue's own net taker flow per second
+(\Cref{sec:formularq22}), so the two slopes are directly comparable. Two
+limits remain. The regressor is the flow that executed on the venue, not
+on either simulated engine: the CDA replays the same orders and its volume
+follows the venue's over time, though at about twice its level
+(\Cref{sec:testfidelity}), while in the FBA the same orders may trade in a
+different second or not at all. And within one second the CDA's price is a
+VWAP and the FBA's a single clearing price, which can widen the
+same-second gap; the 5\,s horizon avoids this.
 
 \subsection{Behaviour the Replay Cannot Show}
 \label{sec:limitsbehaviour}
@@ -627,12 +607,11 @@ replaces it.
 The replayed orders were submitted to Hyperliquid's continuous engine, not
 in reaction to batching (\Cref{sec:testable}). Every result is therefore
 the mechanical effect of the batch rule on fixed historical orders.
-Boundary concentration shows that these orders do not cluster before a
-boundary they could not see; it is a baseline, not a prediction of how
-participants would time their orders against a real, predictable close.
-The same holds for requoting by market makers, bid shading under price
-uncertainty and size inflation under a rule that rewards it: all need
-participants who can respond to the mechanism.
+Timing orders against a real, predictable batch close
+(\Cref{sec:priceimprovement}), requoting by market makers, bid shading
+under price uncertainty and size inflation under a rule that rewards it
+all need participants who can respond to the mechanism, so none of them
+can be measured here.
 
 \subsection{Fidelity of the Replay}
 \label{sec:limitsreplay}
@@ -673,14 +652,16 @@ can be relied on, and why.}
 \textbf{Metric family} & \textbf{Reliance} & \textbf{Reason}\\
 \midrule
 Executed volume, trade count, VWAP & high & read directly off executed trades, same definition for both engines\\
+Time to execution, trader surplus & high & same definition for both engines, computed from each engine's own fills\\
 Depth within a threshold, Amihud & high & same definition for both engines; the one asymmetry favours the FBA\\
-Spread decomposition, CDA side & high & observed trade direction\\
-Spread decomposition, FBA side & low & estimated direction; shows only that no one-sided cost is found\\
+Intra-interval dispersion, matched-timestamp volatility & high & same definition, and the volatility uses the same instants for both engines\\
 Kyle's lambda, 5\,s & high & same regressor (venue flow) and same definition for both engines\\
 Kyle's lambda, same second & moderate & CDA price is a VWAP within the second, the FBA's a single clearing price\\
+Spread decomposition, CDA side & high & observed trade direction\\
+Spread decomposition, FBA side & low & estimated direction; shows only that no one-sided cost is found\\
 Quoted spread & moderate & FBA value read from leftover orders, not a book\\
 Depth at best & not comparable & different objects in the two engines\\
-Boundary concentration & baseline only & orders were not timed against a batch boundary\\
+Realized volatility within a bucket & not comparable & the FBA has at most one price per second; replaced by matched-timestamp volatility\\
 Throughput, latency & feasibility only & no effect on market metrics in an event-time replay\\
 \bottomrule
 \end{tabularx}

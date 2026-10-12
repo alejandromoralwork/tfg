@@ -4,8 +4,8 @@
 This appendix summarises how the data and the simulator were checked. No amount of
 testing proves a program has no errors; it can only make specific errors hard to
 miss. Two independent test systems back the engines and the metrics: a suite of
-\VerTestsTotal\ automatic Rust tests (\VerTestsPassed\ pass; \VerTestsIgnored\ need
-real data or system tools and run separately), and a checklist of
+\VerTestsTotal\ automatic Rust tests, all \VerTestsPassed\ passing (\VerTestsIgnored\ of
+them need real data or system tools and are run separately), and a checklist of
 \VerChecklistTotal\ hand-worked scenarios (\VerChecklistCda\ CDA, \VerChecklistFba\
 FBA, \VerChecklistMet\ metrics) compiled into the simulator itself, so it runs on the
 finished executable with no development tools. On top of these, three further checks

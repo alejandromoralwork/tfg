@@ -442,8 +442,11 @@ per batch, taken at one end of the cycle.
 For these reasons the comparison rests mainly on \emph{trades}. A trade
 exists only once matching is complete, in both mechanisms: in the CDA
 at the instant two orders cross, and in the FBA at the instant the batch
-clears. Executed volume, effective and realized spread, price impact and
-trader surplus therefore compare like with like, whenever they are read.
+clears. Executed volume, VWAP and trader surplus are therefore read from
+the same kind of object in both engines, whenever they are read. The
+effective and realized spread and the price impact are trade-based too,
+but for the FBA they still need an estimated trade direction
+(\Cref{sec:limitssign}).
 The book-like FBA metrics are kept, but each is read at a stated point in
 the cycle, and its direction of bias is taken into account when the
 results are interpreted. \Cref{app:comparability} sets out the argument
@@ -467,48 +470,48 @@ still exists, with the metric marked missing. A missing value (``no
 qualifying observation in this bucket'') and a value of zero (``there were
 observations and the value is zero'') are kept distinct.
 
-For a metric $M$ computable on both engines, the comparison is the
+For a metric $M$, the comparison is the
 \emph{paired difference} $d_t = M^{\mathrm{FBA}}_t - M^{\mathrm{CDA}}_t$
 over the buckets in which both values exist; \Cref{sec:experiments}
-describes how its standard error is estimated. A metric that exists for
-only one engine is reported descriptively.
+describes how its standard error is estimated. Two metrics are built
+differently: matched-timestamp volatility is summarised and paired by
+calendar day, and Kyle's lambda is a slope estimated over all seconds
+together, compared through a regression on the difference
+(\Cref{sec:formularq22}).
 
 \section{Metrics}
 \label{sec:metricdefs}
 
-Each metric below is tagged with its \emph{scope}: \textbf{U} (computed for
-both engines) or \textbf{F} (FBA only). The metrics are grouped by
-the part of RQ2 (\Cref{sec:rqs}) they answer. \Cref{tab:metrics} gives an
+Every metric below is computed for both engines. The metrics are grouped
+by the part of RQ2 (\Cref{sec:rqs}) they answer. \Cref{tab:metrics} gives an
 overview; \Cref{ch:foundations} explains why each is used.
 
 \begin{table}[htbp]
 \centering
 \caption[Overview of the metrics]{Overview of the metrics, by research
-question. Scope: U both engines, F FBA only.}
+question. Every metric is computed for both engines.}
 \label{tab:metrics}
 \small
-\begin{tabularx}{\textwidth}{@{}l l L c@{}}
+\begin{tabularx}{\textwidth}{@{}l l L@{}}
 \toprule
-\textbf{RQ} & \textbf{Metric} & \textbf{What it measures} & \textbf{Scope}\\
+\textbf{RQ} & \textbf{Metric} & \textbf{What it measures}\\
 \midrule
-2.1 & Quoted spread & cost of crossing the book now & U\\
-    & Depth at best / within $h$ bps & quantity available near the price & U\\
-    & Effective spread & cost an actual trade paid & U\\
-    & Realized spread & part of that cost the maker keeps & U\\
-    & Price impact & part lost to informed traders & U\\
-    & Amihud illiquidity & price move per dollar traded & U\\
+2.1 & Quoted spread & cost of crossing the book now\\
+    & Depth at best / within $h$ bps & quantity available near the price\\
+    & Effective spread & cost an actual trade paid\\
+    & Realized spread & part of that cost the maker keeps\\
+    & Price impact & part lost to informed traders\\
+    & Amihud illiquidity & price move per dollar traded\\
 \midrule
-2.2 & Matched-timestamp volatility & price variability on a common grid & U\\
-    & Intra-interval dispersion & price variation within one second & U\\
-    & Kyle's lambda & price move per unit of the venue's net order flow & U\\
+2.2 & Matched-timestamp volatility & price variability on a common grid\\
+    & Intra-interval dispersion & price variation within one second\\
+    & Kyle's lambda & price move per unit of the venue's net order flow\\
 \midrule
-2.3 & Executed volume, trade count & how much trades & U\\
-    & Time to execution & how long orders wait & U\\
-    & Trader surplus & price improvement against the limit & U\\
-    & Boundary concentration & arrivals near the batch close & F\\
-    & Unexecuted residual share & imbalance left at $\clr$ & F\\
+2.3 & Executed volume, trade count & how much trades\\
+    & Time to execution & how long orders wait\\
+    & Trader surplus & price improvement against the limit\\
 \midrule
---- & Throughput, clearing latency & computing speed (control) & U\\
+--- & Throughput, clearing latency & computing speed (control)\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -516,7 +519,7 @@ question. Scope: U both engines, F FBA only.}
 \subsection{Liquidity and Transaction Costs (RQ2.1)}
 \label{sec:metrics21}
 
-\paragraph{Quoted spread (U).} For the CDA, every book snapshot in the
+\paragraph{Quoted spread.} For the CDA, every book snapshot in the
 bucket with both sides present contributes $(a_t - b_t)/\midp \cdot
 10^{4}$\,bps, and the bucket value is the mean over snapshots. The FBA
 has no book while a batch accumulates; its analogue is the gap between the
@@ -524,19 +527,24 @@ best unfilled sell and the best unfilled buy among the orders left after
 a clear (including those rolled over from earlier batches), relative to
 $\clr$ and in bps, averaged over the batches in which both exist.
 
-\paragraph{Depth at best (U).} For the CDA, the mean over snapshots of
+\paragraph{Depth at best.} For the CDA, the mean over snapshots of
 (best-bid size $+$ best-ask size)$/2$, the touch only. For the FBA, the
 mean over batches of $(D(\clr) + S(\clr))/2$, the quantity eligible to
-trade at the clearing price.
+trade at the clearing price. A batch that does not cross still has a
+price: the engine applies the same tie-break cascade to the submitted
+limit prices even when no volume can execute, and the price it selects
+serves as $\clr$ for the FBA's book-like metrics in that batch, so depth
+and quoted spread exist in almost every second, not only in those with a
+trade.
 
-\paragraph{Depth within $h$ bps (U), $h \in \{10, 50, 100\}$.} The
+\paragraph{Depth within $h$ bps, $h \in \{10, 50, 100\}$.} The
 quantity of all orders priced within $h$\,bps of a reference price, half
 the sum of both sides, cumulative across thresholds. The orders counted
 are those in the book (CDA, reference $\midp$) or pending in the batch
 just before it clears (FBA, rolled-over orders included, reference
 $\clr$).
 
-\paragraph{Effective, realized spread and price impact (U).} Let trade
+\paragraph{Effective, realized spread and price impact.} Let trade
 $k$ have price $p_k$, direction $\varepsilon_k$, pre-trade reference price $m_k$
 and, a markout horizon $\Delta$ later, reference price $m_{k+\Delta}$.
 In proportional form \citep{hasbrouck1993assessing,hendershott2011algorithmic},
@@ -576,7 +584,7 @@ would only undo the deviation's own sign. The rule is an estimate, not
 an observed direction; \Cref{sec:limitssign} discusses what it can and cannot
 recover.
 
-\paragraph{Amihud illiquidity (U).} With $\mathrm{close}$ the last
+\paragraph{Amihud illiquidity.} With $\mathrm{close}$ the last
 reference price observed in a bucket (carried forward across empty
 buckets) and $\mathrm{ret} = (\mathrm{close} -
 \mathrm{prev\_close})/\mathrm{prev\_close}$,
@@ -591,13 +599,13 @@ infinite illiquidity.
 \subsection{Price Discovery and Market Quality (RQ2.2)}
 \label{sec:formularq22}
 
-\paragraph{Realized volatility (U).} Within a bucket, the root sum of
+\paragraph{Realized volatility.} Within a bucket, the root sum of
 squared consecutive returns of the reference price,
 $\sqrt{\sum_i r_i^2}$. It needs at least two prices in one bucket, which
 the FBA, clearing at most once per second, almost never has; it is
 therefore not used for the comparison, and is replaced by the next metric.
 
-\paragraph{Matched-timestamp volatility (U).} Let $\mathcal{T}$ be the set
+\paragraph{Matched-timestamp volatility.} Let $\mathcal{T}$ be the set
 of buckets in which both engines traded, with $\mathrm{VWAP}^{e}_t$ the
 volume-weighted average price of engine $e$ in bucket $t$. Over
 consecutive $t_i, t_{i+1} \in \mathcal{T}$ the two engines' log returns
@@ -615,14 +623,14 @@ engines. Because $\mathcal{T}$ needs a trade on both sides, the measure
 compares the engines on common ground; it is not a whole-month volatility
 estimate for either.
 
-\paragraph{Intra-interval price dispersion (U).} The coefficient of
+\paragraph{Intra-interval price dispersion.} The coefficient of
 variation of the trade prices within a bucket,
 $\operatorname{std}(\{p_k\}) / \operatorname{mean}(\{p_k\}) \cdot
 10^{4}$\,bps (population standard deviation). It is zero for the FBA by
 construction whenever the bucket holds a single batch clear, since every
 trade of a batch is at $\clr$.
 
-\paragraph{Kyle's lambda (U).} Kyle's lambda measures how far the price
+\paragraph{Kyle's lambda.} Kyle's lambda measures how far the price
 moves per unit of net order flow \citep{kyle1985continuous}. It is
 estimated as the slope of a regression of price change $y$ on net signed
 flow $f$; the regressor, the response and the regression itself are set
@@ -717,19 +725,19 @@ For the CDA alone, a finer per-sweep estimate is also reported: the
 midpoint move 5\,s after a sweep, regressed on the sweep's net executed
 quantity, in bps per SOL (\Cref{sec:res22}).
 
-\subsection{Execution and Order-Arrival Timing (RQ2.3)}
+\subsection{Execution (RQ2.3)}
 \label{sec:metrics23}
 
-\paragraph{Executed volume, notional, VWAP and trade count (U).} The sums
+\paragraph{Executed volume, notional, VWAP and trade count.} The sums
 of $q$ and of $p \cdot q$ over the bucket's trades, their ratio (the
 volume-weighted average price, $\mathrm{VWAP}$, missing when no volume
 traded), and the number of trades.
 
-\paragraph{Average time to execution (U).} For every order that receives
+\paragraph{Average time to execution.} For every order that receives
 a fill, the time from its submission to its first fill, in seconds,
 averaged over the orders submitted in the bucket.
 
-\paragraph{Trader surplus (U).} Realized price improvement against each
+\paragraph{Trader surplus.} Realized price improvement against each
 side's own limit, summed over the bucket's trades: the buy side of a
 trade at $p_k$ contributes $\max(0, \pi - p_k)\,q_k$ and the sell side
 $\max(0, p_k - \pi)\,q_k$, where $\pi$ is that side's limit price; a market
@@ -741,27 +749,10 @@ whatever the trade price, so a difference between the engines in this
 metric comes from which orders were matched, or from trades involving a
 market order, not from the price as such (\Cref{sec:priceimprovement}).
 
-\paragraph{Boundary concentration (F).} The share of order arrivals that
-land in the final 10\% of a batch's window, with the arrivals of all
-batches that close in the bucket pooled. With arrivals spread evenly over the window, its
-expected value is $0.10$.
-
-\paragraph{Unexecuted residual share (F).} Over the batches that close in
-the bucket,
-\begin{equation}
-  \label{eq:residualshare}
-  \frac{\sum |\,D(\clr) - S(\clr)\,|}{\sum \max\bigl(D(\clr), S(\clr)\bigr)} .
-\end{equation}
-It measures how one-sided the schedule is \emph{at the clearing price},
-not the share of submitted volume left unfilled: a batch can execute
-everything it possibly can, $\min(D(\clr), S(\clr))$, and still score
-high if the two sides were far apart in size. A batch in which no buy
-price reaches any sell price scores exactly $1$.
-
 \subsection{Engine Controls}
 \label{sec:metricscontrol}
 
-\paragraph{Throughput and clearing latency (U).} Throughput is the number
+\paragraph{Throughput and clearing latency.} Throughput is the number
 of messages in the bucket divided by the computing time spent on them;
 clearing latency is that computing time divided by the number of timed
 operations, which is one per order for the CDA but one per \emph{batch}
