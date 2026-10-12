@@ -149,8 +149,11 @@ $\mathrm{VWAP}^{e}_t$ & volume-weighted average price of engine $e$ in bucket $t
 $r^{e}_i$ & log return of $\mathrm{VWAP}^{e}$ between consecutive buckets of $\mathcal{T}$ & \eqref{eq:matchedvol}\\
 $\mathrm{vol}^{e}_{\text{day}}$ & matched-timestamp volatility of engine $e$ on one day & \eqref{eq:matchedvol}\\
 $\lambda$ & Kyle's lambda, price change per unit of net order flow & \S\ref{sec:formularq22}\\
-$f_i, y_i$ & net signed order flow and price change (bps) of observation $i$ in the Kyle regression & \S\ref{sec:formularq22}\\
-$m_{\mathrm{pre}}, m_{\mathrm{post}}$ & CDA midpoint before a sweep and 5\,s after it & \S\ref{sec:formularq22}\\
+$f_i$ & venue net taker flow in second $i$ (1{,}000 SOL), the regressor of Kyle's lambda & \eqref{eq:kylef}\\
+$y^{e}_i(h)$ & price change (bps) of engine $e$ from second $i-1$ to $i+h$ & \eqref{eq:kyley}\\
+$\lambda^{e}(h), u^{e}_i$ & Kyle's lambda of engine $e$ at horizon $h$, and the regression residual & \eqref{eq:kylereg}\\
+$\theta(h), v_i$ & difference $\lambda^{\mathrm{FBA}}(h) - \lambda^{\mathrm{CDA}}(h)$, and its regression residual & \eqref{eq:kylediff}\\
+$m_{\mathrm{pre}}, m_{\mathrm{post}}$ & CDA midpoint before a sweep and 5\,s after it (per-sweep CDA lambda) & \S\ref{sec:formularq22}\\
 $\mu$ & prior expected value of the asset in the model of \citet{kyle1985continuous} & \S\ref{sec:adverse}\\
 \midrule
 \multicolumn{3}{@{}l}{\emph{Design analysis}}\\
@@ -201,11 +204,10 @@ price.
 
 \subsection{Demand and Supply}
 
-The batch is cleared the same way an economics textbook clears a market: by
-lining up how much would be bought against how much would be sold at every
-possible price, and finding where the two balance. For any price $p$, the
-bid side gives the cumulative \emph{demand} at that price and the ask side
-gives the cumulative \emph{supply}, exactly as in that textbook picture.
+The batch is cleared by lining up how much would be bought against how much
+would be sold at every possible price, and finding where the two balance.
+For any price $p$, the bid side gives the cumulative \emph{demand} at that
+price and the ask side gives the cumulative \emph{supply}.
 Demand is the quantity buyers are willing to take at $p$ or less, so it can
 only fall as $p$ rises: a bid counts toward it once its limit price is at
 least $p$, and drops out as soon as $p$ climbs past that limit. Supply is
@@ -237,13 +239,17 @@ mechanism drawn as a classical demand/supply diagram: $D(p)$ and $S(p)$
 as step functions of price. Reading it: pick any price on the horizontal
 axis; the height of the demand step there is how much would be bought at
 that price or cheaper, the height of the supply step is how much would be
-sold at that price or dearer. The two curves bind, i.e.\ reach their
-largest common height, at the clearing price $\clr$, marked where they
-meet. Drawn from a small illustrative example (four orders, three buys
-and one sell), chosen because it clears without a tie and so needs no
-tie-break cascade (below) to illustrate the basic mechanism cleanly; a
-real batch from the simulated month has dozens of orders and does not
-render legibly at this scale.}
+sold at that price or dearer. The two curves cross at the clearing price
+$\clr = 101$, where the executable volume $V(p)$ is largest
+($V^{*} = 35$). Drawn from a small illustrative batch of eight orders,
+four buys (limits 106, 104, 101, 98) and four sells (limits 96, 99, 101,
+104), chosen because it clears without a tie and so needs no tie-break
+cascade (below). At $\clr$ demand exceeds supply by 5, so the buy order
+at 101 is only partly filled. The shaded areas are the buyers' surplus
+(right of $\clr$, under $D$) and the sellers' surplus (left of $\clr$,
+under $S$), built from one rectangle per order that trades at a better
+price than its limit. A real batch from the simulated month has dozens
+of orders and does not render legibly at this scale.}
 \label{fig:fbaschedule}
 \end{figure}
 
@@ -306,17 +312,18 @@ the one it asked for, and every inframarginal order a strictly better
 one; \Cref{fig:fbaschedule} shows exactly how much better. A buyer
 with limit price $\pi_k$ above $\clr$ does not pay $\pi_k$; the whole
 batch pays $\clr$, so this order keeps the gap $\pi_k - \clr$ for every
-unit it trades. In \Cref{fig:fbaschedule} this gap is the shaded
+unit it trades. In \Cref{fig:fbaschedule} each such order is one shaded
 rectangle: its width is how far that order's limit sits above the
 clearing price, its height is how much of it trades, and its area is
 what that order gains by not having to pay what it was willing to.
 Sellers gain the mirror amount, $\clr - \pi_k$, the gap between the
 clearing price and their own limit. Summed over every executed order,
-these gaps are the familiar consumer- and producer-surplus areas from an
-introductory supply/demand diagram, just read off a single discrete
-batch instead of a continuous market: the buyers' share sits above
-$\clr$, under the demand curve; the sellers' share sits below $\clr$,
-above the supply curve.
+these gaps are the familiar consumer- and producer-surplus areas of a
+supply/demand diagram, read off a single discrete batch instead of a
+continuous market. With price on the horizontal axis, as in
+\Cref{fig:fbaschedule}, the buyers' share is the area to the right of
+$\clr$ under the demand curve, and the sellers' share is the area to the
+left of $\clr$ under the supply curve.
 
 Formally, each side's surplus at a candidate price $p$ is
 \begin{equation}
@@ -332,14 +339,17 @@ has $x_k>0$ if $\pi_k \ge \clr$, and a sell only if $\pi_k \le \clr$, so
 no order ever executes at a loss relative to its own limit. This is what
 \Cref{ch:results} measures as \emph{trader surplus}. The worked example
 also previews a point \Cref{sec:priceimprovement} returns to in full: the
-two sides need not split $W$ evenly, or even at all. Here the entire
-gain goes to the buyers, because the seller's own limit happens to equal
-the clearing price. In this example $\mathcal{P}^{*}$ holds the single
-price $100$, so the split is pinned down; when $\mathcal{P}^{*}$ holds
+two sides need not split $W$ evenly. Here the buyers gain
+$5 \times 10 + 3 \times 15 = 95$ and the sellers
+$5 \times 10 + 2 \times 10 = 70$, while the buy and the sell with limit
+101 trade exactly at their limit and gain nothing. In this example
+$\mathcal{P}^{*}$ holds the single price $101$, so the split is pinned
+down; when $\mathcal{P}^{*}$ holds
 several prices, choosing a different one would split $W$ differently
 without changing who trades or how much.
 
 \subsection{What Differs from the CDA}
+\label{sec:fbavscda}
 
 Set against \Cref{sec:cdaformal}, the FBA changes three things. Orders
 wait up to $\tau$ for their first chance to trade, instead of trading on
@@ -347,8 +357,97 @@ arrival, and longer if they are rolled over.
 All trades of a batch share one price $\clr$, instead of each trading at
 the resting order's price. And because the orders of a batch trade
 simultaneously, no order crosses another's quote: there is no maker and
-no taker, and a trade has no observable direction $\varepsilon_k$. This last point
-is the reason several metrics below need an adaptation for the FBA.
+no taker, and a trade has no observable direction $\varepsilon_k$. This
+point is one reason several metrics below need an adaptation for the
+FBA. The other reason is less obvious but matters just as much: the FBA
+has no order book that could be observed in the way the CDA's can.
+
+\paragraph{Why the FBA's unmatched orders are not an order book.} At
+first sight the FBA seems to offer a ready-made substitute for the CDA's
+book. At any moment it holds a set of orders that have not traded yet,
+each with a side, a quantity and a limit price. Sorted by price, this set
+would give a best bid, a best ask, depth at every level and a book
+imbalance, and every book-based statistic could then be computed exactly
+as for the CDA. This does not work, because the two sets are produced by
+different processes and therefore mean different things.
+
+A CDA book is what remains \emph{after} matching. Every order that can
+trade does so the instant it arrives (\Cref{sec:cdaformal}), so an order
+sits in the book only because no opposite order has been willing to trade
+with it. The book is therefore never crossed ($b_t < a_t$ at all times),
+and its depth is liquidity that is actually available: a new order can
+trade against it immediately, at the prices shown.
+
+The FBA's pending orders are what is waiting \emph{for} matching: the
+residual of the last batch plus everything submitted since. None of
+these orders has yet been matched against any other, which has three
+consequences.
+\begin{itemize}
+  \item \textbf{The set holds orders a CDA book never would.} A buy
+  priced above a waiting sell would have traded on arrival in the CDA; in
+  the FBA both simply wait for the close. Whenever a batch is going to
+  trade, its pending set is crossed, with the best buy at or above the
+  best sell. Its ``quoted spread'' is then zero or negative, and its depth
+  includes quantity that is about to disappear.
+  \item \textbf{Its content depends on when it is read.} Just after a
+  clear it holds only the residual; just before the next clear it holds
+  the residual plus a full interval of new orders. A CDA book has no such
+  cycle.
+  \item \textbf{Nobody can trade against it at the prices shown.} A
+  pending order offers to trade only at the next clearing price, and only
+  if that batch's demand and supply reach its limit. It is not standing
+  liquidity at its own limit price in the moment it is observed.
+\end{itemize}
+Statistics computed on the pending set as if it were a book would measure
+the batching delay rather than the liquidity of the market. For the same
+reason, Kyle's lambda is not estimated from the pending set: both engines
+are measured against one common measure of order flow, the venue's own
+net taker flow (\Cref{sec:formularq22}).
+
+\paragraph{When the FBA is read: before the close, after the clear, or at
+the CDA's times.} Any book-like FBA statistic must be read at some point
+in the batch cycle, and that choice decides which way the comparison is
+biased.
+\begin{itemize}
+  \item \textbf{Just before the close} the pending set is at its fullest:
+  it holds the whole interval's orders, including those that are about to
+  execute. Depth read here is overstated, so the bias \emph{favours} the
+  FBA. Both depth measures in this thesis are read at this point
+  (\Cref{sec:metrics21}). The FBA still comes out slightly thinner, so
+  that finding holds with margin.
+  \item \textbf{Just after the clear} the residual is, like a CDA book,
+  no longer crossed, because everything that could trade at $\clr$ has
+  traded. But this is the thinnest moment of the cycle. The clear has
+  just removed exactly the orders closest to $\clr$, and the next
+  interval's orders have not arrived yet, so the residual is often
+  one-sided near $\clr$. A spread or depth read here is biased
+  \emph{against} the FBA. The FBA quoted spread is read at this point,
+  which is one reason it is treated as weaker evidence
+  (\Cref{sec:limitscomparable}).
+  \item \textbf{At the CDA's snapshot times.} One could instead read the
+  pending set at the same instants as the CDA's book snapshots, so that
+  both engines are observed ``at the same time''. The same clock time
+  does not make the two sets the same kind of object. At any instant
+  inside a batch, the pending set is the residual plus whatever has
+  arrived so far. It is still unmatched and possibly crossed, and its
+  content depends on how far into the batch the snapshot falls.
+  Averaging such readings over the interval only mixes the two biases
+  above, in proportions set by when orders happen to arrive.
+\end{itemize}
+The sampling also differs. A CDA bucket value is the mean of many book
+snapshots spread across the second (\Cref{sec:metrics21}), which
+describes the typical state of the book. An FBA value is a single reading
+per batch, taken at one end of the cycle.
+
+For these reasons the comparison rests mainly on \emph{trades}. A trade
+exists only once matching is complete, in both mechanisms: in the CDA
+at the instant two orders cross, and in the FBA at the instant the batch
+clears. Executed volume, effective and realized spread, price impact and
+trader surplus therefore compare like with like, whenever they are read.
+The book-like FBA metrics are kept, but each is read at a stated point in
+the cycle, and its direction of bias is taken into account when the
+results are interpreted. \Cref{app:comparability} sets out the argument
+in more detail.
 
 \section{Measurement Framework}
 \label{sec:measurement}
@@ -401,7 +500,7 @@ question. Scope: U both engines, F FBA only.}
 \midrule
 2.2 & Matched-timestamp volatility & price variability on a common grid & U\\
     & Intra-interval dispersion & price variation within one second & U\\
-    & Kyle's lambda & price move per unit of order flow & U\\
+    & Kyle's lambda & price move per unit of the venue's net order flow & U\\
 \midrule
 2.3 & Executed volume, trade count & how much trades & U\\
     & Time to execution & how long orders wait & U\\
@@ -523,21 +622,100 @@ $\operatorname{std}(\{p_k\}) / \operatorname{mean}(\{p_k\}) \cdot
 construction whenever the bucket holds a single batch clear, since every
 trade of a batch is at $\clr$.
 
-\paragraph{Kyle's lambda (U).} The ordinary least-squares slope through
-the origin of price change on order flow, $\lambda = \sum_i f_i y_i /
-\sum_i f_i^2$, per bucket, in bps per SOL \citep{kyle1985continuous}. For
-the CDA, one observation is one \emph{sweep} (trades with the same
-timestamp, side and pre-trade midpoint): $f$ is the sweep's net signed
-executed quantity and $y = (m_{\mathrm{post}} -
-m_{\mathrm{pre}})/m_{\mathrm{pre}} \cdot 10^{4}$, with $m_{\mathrm{post}}$
-the midpoint 5\,s later. For the FBA, one observation is one batch: $f$ is
-the net quantity of every order waiting in the batch, buy minus sell,
-including all orders rolled over from earlier batches, and $y$ the change
-in bps of the batch's selected price from the previous batch's. Because
-the FBA's $f$ covers a whole standing book and the CDA's a single sweep,
-the two regressors are on very different scales and the two slopes are
-not comparable, and only the CDA's is interpreted
-(\Cref{sec:res22,sec:limitscomparable}).
+\paragraph{Kyle's lambda (U).} Kyle's lambda measures how far the price
+moves per unit of net order flow \citep{kyle1985continuous}. It is
+estimated as the slope of a regression of price change $y$ on net signed
+flow $f$; the regressor, the response and the regression itself are set
+out in turn below.
+
+The FBA poses a problem for the regressor $f$. Net order flow is normally
+read from the trades themselves, as buyer-initiated minus
+seller-initiated quantity, $\sum_k \varepsilon_k q_k$
+(\Cref{sec:terminology}). In the CDA every trade has an aggressor, so
+this is possible. In the FBA it is not: all orders of a batch trade at
+once, no trade has an aggressor, and $\varepsilon_k$ does not exist
+(\Cref{sec:fbavscda}). The FBA therefore has no net order flow of its
+own to put on the right-hand side of the regression.
+
+The solution is to measure the flow \emph{outside} both engines and use
+that one series for both. The raw Hyperliquid records have no aggressor
+field, but they allow the aggressor to be identified. Every fill on the
+real venue writes a record with status \emph{filled}, the order's side
+and its remaining size, and each record carries the time elapsed since
+the order was submitted (\texttt{timestampDiff}, in milliseconds). A
+fill recorded at the order's own submission time, with an elapsed time
+of zero, means the order traded on arrival: it took liquidity and was
+the taker. A fill recorded later belongs to an order that had been
+resting, a maker. The filled quantity is the drop in the order's
+remaining size. Summing the taker fills by side gives the venue's net
+taker flow in each second $i$,
+\begin{equation}
+  \label{eq:kylef}
+  f_i = \frac{\text{taker buy quantity}_i - \text{taker sell quantity}_i}{1{,}000\ \text{SOL}},
+\end{equation}
+positive when buyers were the aggressors on balance. Three properties
+make it the right regressor. It is identical for both engines, because
+both replay the same orders in the same second. Its direction comes from
+the venue's own fill records, not from a price-based guess such as the
+tick rule used for the FBA spreads; the only error left is a maker hit
+within the first millisecond after it was posted, which the record's
+millisecond resolution would count as a taker. And it comes from neither of the two engines
+being compared: the simulator never reads these records. Using the
+CDA's own executed flow instead would have measured the FBA against a
+quantity produced by its competitor. The CDA's simulated volume follows
+the venue's closely over time, but at about twice its level, because the
+replay does not enforce all of the venue's rules
+(\Cref{sec:testfidelity}); the venue's own record avoids that error too.
+
+With $f_i$ fixed, each engine is regressed on it separately. The response
+is that engine's own price change,
+\begin{equation}
+  \label{eq:kyley}
+  y^{e}_i(h) = \frac{P^{e}_{i+h} - P^{e}_{i-1}}{P^{e}_{i-1}} \cdot 10^{4},
+  \qquad h \in \{0, 5\}\,\text{s},
+\end{equation}
+where $P^{e}_i$ is engine $e$'s VWAP in second $i$, carried forward over
+seconds in which it did not trade. Lambda is then the slope of a linear
+regression of this price change on the flow, estimated separately for
+each engine $e$ and each horizon $h$:
+\begin{equation}
+  \label{eq:kylereg}
+  y^{e}_i(h) = \lambda^{e}(h)\, f_i + u^{e}_i,
+  \qquad
+  \hat{\lambda}^{e}(h) = \frac{\sum_i f_i\, y^{e}_i(h)}{\sum_i f_i^{2}},
+\end{equation}
+where $u^{e}_i$ is the part of the price change not explained by the
+flow. The regression is estimated by ordinary least squares
+\emph{without an intercept}: Kyle's price rule $p = \mu + \lambda f$
+(\Cref{sec:adverse}) says that with no net flow the price should not
+move, so the line is forced through the origin, and the
+estimator is the ratio given in \eqref{eq:kylereg}. The question each
+slope answers is the same for both engines: when the real market saw
+this much net buying in a second, how far did this mechanism's price
+move? The sample is every second with nonzero venue flow in which both
+$y^{\mathrm{CDA}}_i$ and $y^{\mathrm{FBA}}_i$ exist, pooled over the
+whole month, so both regressions use exactly the same observations and
+$\lambda$ is in bps per 1{,}000 SOL.
+
+To test whether the two slopes differ, a third regression is run on the
+difference between the engines' price changes,
+\begin{equation}
+  \label{eq:kylediff}
+  y^{\mathrm{FBA}}_i(h) - y^{\mathrm{CDA}}_i(h) = \theta(h)\, f_i + v_i ,
+\end{equation}
+again through the origin. Because both engines share the same $f_i$ and
+the same seconds, its slope is exactly the difference of the two
+lambdas, $\hat{\theta}(h) = \hat{\lambda}^{\mathrm{FBA}}(h) -
+\hat{\lambda}^{\mathrm{CDA}}(h)$. Consecutive seconds are correlated, so
+the standard error of $\hat{\theta}$ is a Newey--West error, with the
+lag length chosen by the same rule as for every other metric
+(\Cref{sec:experiments}); a $\hat{\theta}$ that is not significantly
+different from zero means the two prices respond to the same flow by the
+same amount.
+
+For the CDA alone, a finer per-sweep estimate is also reported: the
+midpoint move 5\,s after a sweep, regressed on the sweep's net executed
+quantity, in bps per SOL (\Cref{sec:res22}).
 
 \subsection{Execution and Order-Arrival Timing (RQ2.3)}
 \label{sec:metrics23}

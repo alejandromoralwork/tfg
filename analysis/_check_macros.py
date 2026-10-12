@@ -8,8 +8,8 @@ for _f in ("Thesis/data/generated_numbers.tex", "Thesis/data/generated_verificat
         pass
 print("defined macros:", len(defined))
 
-for fname in ["Thesis/chapters/ch5_results.tex", "Thesis/chapters/ch4_simulation.tex",
-              "Thesis/chapters/ch6_conclusion.tex", "Thesis/chapters/appendix_c_reproducibility.tex",
+for fname in ["Thesis/chapters/ch6_results.tex", "Thesis/chapters/ch5_simulation.tex",
+              "Thesis/chapters/ch7_conclusion.tex", "Thesis/chapters/appendix_c_reproducibility.tex",
               "Thesis/chapters/appendix_d_testing.tex", "Thesis/chapters/appendix_e_formulas.tex",
               "Thesis/chapters/appendix_f_comparability.tex"]:
     text = open(fname, encoding="utf-8").read()

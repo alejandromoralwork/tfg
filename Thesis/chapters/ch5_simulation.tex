@@ -255,7 +255,11 @@ correlation. The lag truncation is set automatically per metric from the
 paired sample size $n$ by the rule of \citet{newey1994automatic},
 $\lfloor 4(n/100)^{2/9} \rfloor$, capped at 60 lags, so no fixed lag
 count is chosen by hand and every table in \Cref{ch:results} reports a
-standard error computed the same reproducible way.
+standard error computed the same reproducible way. Kyle's lambda is the
+one metric that is a slope rather than a mean. For it, the per-second
+difference between the two engines' price changes is regressed on the
+common order flow, and the same Newey--West rule gives the standard error
+of the difference in slopes (\Cref{sec:formularq22}).
 
 This design's limits are real: \Cref{sec:limitations} sets out their full
 scope, and \Cref{sec:metricreliability} does the same for the metrics

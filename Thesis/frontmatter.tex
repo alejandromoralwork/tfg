@@ -59,14 +59,19 @@ implemented in Rust and fed with
 the same replayed Level~4 order flow from the Hyperliquid exchange for the Solana (SOL) perpetual futures contract during one month of trading. The comparison covers liquidity and transaction costs, price discovery and market quality, and execution and
 order-arrival timing.
 
-With one-second batches, both engines trade statistically the same volume at
-closely matching prices. The adverse-selection cost that resting orders pay
-in the continuous market does not fall systematically on one side in the
-batch auction, as far as an estimated trade direction can show. The batch
-auction pays for this with slightly less depth, longer time to execution and
-batches that mostly do not cross at all. The design analysis adds that a
-predictable batch close turns price improvement into a race to submit last,
-so speed keeps some value under batching.
+The main finding is that one-second batch auctions perform about as well as
+the continuous market. The two engines trade volumes that are statistically
+indistinguishable, at closely matching prices. Batching also removes a cost
+that the continuous market places on liquidity providers: there, resting
+orders systematically pay an adverse-selection cost, while in the batch
+auction this cost does not fall systematically on either side of the trade,
+although this result relies on an estimated trade direction. The gain comes
+at a modest price: the batch auction has slightly less depth, orders take
+longer to execute, and most batches do not cross at all. Finally, the design
+analysis shows that batching does not make speed worthless. When traders can
+predict when a batch closes, the best way to get price improvement is to
+submit as late as possible, so the race to be first becomes a race to be
+last.
 
 \vspace{0.6em}
 \noindent\textbf{Keywords:} market microstructure; frequent batch

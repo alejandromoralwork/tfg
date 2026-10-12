@@ -15,6 +15,7 @@ import json
 import numpy as np
 import pandas as pd
 
+import common_flow_lambda
 import config
 import load
 import matched_volatility
@@ -38,6 +39,8 @@ METRIC_STEM = {
     "price_impact_bps_30s": "PriceImpactThirtyS",
     "amihud_illiquidity": "Amihud",
     "kyle_lambda": "KyleLambda",
+    "common_flow_lambda": "CommonFlowLambda",
+    "common_flow_lambda_5s": "CommonFlowLambdaFiveS",
     "realized_volatility": "RealizedVol",
     "matched_volatility": "MatchedVol",
     "matched_volatility_intraday": "MatchedVolIntraday",
@@ -65,6 +68,8 @@ METRIC_STEM = {
 _FOUR_DP = {"fill_rate", "order_to_trade_ratio", "book_imbalance",
             "unexecuted_residual_share", "boundary_concentration",
             "order_size_inflation"}
+# bps per 1,000 SOL: values ~0.5 with differences ~0.005 that 2dp would round away
+_THREE_DP = {"common_flow_lambda", "common_flow_lambda_5s"}
 # trade_count's raw per-row value is an integer count, but its *mean*
 # across buckets (what's reported here) is a fraction (e.g. ~1.3
 # trades/bucket) -- falls through to the default 2dp formatting below,
@@ -74,7 +79,12 @@ _FOUR_DP = {"fill_rate", "order_to_trade_ratio", "book_imbalance",
 def _fmt(x, key=None):
     if x is None or (isinstance(x, float) and (np.isnan(x) or np.isinf(x))):
         return "n/a"
-    s = f"{x:.4f}" if key in _FOUR_DP else f"{x:,.2f}"
+    if key in _FOUR_DP:
+        s = f"{x:.4f}"
+    elif key in _THREE_DP:
+        s = f"{x:.3f}"
+    else:
+        s = f"{x:,.2f}"
     if set(s.replace(",", "")) <= set("-0."):  # e.g. "-0.00" -> "0.00"
         s = s.lstrip("-")
     return s
@@ -144,6 +154,15 @@ def main(extra_macros=None):
         macros_for_paired(macros, dump["paired"], metric, stats)
     macros["SignedFbaSpreadNMatched"] = f"{signed['n_matched']:,}"
     macros["SignedFbaSpreadNSigned"] = f"{signed['n_signed']:,}"
+
+    # Kyle's lambda on one common regressor (the venue's net signed taker
+    # flow per second) for both engines -- the simulator's own FBA
+    # kyle_lambda regresses on the whole pending batch and is not comparable.
+    # See analysis/common_flow_lambda.py.
+    print("computing common-flow Kyle's lambda...")
+    cfl = common_flow_lambda.compute(merged)
+    for metric, stats in cfl["stats"].items():
+        macros_for_paired(macros, dump["paired"], metric, stats)
 
     print("computing one-sided stats for CDA-only / FBA-only metrics...")
     for metric in config.CDA_ONLY_METRICS:

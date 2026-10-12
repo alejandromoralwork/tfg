@@ -151,8 +151,9 @@ contribute a trade to the same second; and the filled share of submitted quantit
 which should never exceed one, does so in six rows out of \VerFillRows, all traceable
 to the repeated input records noted above. Recomputing eleven columns independently from the raw CSV
 files, rather than trusting the simulator's own running summary, matched to a
-relative error of at most $10^{-8}$ in every case but one (the FBA's Kyle's lambda,
-$2.4\times10^{-4}$, a sum of near-cancelling values). Every number quoted anywhere in
+relative error of at most $10^{-8}$ in every case but one (the simulator's own
+per-batch FBA Kyle's lambda, $2.4\times10^{-4}$, a sum of near-cancelling values;
+the comparison in \Cref{ch:results} does not use this value, \Cref{sec:formularq22}). Every number quoted anywhere in
 this thesis is generated the same way, by a script that also checks that no macro is
 left undefined and no cross-reference is left dangling; this process caught and
 corrected one real error, a wrongly based percentage of skipped records.

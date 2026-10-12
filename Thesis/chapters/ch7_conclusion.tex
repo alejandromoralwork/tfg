@@ -47,7 +47,10 @@ much} trades or \emph{at what price} (\Cref{tab:rq2answers}).
   liquidity, however, is slightly lower in the batch market, not higher.
   \item \textbf{Prices (RQ2.2).} Both engines arrive at the same price, and
   volatility is about the same; uniform pricing removes the spread of prices
-  within a second.
+  within a second. The same net order flow moves both prices by the same
+  amount within five seconds, so batching neither slows the price's
+  response to information nor dampens it, contrary to the prediction that
+  a batch price reacts less to one-sided flow.
   \item \textbf{Execution (RQ2.3).} The same volume trades, but orders wait
   longer, because \FbaEmptyBatchShare\% of one-second batches do not cross at
   all and even those that do leave most of their longer side unmatched.

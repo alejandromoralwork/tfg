@@ -1,10 +1,11 @@
-"""Builds the figures for ch5_results.tex -> Thesis/figures/*.png.
+"""Builds the figures for ch6_results.tex -> Thesis/figures/*.png.
 
 Eight figures, picked to each tell one specific story rather than
 dumping all ~30 metrics:
 
   fig_latencycontrol.png -- engine-control finding: clearing/match latency
-  fig_kylelambda.png      -- CDA Kyle's lambda (the FBA's is not comparable)
+  fig_kylelambda.png      -- both engines' price response to the same venue
+                             order flow (common-flow Kyle's lambda)
                              + the FBA intra-interval-dispersion uniform-pricing check
   fig_matchedvol.png       -- matched-timestamp volatility by calendar day
                              (RQ2.2), plus matched-return coverage per day
@@ -28,6 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+import common_flow_lambda
 import config
 import load
 import matched_volatility
@@ -82,21 +84,24 @@ def fig_latencycontrol(m):
 def fig_kylelambda(m):
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.6))
 
-    # CDA only: the FBA's regressor spans the whole rolled-over book, so its
-    # slope is on a different scale and overlaying the two would imply a
-    # comparison the data do not support.
+    # Both engines against ONE regressor, the venue's net signed taker flow
+    # per second (common_flow_lambda.py). The simulator's own FBA
+    # kyle_lambda regresses on the whole pending batch and is not comparable,
+    # so it is not plotted.
     ax = axes[0]
-    vals = m["kyle_lambda_cda"].dropna()
-    lo, hi = vals.quantile([0.01, 0.99])
-    vals = vals[(vals >= lo) & (vals <= hi)]
-    ax.hist(vals, bins=100, alpha=0.8, color=CDA_COLOR, density=True)
-    ax.axvline(0, color="black", linewidth=0.8, linestyle="--")
-    ax.axvline(vals.mean(), color=CDA_COLOR, linewidth=1.2, linestyle=":",
-               label=f"mean {m['kyle_lambda_cda'].mean():.2f}")
-    ax.set_xlabel("Kyle's lambda (bps per SOL of net executed flow)")
-    ax.set_ylabel("density")
-    ax.set_title("CDA: price impact of order flow, per interval")
-    ax.legend(frameon=False, fontsize=8)
+    cfl = common_flow_lambda.compute(m)
+    b, st = cfl["binned"], cfl["stats"]["common_flow_lambda"]
+    ax.axhline(0, color="black", linewidth=0.6)
+    ax.axvline(0, color="black", linewidth=0.6)
+    ax.plot(b["x"], b["cda"], marker="o", markersize=4, color=CDA_COLOR,
+            label=f"CDA, $\\lambda$ = {st['cda_mean']:.3f}")
+    ax.plot(b["x"], b["fba"], marker="s", markersize=4, color=FBA_COLOR,
+            label=f"FBA, $\\lambda$ = {st['fba_mean']:.3f}")
+    ax.set_xscale("symlog", linthresh=0.001)
+    ax.set_xlabel("Net venue taker flow in the second (1,000 SOL, symlog)")
+    ax.set_ylabel("mean price change in the second (bps)")
+    ax.set_title("Price response to the same order flow")
+    ax.legend(frameon=False, fontsize=8, loc="upper left")
 
     ax = axes[1]
     cda_disp = m["intra_interval_price_dispersion_cda"].dropna()

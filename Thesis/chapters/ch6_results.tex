@@ -209,7 +209,10 @@ near-zero level holds on every day, not only in the pooled mean.}
 \caption[RQ2.2 results]{Price discovery under both mechanisms. Paired
 differences (FBA$-$CDA), mean (Newey--West HAC standard error in
 parentheses), with $p$-values where both engines report the metric;
-$n$ as in \Cref{tab:res21}.}
+$n$ as in \Cref{tab:res21}. For Kyle's lambda the CDA and FBA columns are
+the two slopes on the same venue flow, the difference is the slope of the
+engines' difference in price change (\Cref{sec:formularq22}), and $n$ is
+the number of seconds with venue flow.}
 \label{tab:res22}
 \small
 \begin{tabularx}{\textwidth}{@{}L c c c c c@{}}
@@ -218,7 +221,8 @@ $n$ as in \Cref{tab:res21}.}
 \textbf{$p$} & \textbf{$n$}\\
 \midrule
 Intra-interval price dispersion (bps) & \ResDispersionCda & \ResDispersionFba & \ResDispersionDiff\ (\ResDispersionHacSe) & \ResDispersionP & \ResDispersionNPaired\\
-Kyle's lambda (bps per SOL) & \ResKyleLambdaCda & \ResKyleLambdaFba & \ResKyleLambdaDiff\ (\ResKyleLambdaHacSe) & \ResKyleLambdaP & \ResKyleLambdaNPaired\\
+Kyle's lambda, same second (bps per 1{,}000 SOL) & \ResCommonFlowLambdaCda & \ResCommonFlowLambdaFba & \ResCommonFlowLambdaDiff\ (\ResCommonFlowLambdaHacSe) & \ResCommonFlowLambdaP & \ResCommonFlowLambdaNPaired\\
+Kyle's lambda, 5\,s (bps per 1{,}000 SOL) & \ResCommonFlowLambdaFiveSCda & \ResCommonFlowLambdaFiveSFba & \ResCommonFlowLambdaFiveSDiff\ (\ResCommonFlowLambdaFiveSHacSe) & \ResCommonFlowLambdaFiveSP & \ResCommonFlowLambdaFiveSNPaired\\
 Matched-timestamp volatility, daily RMS (bps) & \ResMatchedVolCda & \ResMatchedVolFba & \ResMatchedVolDiff\ (\ResMatchedVolHacSe) & \ResMatchedVolP & \ResMatchedVolNPaired\\
 \bottomrule
 \end{tabularx}
@@ -256,20 +260,34 @@ zero for the FBA, as uniform pricing implies: exactly zero in
 the rest being seconds that received trades from two batch clears
 (\Cref{sec:testresets}).
 
-\textbf{Kyle's lambda.} For the CDA, the price moves by
-\ResKyleLambdaCda\,bps per SOL of net executed flow in a sweep, and the
-distribution is skewed to positive values all month
-(\Cref{fig:kylelambda}), as adverse selection predicts. The FBA value,
-\ResKyleLambdaFba, is built on an order-flow measure of a different scale
-and is not compared (\Cref{sec:limitscomparable}).
+\textbf{Kyle's lambda.} Both engines' prices follow the venue's net taker
+flow (\Cref{fig:kylelambda}, left): net buying raises the price and net
+selling lowers it, as adverse selection predicts. Measured 5\,s after the
+flow, the two engines respond by the same amount,
+\ResCommonFlowLambdaFiveSCda\ against \ResCommonFlowLambdaFiveSFba\,bps per
+1{,}000 SOL ($p$ \ResCommonFlowLambdaFiveSP). Within the same second, the
+FBA's price moves more (\ResCommonFlowLambdaFba\ against
+\ResCommonFlowLambdaCda, $p$ \ResCommonFlowLambdaP). The figure shows
+that this gap comes only from the seconds with the very largest flows; in
+every other range of flow the two curves lie on top of each other. Part
+of it is also a matter of measurement: within one second the CDA's price
+is a VWAP, an average along the path its trades took, while the FBA
+trades once, at the price the batch ends on. The 5\,s value, read once
+both prices have settled, is therefore the cleaner comparison. Batching
+neither hides order flow from the price nor makes the price overreact to
+it. Theory predicts that the FBA's price should react \emph{less} to
+one-sided flow (\Cref{tab:theorylinks}); the replay does not show this. The CDA's own per-sweep estimate, \ResKyleLambdaCda\,bps per SOL of a
+sweep's executed quantity, describes the CDA alone
+(\Cref{sec:formularq22}).
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.95\textwidth]{figures/fig_kylelambda.png}
-\caption[Kyle's lambda and the uniform-pricing check]{Left: distribution
-of the CDA's Kyle's lambda per interval (1st--99th percentile range
-shown); the FBA's value is built on a different order-imbalance scale and
-is not shown (\Cref{sec:limitscomparable}). Right: distribution of
+\caption[Kyle's lambda and the uniform-pricing check]{Left: mean price
+change of each engine within the second, against the venue's net taker
+flow in that second, in 20 bins of equal count (horizontal axis
+symmetric-logarithmic); the legend gives the pooled same-second slopes.
+Right: distribution of
 intra-interval price dispersion (log-scale count axis, since the FBA's
 near-total mass at exactly zero would otherwise flatten everything else);
 CDA's full distribution against only the small nonzero minority of FBA
@@ -461,9 +479,11 @@ depth within 10\,bps \ResDepthWithinTenBpsCda\ vs.\ \ResDepthWithinTenBpsFba\,SO
 Amihud \ResAmihudCda\ vs.\ \ResAmihudFba\\
 \addlinespace
 RQ2.2 Price discovery and market quality &
-Both engines discover the same price; uniform pricing removes price
-dispersion within a second, and volatility is about the same. &
+Both engines discover the same price and respond equally to the same
+order flow; uniform pricing removes price dispersion within a second, and
+volatility is about the same. &
 VWAP difference: median \PriceDiffMedianBps\,bps;
+Kyle's lambda at 5\,s \ResCommonFlowLambdaFiveSCda\ vs.\ \ResCommonFlowLambdaFiveSFba\,bps per 1{,}000 SOL;
 dispersion \ResDispersionCda\ vs.\ \ResDispersionFba\,bps;
 daily volatility \ResMatchedVolCda\ vs.\ \ResMatchedVolFba\,bps\\
 \addlinespace
@@ -486,9 +506,12 @@ From these answers the simulation supports three conclusions.
   price.} In the CDA the realized spread is negative and the price impact
   grows from \ResPriceImpactOneSCda\ to \ResPriceImpactThirtySCda\,bps
   between 1 and 30\,s: a resting order loses on average once the price has
-  absorbed what the trade revealed, and Kyle's lambda
-  (\ResKyleLambdaCda\,bps per SOL) confirms that the CDA's price follows net
-  order flow. In the FBA all three spread measures stay near zero on every
+  absorbed what the trade revealed. Kyle's lambda shows that the same net
+  order flow moves both engines' prices by the same amount within 5\,s
+  (\ResCommonFlowLambdaFiveSCda\ against \ResCommonFlowLambdaFiveSFba\,bps
+  per 1{,}000 SOL), so the information reaches the price in both
+  mechanisms; what differs is who pays for it. In the FBA all three spread
+  measures stay near zero on every
   day of the month, while volume and price match the CDA. This is what
   uniform clearing should do: every order in a batch trades at one price set
   after all orders are in, so there is no stale quote to pick off.
@@ -580,13 +603,19 @@ the same kind of object as a CDA book that has continuously matched
 everything it could (\Cref{app:comparability}). It is therefore weaker
 evidence about liquidity than depth within a threshold.
 
-\textbf{Kyle's lambda} for the FBA regresses the price change on the net
-quantity of every order waiting in the batch, including the whole
-rolled-over book, while the CDA's regressor is the net quantity of a single
-sweep. The two scales differ by orders of magnitude, so the FBA's
-near-zero slope follows from the scale, not from how its price reacts to
-the flow of a batch. A comparable value would need the imbalance of newly
-submitted orders only, which this run did not record.
+\textbf{Kyle's lambda} as the simulator records it is not comparable: the
+FBA's regressor is the net quantity of every order waiting in the batch,
+including the whole rolled-over book, while the CDA's is the net quantity
+of a single sweep, and the two differ in scale by orders of magnitude.
+The comparison therefore regresses both engines on the venue's own net
+taker flow per second (\Cref{sec:formularq22}). Two limits remain. The
+regressor is the flow that executed on the venue, not on either
+simulated engine. The CDA replays the same orders and its volume follows
+the venue's over time, though at about twice its level
+(\Cref{sec:testfidelity}); in the FBA the same orders may trade in a
+different second or not at all. And within one second the CDA's price is a VWAP and the FBA's a
+single clearing price, which can widen the same-second gap; the 5\,s
+horizon avoids this.
 
 \textbf{Realized volatility within a bucket} needs two prices in one
 second, which the FBA almost never has; matched-timestamp volatility
@@ -647,7 +676,8 @@ Executed volume, trade count, VWAP & high & read directly off executed trades, s
 Depth within a threshold, Amihud & high & same definition for both engines; the one asymmetry favours the FBA\\
 Spread decomposition, CDA side & high & observed trade direction\\
 Spread decomposition, FBA side & low & estimated direction; shows only that no one-sided cost is found\\
-Kyle's lambda & CDA only & FBA regressor on a different scale\\
+Kyle's lambda, 5\,s & high & same regressor (venue flow) and same definition for both engines\\
+Kyle's lambda, same second & moderate & CDA price is a VWAP within the second, the FBA's a single clearing price\\
 Quoted spread & moderate & FBA value read from leftover orders, not a book\\
 Depth at best & not comparable & different objects in the two engines\\
 Boundary concentration & baseline only & orders were not timed against a batch boundary\\

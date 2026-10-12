@@ -2,7 +2,7 @@
 
 Python pipeline that turns `results/sol/{fba,cda}_timeseries.csv` (and, for
 dataset-level descriptive stats, the raw `src/data/order_statuses/sol/*.data.gz`
-input files) into the numbers and figures used in `Thesis/chapters/ch5_results.tex`.
+input files) into the numbers and figures used in `Thesis/chapters/ch6_results.tex`.
 
 This is analysis-only: it does not touch the Rust simulator (`src/`) and does
 not re-run the simulation. It reads what `simulate sol 1` already produced.
@@ -29,7 +29,7 @@ a full machine-readable dump for reference/debugging), and `make_figures.py`
 (write `Thesis/figures/*.pdf`).
 
 Re-run any time the underlying CSVs change; it overwrites its outputs
-in place. `Thesis/chapters/ch5_results.tex` reads the generated macros via
+in place. `Thesis/chapters/ch6_results.tex` reads the generated macros via
 `\input{data/generated_numbers}` — nothing about the table markup needs to
 change on a re-run, only the numbers.
 
