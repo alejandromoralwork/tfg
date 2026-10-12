@@ -53,7 +53,8 @@ that fund the arms race. In decentralised finance the argument arrives
 from a different direction but converges on the same mechanism: settlement
 is already discrete, ordering inside a block is economically contestable,
 and uniform-price batch clearing removes the ordering rent otherwise
-extracted by block producers \citep{gong2023fbadex,walther2021multitoken}.
+extracted by block producers
+\citep{daian2020flash,gong2023fbadex,walther2021multitoken,dutta2025cow}.
 
 \section{The Design Problem behind the Idea}
 \label{sec:designproblem}
@@ -80,7 +81,9 @@ batching is a good idea, not about how a batching engine is built.
 \citet{zoican2021speed} and \citet{eibelshauser2022fba} study how
 information and speed interact inside auctions, and
 \citet{aldrich2020experiments} compare the two institutions in the
-laboratory. Individual design dimensions appear in isolation: rationing
+laboratory, and \citet{budish2024competition} explain why exchanges, which
+earn rents from selling speed, have little private incentive to adopt
+batching at all. Individual design dimensions appear in isolation: rationing
 rules in the derivatives microstructure literature, disclosure in the
 transparency literature \citep{madhavan1996transparency}, and clearing
 formulations in the decentralised exchange literature
@@ -143,18 +146,37 @@ a set of metrics defined in \Cref{sec:metricdefs}:
 \section{Contribution}
 \label{sec:contribution}
 
-The thesis makes two contributions, one conceptual and one methodological.
-It consolidates the FBA design space into five blocks and links each
-available option to a theoretical prediction about induced behaviour. And
-it implements two matching engines on a shared order and trade
-representation, so that the mechanism is the only treatment variable and
-the exact rationing outcome and the residual left unmatched after each
-batch are directly observable rather than inferred, applying them to a
-recently released Level~4 order book dataset from the Hyperliquid exchange
-\citep{albers2026openbook} at nanosecond precision under identical
-conditions with low confounding.
+The thesis makes four contributions.
 
-Both contributions are bounded by what a replay of fixed historical order
+\begin{enumerate}
+  \item \textbf{A map of the design space.} It decomposes a frequent batch
+  auction engine into five design blocks, sets out the options within each,
+  and links every option to the behaviour theory predicts it will induce and
+  to its main cost (\Cref{ch:design}, summarised in \Cref{tab:consequences}).
+  \item \textbf{The boundary repricing race.} It shows that the price
+  improvement uniform clearing gives on one side of a batch is a transfer
+  from the other side, not a gain, and that under a predictable close and a
+  visible batch the participant who submits last can steer that transfer.
+  Batching with a fixed close therefore moves the speed race to the batch
+  boundary instead of removing it (\Cref{sec:priceimprovement}). The same
+  chapter proposes four ways to redefine the maker--taker distinction once
+  arrival order no longer defines it (\Cref{sec:segregation}).
+  \item \textbf{A same-flow comparison.} It implements a continuous and a
+  batch matching engine on one shared order and trade representation and
+  feeds both with the same month of Level~4 order flow from the Hyperliquid
+  exchange \citep{albers2026openbook}, at nanosecond resolution. The
+  mechanism is the only treatment variable, and quantities that field data
+  never show, such as the exact rationing outcome and the volume left
+  unmatched after each batch, are observed directly (\Cref{ch:simulation,ch:results}).
+  \item \textbf{Measurement adaptations for batch markets.} It defines
+  batch analogues of the standard liquidity and cost measures and states,
+  metric by metric, how far each can be compared with its continuous
+  counterpart (\Cref{sec:metricdefs,sec:metricreliability}). The code and the
+  simulated output are published so that every number can be reproduced
+  (\Cref{app:repro}).
+\end{enumerate}
+
+All four are bounded by what a replay of fixed historical order
 flow can show. The design decomposition is normative, not a report of
 which option was tested; the empirical comparison isolates the
 mechanism's mechanical effect on one dataset, not how participants would

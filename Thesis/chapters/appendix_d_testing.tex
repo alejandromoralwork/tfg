@@ -189,8 +189,8 @@ sample of 24 whole hours shows that \VerHoursPostPct\ percent of the simulated
 volume comes from post-only takers and \VerHoursSelfPct\ percent from a participant
 trading with themselves; removing the post-only volume brings the simulated total to
 within a few percent of the venue's (\VerHoursExRatio\ times it, against
-\VerHoursRatio\ times before). Both engines share this same imperfect input equally,
-so the paired comparison between them in \Cref{ch:results} is unaffected, but the
+\VerHoursRatio\ times before). Both engines receive this same imperfect input, so
+it does not favour either side of the paired comparison in \Cref{ch:results}, but the
 absolute levels of volume and everything computed from it describe the replayed
 flow, not the venue exactly. This is the largest limitation this verification found.
 
@@ -199,7 +199,9 @@ flow, not the venue exactly. This is the largest limitation this verification fo
 
 The volume mismatch above is about \emph{how much} trades; it says nothing about
 \emph{at what price}. Comparing each engine's hourly volume-weighted price against
-real hourly SOL-USD candles from Yahoo Finance (\Cref{fig:pricevsyahoo}) shows the
+real hourly SOL-USD spot candles from Yahoo Finance (\Cref{fig:pricevsyahoo}; the
+perpetual is held close to the spot price by funding, so the two are comparable at an
+hourly scale) shows the
 simulated price tracks the real one closely all month: a mean absolute difference of
 about \VerPriceMadCda\ bps for the CDA and \VerPriceMadFba\ bps for the FBA, roughly
 0.1\% of the price, with the simulated price falling inside that hour's real

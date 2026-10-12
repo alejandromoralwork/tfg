@@ -2,8 +2,8 @@
 \label{ch:simulation}
 
 The idea behind the empirical part of the thesis is simple: one historical
-stream of orders is replayed
-twice, once through a continuous engine and once through a batch engine.
+stream of orders is replayed through two engines at once, a continuous
+engine and a batch engine.
 Because both engines receive exactly the same events, everything that could
 otherwise distort the comparison is held fixed, and the matching engine is the
 only thing that differs.
@@ -14,11 +14,11 @@ only thing that differs.
 \subsection{The Two Engines and the Replay}
 
 Both engines are written in Rust and work on the same order and trade format,
-so a difference in results cannot come from how orders are represented. They
-are otherwise independent programs with no common interface. A shared replay
-program reads the event stream once, in time order, and gives every order to
-\emph{both} engines in the same pass, which is what makes a comparison
-interval by interval possible. The metrics are computed by one shared piece of
+so a difference in results cannot come from how orders are represented.
+Apart from that format they share no code. A shared replay loop reads the
+event stream once, in time order, and gives every order to \emph{both}
+engines in the same pass, which is what makes a comparison interval by
+interval possible (\Cref{sec:implreplay} lists its steps). The metrics are computed by one shared piece of
 code outside the two engines, so both are measured in exactly the same way.
 The replay follows the timestamps stored in the data, not the computer's
 clock, so the results do not depend on how fast the machine runs. It is
@@ -31,7 +31,8 @@ price first and arrival time second. Each new order is matched at once against
 the other side of the book and trades at the price of the resting order, so
 one large order that sweeps several price levels can produce several trade
 prices. Any unfilled part of a limit order stays in the book until it is
-filled or a cancel record removes it (\Cref{sec:cancellations}). The
+filled or a cancel record removes it (\Cref{sec:cancellations}).
+\Cref{sec:implcda} describes the data structures behind the book. The
 time-in-force field of an order is read from the data but not enforced.
 This is a limitation of this implementation, and \Cref{sec:testfidelity}
 measures how large it is.
@@ -49,8 +50,11 @@ price closest to the previous batch's clearing price, and finally the lowest
 price, so the outcome is always the same. Orders priced
 strictly better than the clearing price are filled completely, except in the
 rare case where a range of prices supports the same volume (\Cref{sec:testfba}).
-Orders priced exactly at it are served in order of aggressiveness (a market order before any
-limit order) and then submission time.
+The eligible orders of each side are served in order of aggressiveness (a
+market order before any limit order, then the better limit price) and then
+submission time, so among orders priced exactly at the clearing price the
+earlier one is filled first. \Cref{sec:implfba} describes the clearing step
+in detail.
 
 Volume that cannot be matched always moves to the next batch. No outside
 source of liquidity, such as an automated market maker, is used to fill it, so
@@ -134,8 +138,60 @@ sends for an order that is already filled. Cancellation records are therefore
 the only way the simulated books shed orders other than by trading, and the size
 of the books depends on them (\Cref{sec:testresets}).
 
-\section{Data Source and Data Levels}
+\section{Venue and Data}
 \label{sec:data}
+
+\subsection{The Venue}
+\label{sec:venue}
+
+Hyperliquid is a decentralised exchange that runs on its own blockchain. Its
+trading layer, HyperCore, holds the order books, margin accounts and
+positions in the state of the chain, so the limit order book itself is on
+chain rather than kept by an off-chain operator; the chain is secured by
+HyperBFT, a variant of the HotStuff consensus protocol
+\citep{hyperliquid2026docs}. Most of its activity is in perpetual futures,
+among them the SOL contract studied here (\Cref{sec:terminology}). Three
+features of the venue matter for this thesis.
+
+\paragraph{A continuous book with price-time priority.} Orders are matched
+in price-time priority, at prices on a fixed tick grid and in sizes that are
+multiples of a lot size \citep{hyperliquid2026docs}. The venue is therefore
+a continuous double auction in the sense of \Cref{sec:cdaformal}, and the CDA
+engine of this thesis models its matching rule.
+
+\paragraph{Processing in blocks, cancellations first.} Orders do not reach
+the book one at a time as they leave a participant's machine; they are
+processed block by block. Within each consensus batch of a block the venue
+sorts actions into three groups and processes them in this order: actions
+that place no new order, then cancellations, then actions that place new
+orders, keeping the block proposer's order within each group
+\citep{hyperliquid2026docs}. A cancellation and an aggressive order that
+arrive in the same batch are therefore not raced against each other: the
+cancellation always goes first. Hyperliquid's continuous market thus already
+contains one element of batch design, protection of resting quotes against
+being picked off within a block, while trades still execute one order at a
+time at the resting order's price. The replay processes records in the order
+the node wrote them, which follows the venue's own processing order, so this
+rule is reflected in the stream both engines receive. The comparison in this
+thesis is therefore between batching and a continuous market that already
+softens the latency race, not a purely first-come, first-served exchange,
+and the gain from batching it measures may be smaller than on a traditional
+venue.
+
+\paragraph{Latency and timestamps.} The documented end-to-end latency,
+from sending a request to receiving the committed response, has a median of
+0.2\,s and a 99th percentile of 0.9\,s for a co-located client
+\citep{hyperliquid2026docs}. Speed differences that matter on this venue are
+therefore measured in tens to hundreds of milliseconds, not the
+microseconds of the equity races in \Cref{sec:discretetime}, and a batch of
+$\tau = 1$\,s is only about five times the median latency, close to the lower
+bound discussed for Block~1 (\Cref{sec:interval}). Because records are
+written block by block, most consecutive records carry the same timestamp
+(\Cref{sec:sample}), and a timestamp shows when the node processed a
+message, not when the participant sent it.
+
+\subsection{The Dataset}
+\label{sec:dataset}
 
 The simulation uses the public Hyperliquid Level~4 order book dataset of
 \citet{albers2026openbook}, recorded directly at a Hyperliquid node and
@@ -185,7 +241,7 @@ else identical, stating where it could not:
   times in its first days (\Cref{sec:testresets}).
 \end{enumerate}
 
-The sample is a single instrument, SOL/USD, replayed once through each engine
+The sample is a single instrument, the SOL perpetual, replayed once through each engine
 over the whole month covered by the data: 1--31~December 2025, 744 hourly
 files, none missing (the records themselves contain a few silences,
 \Cref{sec:testfiles}). It is the full month, not a sample, so comparisons across
@@ -194,8 +250,9 @@ CDA value and one FBA value from the same order flow, so differences are
 measured as paired differences per interval. This removes variation caused by
 the market itself and isolates the effect of the mechanism. Because market
 data in consecutive seconds are correlated, the standard errors are
-Newey--West errors, which allow for this correlation. The lag truncation
-is set automatically per metric from the paired sample size $n$ as
+Newey--West errors \citep{newey1987simple}, which allow for this
+correlation. The lag truncation is set automatically per metric from the
+paired sample size $n$ by the rule of \citet{newey1994automatic},
 $\lfloor 4(n/100)^{2/9} \rfloor$, capped at 60 lags, so no fixed lag
 count is chosen by hand and every table in \Cref{ch:results} reports a
 standard error computed the same reproducible way.
@@ -230,8 +287,10 @@ any choice by the participant. The metric therefore shows the mechanical effect
 of the rule that was implemented on fixed historical orders. That is a useful
 baseline, but it is not evidence of how participants would behave under real
 batching. Throughput and clearing latency
-have a different purpose: they are a control, used to rule out differences in
-processing speed as an explanation for anything else measured.
+have a different purpose: they are a control showing that both engines would
+be fast enough to run in real time. They cannot explain any other result,
+because the replay runs on the data's timestamps and not on the computer's
+clock.
 
 \section{Validation of the Harness}
 \label{sec:validation}

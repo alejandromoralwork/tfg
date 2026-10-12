@@ -16,8 +16,14 @@ they are.
 
 \subsection{Orders}
 
-A venue trades one \emph{asset pair}, here SOL against USD. Prices $p$ are
-quoted in USD per SOL and quantities $q$ in SOL. An \emph{order} $k$ is an
+The instrument studied here is the SOL \emph{perpetual futures contract}
+traded on Hyperliquid (SOL-PERP): a linear contract on the price of the
+Solana token that has no expiry date, is collateralised in the USDC
+stablecoin, and is kept close to the spot price of SOL by funding payments
+exchanged every hour between long and short positions
+\citep{hyperliquid2026docs}. One contract unit is one SOL. Prices $p$ are
+quoted in US dollars per SOL (written USD throughout) and quantities $q$ in
+SOL. \Cref{sec:venue} describes the venue. An \emph{order} $k$ is an
 instruction to buy or sell and is described by
 \begin{equation}
   k = (s_k,\; q_k,\; \pi_k,\; t_k),
@@ -169,9 +175,9 @@ asks):
   \item While $k$ has quantity left and the book holds an ask with
   $a_t \le \pi_k$ (always, for a market order), $k$ trades against the
   first-ranked order $j$ at the best ask. The trade price is the
-  \emph{resting} order's price, $p = a_t$, and the trade quantity is
-  $\min(q_k, q_j)$; both remaining quantities are reduced by it, and a
-  fully filled resting order leaves the book.
+  \emph{resting} order's price, $p = a_t$, and the trade quantity is the
+  smaller of the two orders' remaining quantities; both are reduced by it,
+  and a fully filled resting order leaves the book.
   \item Any quantity of a limit order that is left when no further ask
   crosses rests in the book at $\pi_k$, behind the orders already resting
   at that price. The unfilled remainder of a market order does not rest.
@@ -290,7 +296,8 @@ earlier submission, and fills them in that order until the shorter side
 is used up (\Cref{sec:rationing} discusses the alternatives). The volume
 left unmatched, $|D(\clr) - S(\clr)|$ on the longer side together with
 every order that was not eligible at $\clr$, is the \emph{residual}; in
-this thesis it rolls over into the next batch unchanged.
+this thesis it rolls over into the next batch with its limit price and
+submission time unchanged.
 
 \subsection{Price Improvement and Surplus}
 
@@ -335,7 +342,8 @@ without changing who trades or how much.
 \subsection{What Differs from the CDA}
 
 Set against \Cref{sec:cdaformal}, the FBA changes three things. Orders
-wait up to $\tau$ before they can trade, instead of trading on arrival.
+wait up to $\tau$ for their first chance to trade, instead of trading on
+arrival, and longer if they are rolled over.
 All trades of a batch share one price $\clr$, instead of each trading at
 the resting order's price. And because the orders of a batch trade
 simultaneously, no order crosses another's quote: there is no maker and
@@ -445,26 +453,28 @@ each in bps after multiplying by $10^{4}$, so that $S^{\mathrm{eff}}_k =
 S^{\mathrm{real}}_k(\Delta) + \mathrm{PI}_k(\Delta)$ trade by trade and in
 any quantity-weighted aggregate. The bucket value is the
 quantity-weighted mean over the bucket's trades, for $\Delta \in
-\{1, 5, 30\}$\,s. For the CDA, $m_k$ is the book midpoint before the trade
-and $m_{k+\Delta}$ the first midpoint at or after $t_k + \Delta$. The FBA
-needs two adaptations. Its reference price $m_k$ is the previous batch's
-clearing price as of the order's submission, since there is no midpoint
-while a batch accumulates, and $m_{k+\Delta}$ is the first FBA clearing
-price at or after $t_k + \Delta$. And its trades have no direction $\varepsilon_k$
+\{1, 5, 30\}$\,s. For the CDA, $m_k$ is the book midpoint just before the
+trade (the best price of the one side present, if the other side is
+empty) and $m_{k+\Delta}$ the first midpoint at or after $t_k + \Delta$.
+The FBA needs two adaptations. Its reference price $m_k$ is the clearing
+price of the last earlier batch that traded, $p_{\mathrm{prev}}$, since
+there is no midpoint while a batch accumulates, and $m_{k+\Delta}$ is the
+first FBA clearing price at or after $t_k + \Delta$. And its trades have no direction $\varepsilon_k$
 (\Cref{sec:fbanotation}), so the simulator records only the unsigned
 deviation $2|p_k - m_k|/m_k$.
 
 \paragraph{Signing the FBA side.} Before the FBA values are compared, each
 bucket in which both engines traded is given a direction by a zero-tick
-rule \citep{leeready1991} applied to \emph{consecutive CDA prices}: the
-second's FBA trades are labelled buys if the CDA price ticked up, sells if
-it ticked down, and inherit the last nonzero tick otherwise. The reported
+rule \citep{leeready1991} applied to the \emph{CDA's} prices: taking these
+buckets in time order, a bucket's FBA trades are labelled buys if the CDA's
+VWAP rose from the previous such bucket, sells if it fell, and inherit the
+last nonzero tick if it is unchanged. The reported
 FBA effective and realized spread are this sign times the unsigned
 values, and the FBA price impact is the signed effective spread minus the
 signed realized spread. Signing with the FBA's own price history instead
 would be circular, because that history is $m_k$ itself, so the sign
 would only undo the deviation's own sign. The rule is an estimate, not
-an observed direction; \Cref{sec:res21} discusses what it can and cannot
+an observed direction; \Cref{sec:limitssign} discusses what it can and cannot
 recover.
 
 \paragraph{Amihud illiquidity (U).} With $\mathrm{close}$ the last
@@ -526,7 +536,8 @@ including all orders rolled over from earlier batches, and $y$ the change
 in bps of the batch's selected price from the previous batch's. Because
 the FBA's $f$ covers a whole standing book and the CDA's a single sweep,
 the two regressors are on very different scales and the two slopes are
-not comparable; \Cref{sec:res22} reports both with that caveat.
+not comparable, and only the CDA's is interpreted
+(\Cref{sec:res22,sec:limitscomparable}).
 
 \subsection{Execution and Order-Arrival Timing (RQ2.3)}
 \label{sec:metrics23}
@@ -553,8 +564,8 @@ metric comes from which orders were matched, or from trades involving a
 market order, not from the price as such (\Cref{sec:priceimprovement}).
 
 \paragraph{Boundary concentration (F).} The share of order arrivals that
-land in the final 10\% of a batch's window, summed over the batches that
-close in the bucket. With arrivals spread evenly over the window, its
+land in the final 10\% of a batch's window, with the arrivals of all
+batches that close in the bucket pooled. With arrivals spread evenly over the window, its
 expected value is $0.10$.
 
 \paragraph{Unexecuted residual share (F).} Over the batches that close in
@@ -578,5 +589,8 @@ clearing latency is that computing time divided by the number of timed
 operations, which is one per order for the CDA but one per \emph{batch}
 for the FBA. Both are wall-clock measurements, so they are the only
 values that differ between repeated runs (\Cref{sec:testdeterminism}).
-Neither describes market quality; they exist to rule out ``one engine is
-simply slower'' as an explanation for any other difference.
+Neither describes market quality. Because the replay runs on the
+timestamps stored in the data, not on the computer's clock
+(\Cref{sec:environment}), computing speed cannot change any other metric;
+the two controls only show whether each engine would be fast enough to run
+in real time.

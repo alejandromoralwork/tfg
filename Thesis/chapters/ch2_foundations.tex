@@ -78,15 +78,19 @@ pricing in continuous time is not well defined. Together they imply that
 speed pays only for crossing an interval boundary, getting into the
 current batch rather than the next: the value of a marginal nanosecond
 falls from ``wins the race'' to ``matters only in the vanishingly rare
-case that it changes which batch an order lands in''. This conclusion
-assumes that waiting inside the window gains nothing;
-\Cref{sec:priceimprovement} shows that with a predictable close and a
-visible batch it does, and that speed then regains value near the
-boundary. In the model of
+case that it changes which batch an order lands in''. In the model of
 \citet{budish2015hft}, liquidity providers then no longer need to price
 sniping risk into their quotes and spreads narrow. The residual cost is
 delay, an average of $\tau/2$ if orders arrive uniformly, so the choice of
 $\tau$ trades speed neutralisation against delay imposed on everybody.
+The benefit is not free of side effects: \citet{baldauf2020hft} show that
+competition among fast traders affects both liquidity and the incentive to
+acquire information, so a measure that curbs the race can lower spreads
+and still change how much information prices contain.
+This conclusion assumes that waiting inside the window gains nothing;
+\Cref{sec:priceimprovement} shows that with a predictable close and a
+visible batch it does, and that speed then regains value near the
+boundary.
 
 Both halves of this trade-off are followed up later. The choice of $\tau$
 and of its closing rule is design Block~1 (\Cref{sec:interval}). The
@@ -140,7 +144,7 @@ selection. The thesis estimates $\lambda$ for each engine as the slope of
 price change on order flow (\Cref{sec:formularq22}); a lower $\lambda$
 would mean prices react less to one-sided flow. As defined there, the two
 engines' order-flow measures differ in scale, so only the CDA's estimate
-is interpreted (\Cref{sec:res22}).
+is interpreted (\Cref{sec:limitscomparable}).
 
 \subsection{Decomposing the Spread}
 \label{sec:spread-decomposition}
@@ -205,9 +209,11 @@ creates normally falls on the market maker posting a quote
 not a resting quote but an instruction that has not executed yet, and the
 party exposed by it is not the quoter but the one demanding liquidity,
 the submitter itself. An observer can buy ahead of a pending swap and
-sell into the price it moves, sandwiching the submitter. Batch
+sell into the price it moves, sandwiching the submitter
+\citep{daian2020flash}. Batch
 clearing removes this by construction: if every order in the interval
-settles at one uniform price, position within the batch carries no value.
+settles at one uniform price, position within the batch carries no value
+for the price an order obtains.
 
 This strand shapes design Block~2 (\Cref{sec:disclosure}). It cannot be
 tested in the replay: the replayed orders never see what the engine
@@ -229,10 +235,11 @@ approximately optimal, a property inherited from
 \citet{vickrey1961counterspeculation}. This is the formal basis for the
 claim that batching substitutes competition in price for competition in
 speed: if submitted limits are approximately truthful, the clearing price
-aggregates valuations rather than reaction times. Visibility of the
-accumulated batch does not disturb this --- a participant who can
-anticipate the clearing price pays it regardless of the limit it submits
-above it --- but it does change \emph{when} orders are submitted, since
+aggregates valuations rather than reaction times. For a price-taking
+participant, visibility of the accumulated batch does not disturb this ---
+a participant who can anticipate the clearing price pays it regardless of
+the limit it submits above it --- but it does change \emph{when} orders
+are submitted, since
 observing the indicative price gives a participant reason to withhold
 until shortly before the batch closes.
 
@@ -256,7 +263,7 @@ price-setting in a short one.
 
 For every executed non-marginal order, uniform pricing also produces price
 improvement relative to the submitted limit: a buyer willing to pay
-$\pi_k$ who clears at $\clr < \pi_k$ captures $(\pi_k - \clr) q_k$ of
+$\pi_k$ who clears at $\clr < \pi_k$ captures $(\pi_k - \clr) x_k$ of
 surplus that, under continuous discriminatory execution at the resting
 price, would in general have accrued differently. Aggregating this across
 executed orders gives the realized trader surplus metric
@@ -314,10 +321,10 @@ attributed to the mechanism.
 
 Three adaptations are required for a batch mechanism. Measures that reference
 the prevailing midpoint at the moment of the trade have no book to take a
-midpoint from during accumulation, so the reference is the previous batch's
-own clearing price as of the order's submission --- stale by up to $\tau$,
-and longer when recent batches did not trade, never a same-instant quantity
-as the CDA's midpoint is. And the quoted
+midpoint from during accumulation, so the reference is the clearing price
+of the last earlier batch that traded --- one interval $\tau$ old, and
+older when recent batches did not trade, never a same-instant quantity as
+the CDA's midpoint is. Second, the quoted
 spread has no direct analogue during accumulation, so it is defined here
 as the gap between the best unfilled buy and the best unfilled sell left
 after a batch clears. The third follows from \Cref{sec:fbanotation}: an
@@ -330,7 +337,9 @@ demonstration that institutions can produce allocative efficiency largely
 independently of trader rationality also licenses replay-based simulation,
 since much of what a mechanism does is mechanical rather than behavioural;
 \citet{lebaron2006agent} surveys the agent-based alternative in which
-behaviour is modelled and allowed to adapt.
+behaviour is modelled and allowed to adapt, and \citet{wah2013latency}
+apply it to latency arbitrage, comparing continuous and periodic call
+markets with simulated traders.
 
 \section{From Theory to Design and Measurement}
 \label{sec:theorylinks}

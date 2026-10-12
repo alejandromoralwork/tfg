@@ -33,43 +33,33 @@ clearing-price selection rule. Under a fixed close and a visible batch,
 that split can be steered by whoever submits last, which turns the choice
 of time window into a boundary repricing race (\Cref{sec:priceimprovement}).
 
-\paragraph{RQ2.} The paired comparison of the two engines on identical
-order flow covers the one configuration actually run: SOL/USD,
-$\tau=1$\,second, the full month of December 2025, without the interval
-sweep or rationing comparison the fuller design calls for. One finding
-does most of the work in this answer: effective spread, realized spread
-and price impact are clearly costly for the CDA and all close to zero for
-the FBA. In the CDA, a resting order is predictably picked off: the price
-moves against it after every trade, which is the textbook signature of
-adverse selection, and Kyle's lambda confirms that the CDA's price moves
-with net order flow. In the FBA no such one-sided cost appears, consistent
-with every order in a batch trading at one uniform price set only after all
-of the batch's orders are in, so no stale quote can be picked off. This
-result rests on one estimate: the FBA has no directly observable aggressor
-side, so all three FBA values share a tick-rule proxy, and a near-zero
-average is also what a proxy unrelated to the true direction would give.
-The FBA's Kyle's lambda is built on a different order-flow scale and cannot
-serve as an independent check. The finding is therefore that the cost does
-not fall on one side in the FBA, not proof that it is absent.
+\paragraph{RQ2.} The simulation replayed one month of SOL perpetual order
+flow through both engines, with one-second batches. Its answer is that
+batching changes \emph{who bears the cost of trading}, but not \emph{how
+much} trades or \emph{at what price} (\Cref{tab:rq2answers}).
 
-This result does not come from trading less or at a different price ---
-both engines clear statistically the same volume, at prices that track
-each other closely, and this is the firmest finding of the comparison.
-What the FBA gives up instead is depth and time. Depth within a fixed distance of the reference price, the one depth
-measure genuinely comparable across the two engines, is slightly
-\emph{lower} for the FBA at every threshold, and a given amount of trading
-moves the FBA's price marginally more, not less (Amihud illiquidity) ---
-the opposite of what a liquidity-pooling argument for batching would
-predict, if a more modest effect than the spread result above. Execution
-also simply takes longer under the FBA. Underlying both is a market that,
-at this interval, is usually not the well-populated auction the mechanism
-assumes: \FbaEmptyBatchShare\% of one-second batches clear no trade at all,
-and even among those that do, most of the longer side is typically left
-unmatched at the clearing price. At
-$\tau=1$\,second on this instrument, the FBA behaves closer to its own
-degenerate, near-continuous limit than to a well-filled multilateral
-auction --- which is the frame every other number above has to be read
-through.
+\begin{itemize}
+  \item \textbf{Costs (RQ2.1).} In the continuous market, resting orders
+  lose systematically to better-informed orders: the effective spread is
+  positive, the realized spread negative and the price impact grows with
+  time. In the batch market no such one-sided cost is found, because every
+  order in a batch trades at one price set after all orders are in. Standing
+  liquidity, however, is slightly lower in the batch market, not higher.
+  \item \textbf{Prices (RQ2.2).} Both engines arrive at the same price, and
+  volatility is about the same; uniform pricing removes the spread of prices
+  within a second.
+  \item \textbf{Execution (RQ2.3).} The same volume trades, but orders wait
+  longer, because \FbaEmptyBatchShare\% of one-second batches do not cross at
+  all and even those that do leave most of their longer side unmatched.
+\end{itemize}
+
+Put together, batching at one second protects resting orders from being
+picked off, but on this market a one-second batch rarely holds enough
+two-sided flow to work as the well-filled auction the mechanism assumes.
+These conclusions hold for one instrument, one month and one interval, for
+orders that were never submitted to a batch market, and the cost result
+rests on an estimated trade direction, so it shows that no one-sided cost
+is found rather than that the cost is zero (\Cref{sec:metricreliability}).
 
 \section{Limitations}
 \label{sec:limitations}
@@ -86,15 +76,10 @@ chosen under uncertainty about a clearing price. Every equilibrium
 prediction of the FBA literature --- narrower quoted spreads, size
 inflation, boundary concentration, bid shading --- is therefore out of
 reach, and the simulation delivers the mechanical baseline against which
-such responses would be measured. Two further limitations bound what future
-work can build on: the engines are per-pair, so the multi-asset clearing
-problem is part of the design analysis but not of the measurement; and
-several metrics require adaptation to a batch setting, most notably the
-sign of the effective and realized spread and the order-flow measure
-behind Kyle's lambda, which in this run covers the whole rolled-over book
-and so is not comparable with the CDA's; an extension inherits these
-adaptations rather than a clean continuous-market baseline
-(\Cref{sec:metricreliability} works through this case by case).
+such responses would be measured. A further limitation bounds what future
+work can build on: several metrics require adaptation to a batch setting,
+which an extension inherits (\Cref{sec:metricreliability} works through them
+case by case).
 
 The sample itself bounds the claims further. The data come from one
 venue, one instrument and one continuous month; a crypto perpetuals
@@ -102,9 +87,14 @@ exchange has a participant population, fee structure and latency profile
 that differ from an equity market, so magnitudes should not be carried
 over elsewhere without re-estimation, and the month gives day-by-day
 stability within the sample, not a cross-instrument or cross-regime one.
-And because the replay does not enforce time-in-force, it trades about
-\VerCdaOverVenue\ times the venue's own recorded volume
-(\Cref{sec:testfidelity}). Both engines share this gap identically, so
-the paired comparisons in \Cref{ch:results} are unaffected by it. But the
+And because the replay does not enforce post-only orders or self-trade
+prevention, it trades about \VerCdaOverVenue\ times the venue's own recorded
+volume (\Cref{sec:testfidelity}). Both engines receive this same input, so
+it does not favour either side of the paired comparisons in
+\Cref{ch:results}. Sizes are also rounded to whole SOL, which removes
+orders below 0.5\,SOL from both engines alike (\Cref{sec:data}). But the
 absolute volume, trade-count and latency levels reported there describe
-this replay, not Hyperliquid's live market.
+this replay, not Hyperliquid's live market. Finally, the month was not
+replayed in one uninterrupted run: \VerResetN\ restarts in its first five
+days emptied both engines at the same record, which understates book-based
+measures for some hours afterwards (\Cref{sec:testresets}).

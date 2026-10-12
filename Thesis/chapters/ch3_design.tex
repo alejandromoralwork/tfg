@@ -131,10 +131,13 @@ derives it formally; the options below differ in how exposed they are to it.
   interval to activity, but because the closing depends on what participants
   do, it can be manipulated: a participant can trigger the close by
   submitting volume.
-  \item \textbf{Random extension.} A fixed nominal closing time, followed by a
-  short random extension if late activity is detected, as in several equity
-  closing auctions. It is predictable in normal conditions and unpredictable
-  exactly when predictability would be exploited.
+  \item \textbf{Random end after a minimum duration.} The batch runs for a
+  fixed minimum time and then ends at a random moment within a short
+  window. Xetra's closing auction works this way: after a minimum call
+  phase it ends at a random time, precisely to make the price harder to
+  manipulate \citep{deutscheboerse2026xetra}. The schedule stays predictable
+  to within that short window, while the exact final moment, the one a
+  late submitter would target, is not.
 \end{itemize}
 
 \subsection{Consequence of the Time Window: Price Improvement and the
@@ -396,7 +399,8 @@ reflects the average of the pool, so uninformed participants end up paying for
 the losses that informed participants cause. Splitting flow by participant
 class, typically retail against institutional, lets the provider quote a
 tighter price to the group it believes is uninformed. This is the logic
-behind retail wholesaling in equity markets, and it carries over to batches
+behind retail wholesaling, the purchase of retail order flow, in equity
+markets \citep{easley1996cream}, and it carries over to batches
 through one auction per group, or through eligibility rules for each group.
 The difficulty is classification. The split is only as good as the label,
 labels can be gamed by sending institutional orders through retail channels,
@@ -430,8 +434,9 @@ solved. In a continuous book the maker is the resting order and the taker is
 the order that crosses it, so the distinction depends on arrival order. That
 definition is not available when all matched orders arrive in the same
 interval and trade at the same time and price. Yet fees, rebates and a large
-part of exchange revenue depend on it. There are four ways to redefine it,
-none fully satisfactory:
+part of exchange revenue depend on it. This thesis distinguishes four ways
+to redefine it, none fully satisfactory; the first follows the DFBA, the
+other three are proposed here:
 
 \begin{enumerate}
   \item \textbf{By declared intent}, as in the DFBA. Simple to operate, but
@@ -534,8 +539,9 @@ variable they control encourages them to inflate that variable
   an uncertainty about execution that participants cannot manage, which
   matters to anyone hedging, and the need for a random draw that participants
   can verify.
-  \item[Hybrid rules.] The CME's K-algorithm family gives part of the volume by
-  time priority and the rest pro rata, balancing the two distortions. A
+  \item[Hybrid rules.] Several of the CME's matching algorithms give part of
+  the volume by time priority and the rest pro rata, balancing the two
+  distortions \citep{haynes2020precedence}. A
   batch version could give a share $\kappa$ pro rata and the remaining
   $1 - \kappa$ by lottery.
 \end{description}
@@ -590,157 +596,126 @@ solvers instead of one fixed algorithm \citep{harrison2025hybrid}.
 
 \Cref{tab:consequences} collects every option discussed in this chapter,
 block by block, with the behaviour it is predicted to induce and the cost it
-carries. The last column marks the option the simulated engine implements
-(\Cref{tab:fbachoices}); ``n/a'' marks a block whose choice cannot affect a
-replay.
+carries. The options the simulated engine implements are listed in
+\Cref{tab:fbachoices}.
 
 \begingroup
 \small
 \renewcommand{\arraystretch}{1.15}
-\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.0cm}
-  >{\raggedright\arraybackslash}p{6.6cm}
-  >{\raggedright\arraybackslash}p{4.7cm}
-  >{\centering\arraybackslash}p{1.1cm}@{}}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.2cm}
+  >{\raggedright\arraybackslash}p{7.2cm}
+  >{\raggedright\arraybackslash}p{5.6cm}@{}}
 \caption[Design options and their consequences]{Every design option of
 \Cref{ch:design}, the behaviour it is predicted to induce, and its main
-cost. Run: the option implemented in the simulated engine.}
+cost.}
 \label{tab:consequences}\\
 \toprule
-\textbf{Option} & \textbf{Predicted consequence} & \textbf{Main cost or risk} & \textbf{Run}\\
+\textbf{Option} & \textbf{Predicted consequence} & \textbf{Main cost or risk}\\
 \midrule
 \endfirsthead
-\multicolumn{4}{@{}l}{\emph{\Cref{tab:consequences}, continued}}\\
+\multicolumn{3}{@{}l}{\emph{\Cref{tab:consequences}, continued}}\\
 \toprule
-\textbf{Option} & \textbf{Predicted consequence} & \textbf{Main cost or risk} & \textbf{Run}\\
+\textbf{Option} & \textbf{Predicted consequence} & \textbf{Main cost or risk}\\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-\multicolumn{4}{@{}l}{\emph{Block 1: batch interval (\Cref{sec:interval})}}\\
+\multicolumn{3}{@{}l}{\emph{Block 1: batch interval (\Cref{sec:interval})}}\\
 Short $\tau$ &
 prices stay current; a speed difference $\delta$ still decides the batch with probability $\delta/\tau$ &
-thin, one-sided batches that often do not cross; truthfulness weakens as orders become pivotal &
-\checkmark\ (1\,s)\\
+thin, one-sided batches that often do not cross; truthfulness weakens as orders become pivotal\\
 Long $\tau$ &
 speed differences become irrelevant; fuller batches &
-delay of $\tau/2$ on average; stale orders; market makers cannot withdraw in time &
----\\
+delay of $\tau/2$ on average; stale orders; market makers cannot withdraw in time\\
 Fixed close &
 predictable boundary; late submission weakly dominates, producing the boundary repricing race (\Cref{sec:priceimprovement}) &
-speed regains value as deadline precision; accumulation phase can empty out &
-\checkmark\\
+speed regains value as deadline precision; accumulation phase can empty out\\
 Random close &
 waiting becomes a gamble; interior optimum between information and risk of exclusion &
-imprecise timing for everyone; random draw must be verifiable &
----\\
+imprecise timing for everyone; random draw must be verifiable\\
 Volume- or event-triggered close &
 interval adapts to activity &
-close can be triggered strategically by submitting volume &
----\\
-Random extension &
-predictable in normal conditions, unpredictable when late activity appears &
-close becomes unpredictable exactly when activity is high &
----\\
+close can be triggered strategically by submitting volume\\
+Random end after a minimum &
+schedule predictable to within a short window; the exact last moment cannot be targeted &
+a short random window gives less protection than a fully random close\\
 \midrule
-\multicolumn{4}{@{}l}{\emph{Block 2: information disclosure (\Cref{sec:disclosure})}}\\
+\multicolumn{3}{@{}l}{\emph{Block 2: information disclosure (\Cref{sec:disclosure})}}\\
 Fully open book &
 strong within-batch price discovery; early orders are exploited by later ones &
-strongest incentive to submit late; amplifies the boundary race &
-n/a\\
+strongest incentive to submit late; amplifies the boundary race\\
 Indicative price &
 coordination on a common price estimate &
-some intent leakage through price moves &
-n/a\\
+some intent leakage through price moves\\
 Aggregate imbalance &
 attracts offsetting liquidity without revealing limits &
-weaker price anchoring &
-n/a\\
+weaker price anchoring\\
 Sealed bid &
 no exploitation of submitted orders; no informational reason to wait &
-bid shading under price uncertainty, which can reduce cleared volume &
-n/a\\
+bid shading under price uncertainty, which can reduce cleared volume\\
 \midrule
-\multicolumn{4}{@{}l}{\emph{Block 3: order flow segregation (\Cref{sec:segregation})}}\\
+\multicolumn{3}{@{}l}{\emph{Block 3: order flow segregation (\Cref{sec:segregation})}}\\
 Unified pool &
 all liquidity meets in one auction; simplest to regulate &
-uninformed flow pays for losses to informed flow &
-\checkmark\\
+uninformed flow pays for losses to informed flow\\
 By participant class &
 tighter prices for flow believed uninformed &
-labels can be gamed; different prices for the same asset at the same time &
----\\
+labels can be gamed; different prices for the same asset at the same time\\
 By intent (DFBA) &
 makers never trade with each other; no queue to pick off makers &
-liquidity split across two thinner auctions; labels must be enforced &
----\\
+liquidity split across two thinner auctions; labels must be enforced\\
 Maker--taker by declared intent &
 simple to operate &
-self-declared unless enforced &
----\\
+self-declared unless enforced\\
 Maker--taker by price aggressiveness &
 observable and hard to game &
-penalises demand for certainty of execution &
----\\
+penalises demand for certainty of execution\\
 Maker--taker by marginality &
 ties the fee to price setting &
-fee unknown before the batch clears &
----\\
+fee unknown before the batch clears\\
 Maker--taker by persistence &
 rewards liquidity that stays available across batches &
-needs order age tracked; every new order starts as a taker &
----\\
+needs order age tracked; every new order starts as a taker\\
 \midrule
-\multicolumn{4}{@{}l}{\emph{Block 4: clearing and rationing (\Cref{sec:clearing})}}\\
+\multicolumn{3}{@{}l}{\emph{Block 4: clearing and rationing (\Cref{sec:clearing})}}\\
 Tie-break led by minimum imbalance &
 price responds to marginal submitted limits &
-the lever for the last-mover advantage \eqref{prop:lastmover} &
-\checkmark\\
+the lever for the last-mover advantage \eqref{prop:lastmover}\\
 Tie-break led by a reference price &
 price insensitive to marginal limits; removes the lever &
-needs a reference (previous clear or external price) &
----\\
+needs a reference (previous clear or external price)\\
 Price-time priority &
 continuity with continuous markets &
-rewards being early in the batch: a speed race at the interval scale, pulling against the boundary race &
-\checkmark\\
+rewards being early in the batch: a speed race at the interval scale, pulling against the boundary race\\
 Pro rata &
 ignores timing &
-order stuffing; displayed sizes less informative &
----\\
+order stuffing; displayed sizes less informative\\
 Size priority or maximal fill &
 favours block orders &
-threshold incentive to inflate size &
----\\
+threshold incentive to inflate size\\
 Random allocation &
 removes timing and size incentives; size becomes an honest statement &
-unmanageable execution uncertainty; verifiable randomness needed &
----\\
+unmanageable execution uncertainty; verifiable randomness needed\\
 Hybrid ($\kappa$ pro rata, $1-\kappa$ lottery) &
 balances the two distortions &
-inherits a share of both &
----\\
+inherits a share of both\\
 \midrule
-\multicolumn{4}{@{}l}{\emph{Block 5: settlement and residual (\Cref{sec:settlement})}}\\
+\multicolumn{3}{@{}l}{\emph{Block 5: settlement and residual (\Cref{sec:settlement})}}\\
 Gross settlement &
 clear record of every fill &
-one transfer per matched pair &
-\checkmark\\
+one transfer per matched pair\\
 Net settlement &
 fewer transfers; large saving where each transfer has a fee &
-hides which order led to which transfer; harder per-fill fees &
----\\
+hides which order led to which transfer; harder per-fill fees\\
 Roll over residual &
 natural for resting limit orders; residual keeps its limit price &
-unmatched orders accumulate across batches &
-\checkmark\\
+unmatched orders accumulate across batches\\
 Cancel residual (IOC) &
 no stale residual &
-participants must resubmit every batch &
----\\
+participants must resubmit every batch\\
 Fill-or-kill &
 all-or-nothing execution &
-turns clearing into a combinatorial problem; needs size limits or solvers &
----\\
+turns clearing into a combinatorial problem; needs size limits or solvers\\
 \end{longtable}
 \endgroup
 
