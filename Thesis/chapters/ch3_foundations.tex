@@ -21,14 +21,15 @@ in \Cref{ch:background}.
 
 The argument of \citet{budish2015hft} rests on a single structural
 observation, not on irrationality or market power: in a continuous
-market, a public information event creates a discrete arbitrage
-opportunity that is allocated by relative speed.
+market, a public information event creates a one-off, risk-free arbitrage
+opportunity, and that opportunity goes to whoever is fastest.
 
 Consider a liquidity provider quoting a two-sided market in an asset
 whose fair value is tracked by a correlated, continuously observable
-signal. When the signal jumps, every participant learns the same thing at
-essentially the same instant: the liquidity provider wants to cancel its
-stale quote, every other fast participant wants to hit it. The engine
+signal. When the signal jumps, every participant receives the same
+information at essentially the same instant: the liquidity provider wants
+to cancel its stale quote, and every other fast participant wants to
+trade against it. The engine
 processes both messages in arrival order, so whether the quote is
 cancelled or picked off depends on network path length, hardware and code
 efficiency, not on anything informational.
@@ -59,7 +60,8 @@ aggregate transfer, small relative to total volume but large in absolute
 terms, concentrates in the effective spread paid by liquidity demanders.
 Removing the race therefore removes a component of the spread. This is why
 the effective spread, and its split into realized spread and price impact
-(\Cref{sec:metrics21}), is the central cost measure of RQ2.1.
+(\Cref{sec:metrics21}), is the natural cost measure of RQ2.1; it needs a
+trade direction, which only the CDA provides (\Cref{sec:limitssign}).
 
 \subsection{Batching as the Response}
 
@@ -80,7 +82,11 @@ current batch rather than the next: the value of a marginal nanosecond
 falls from ``wins the race'' to ``matters only in the vanishingly rare
 case that it changes which batch an order lands in''. In the model of
 \citet{budish2015hft}, liquidity providers then no longer need to price
-sniping risk into their quotes and spreads narrow. The residual cost is
+sniping risk into their quotes and spreads narrow. Whether such sniping
+occurs in the SOL perpetual studied here cannot be measured with the data
+used, which contain no identifiable latency races; Hyperliquid's own
+processing of cancellations before new orders already limits it
+(\Cref{sec:venue}). The residual cost is
 delay, an average of $\tau/2$ if orders arrive uniformly, so the choice of
 $\tau$ trades speed neutralisation against delay imposed on everybody.
 The benefit is not free of side effects: \citet{baldauf2020hft} show that
@@ -94,9 +100,11 @@ boundary.
 
 Both halves of this trade-off are followed up later. The choice of $\tau$
 and of its closing rule is design Block~1 (\Cref{sec:interval}). The
-benefit, a lower adverse-selection cost, is measured by the spread
-decomposition (RQ2.1), and the cost, delay, by the time to execution
-(RQ2.3, \Cref{sec:metrics23}).
+benefit, a lower adverse-selection cost, would be measured by the spread
+decomposition, which the replay can build only for the CDA, and
+indirectly by Amihud illiquidity and Kyle's lambda (RQ2.1, RQ2.2); the
+cost, delay, is measured by the time to execution (RQ2.3,
+\Cref{sec:metrics23}).
 
 \section{Information Asymmetry and Adverse Selection}
 \label{sec:adverse}
@@ -127,10 +135,10 @@ in the design part but not measured.
 \subsection{Strategic Informed Trading and Market Depth}
 
 \citet{kyle1985continuous} approaches the same problem from the informed
-trader's side: a single informed agent chooses how much to trade, knowing
-that trading more reveals more, while noise traders provide cover and a
-competitive market maker sets the price as the conditional expectation of
-value given total order flow. The equilibrium price function is linear,
+trader's side. A single informed agent chooses how much to trade, knowing
+that trading more reveals more of its information. Noise traders provide
+cover for it, and a competitive market maker sets the price as the
+expected value of the asset given the total order flow. The equilibrium price function is linear,
 $p = \mu + \lambda f$, where $\mu$ is the prior expected value, $f$ is
 aggregate order flow and
 $\lambda$ measures price impact per unit of flow; its reciprocal, market
@@ -142,9 +150,7 @@ organised the way Kyle already assumes. $\lambda$ also supplies the
 empirical bridge: price impact is the operational measure of adverse
 selection. The thesis estimates $\lambda$ for each engine as the slope of
 price change on order flow (\Cref{sec:formularq22}); a lower $\lambda$
-would mean prices react less to one-sided flow. Both engines are regressed
-on the same measure of flow, the venue's own net taker flow, so that the
-two slopes can be compared directly.
+would mean prices react less to one-sided flow.
 
 \subsection{Decomposing the Spread}
 \label{sec:spread-decomposition}
@@ -154,11 +160,23 @@ cost of a trade is. The standard strategy is to decompose the effective
 spread into a realized spread and a price impact component
 \citep{hasbrouck1993assessing,hendershott2011algorithmic}, as defined in
 \eqref{eq:effspread}--\eqref{eq:priceimpact}, with $S^{\mathrm{eff}}_k =
-S^{\mathrm{real}}_k(\Delta) + \mathrm{PI}_k(\Delta)$. The effective spread
-is what the liquidity demander paid relative to the midpoint; the realized spread is what the provider still holds once the
-market has revised its valuation, the gross compensation for supplying
-liquidity; the price impact is the permanent revision of the midpoint in the
-direction of the trade, the part lost to the information the order carried.
+S^{\mathrm{real}}_k(\Delta) + \mathrm{PI}_k(\Delta)$, where $\Delta$ is the
+markout horizon, the time after the trade at which the midpoint is read
+again. The effective spread is what the liquidity demander paid relative
+to the midpoint. The realized spread is what the provider still holds
+once the market has revised its valuation, the gross compensation for
+supplying liquidity. The price impact is the permanent revision of the
+midpoint in the direction of the trade, the part lost to the information
+the order carried.
+
+From the liquidity demander's side, the effective spread is the trade's
+slippage against the midpoint. Slippage is not a fixed property of a
+trade: it depends on the horizon $\Delta$ at which it is measured, on the
+trade's size and on volatility. A large order faces a trade-off between
+executing quickly, with a larger price impact, and executing slowly in
+smaller pieces, with a smaller impact but more exposure to price moves in
+the meantime. The replay keeps every order's size and timing as
+submitted, so this trade-off is not studied here.
 
 When a public signal moves, discrete uniform-price clearing removes the
 latency-arbitrage mechanism, since the aggressive order and the maker's
@@ -169,13 +187,13 @@ informed trader can still price aggressively into a batch
 \citep{eibelshauser2022fba} --- so the prediction is a reduction in
 price impact, not its elimination. A fall in effective spread driven by
 price impact is therefore the result theory predicts; a fall driven by
-realized spread would mean providers simply earn less with the
+realized spread would mean providers earn less with the
 informational component untouched, and a fall in price impact with no
 change in effective spread would mean the benefit is captured by
-providers rather than passed on. These three readings are what the
-RQ2.1 comparison in \Cref{sec:res21} is designed to tell apart, which is
-why all three components are reported rather than the effective spread
-alone.
+providers rather than passed on. Telling these three readings apart
+needs all three components for both mechanisms. The replay supplies them
+only for the CDA, because FBA trades have no direction
+(\Cref{sec:limitssign}), so for the FBA the question stays open.
 
 \section{Market Transparency Theory}
 \label{sec:transparency}
@@ -199,10 +217,16 @@ setting shading is not merely a transfer: shaded limit prices are less
 likely to cross, so it can reduce the volume that clears.
 
 The trade-off assumes the operator can choose where to sit among these
-options. Decentralised blockchain venues are the limiting case where it
-cannot: a transaction waiting in a public mempool is visible to everyone
-before it executes, so such markets are fully open by default without the
-benefit that regime is supposed to buy. Disclosure normally exposes the trading intent of the order submitter
+options. Decentralised venues that settle through a public mempool are
+the limiting case where it cannot: a transaction waiting there is visible
+to everyone before it executes, so such markets are fully open by default
+without the benefit that regime is supposed to buy. The value that can be
+extracted by reordering, inserting or excluding pending transactions is
+known as miner, now maximal, extractable value (MEV) \citep{daian2020flash}. Not every
+blockchain venue is in this position: hybrid designs match orders off
+chain and settle on chain, and Hyperliquid orders transactions in its own
+consensus layer (\Cref{sec:venue}), so the exposure depends on the
+architecture and not on the use of a blockchain as such. Disclosure normally exposes the trading intent of the order submitter
 \citep{madhavan1996transparency}, and the informational disadvantage this
 creates normally falls on the market maker posting a quote
 \citep{glosten1985bid}. A mempool flips both of these. What is exposed is
@@ -322,17 +346,14 @@ have no theoretical prediction of their own: they check that the two
 engines trade the same flow, so that any other difference can be
 attributed to the mechanism.
 
-Three adaptations are required for a batch mechanism. Measures that reference
-the prevailing midpoint at the moment of the trade have no book to take a
-midpoint from during accumulation, so the reference is the clearing price
-of the last earlier batch that traded --- one interval $\tau$ old, and
-older when recent batches did not trade, never a same-instant quantity as
-the CDA's midpoint is. Second, the quoted
-spread has no direct analogue during accumulation, so it is defined here
-as the gap between the best unfilled buy and the best unfilled sell left
-after a batch clears. The third follows from \Cref{sec:fbanotation}: an
-FBA trade has no aggressor, so the direction $\varepsilon_k$ in
-\eqref{eq:effspread} has to be estimated (\Cref{sec:metrics21}).
+Three of these metrics need adapting for a batch mechanism
+(\Cref{sec:metrics21}). Measures that reference the midpoint at the
+moment of the trade use the previous clearing price instead, which is at
+least one interval old. The quoted spread is read from the orders left
+after a clear. And the spread decomposition needs the direction
+$\varepsilon_k$ of each trade, which an FBA trade does not have
+(\Cref{sec:fbanotation}); this is the one adaptation that fails
+(\Cref{sec:limitssign}).
 
 Finally, the experimental convention is that of \citet{gode1993allocative}:
 hold the induced order flow constant and vary only the mechanism. Their
@@ -368,8 +389,8 @@ measures it.}
 \toprule
 \textbf{Strand} & \textbf{Prediction for the FBA} & \textbf{Design block} & \textbf{Metric (RQ)}\\
 \midrule
-Latency arbitrage (\ref{sec:discretetime}) & no speed race within $\tau$; lower adverse-selection cost; delay of about $\tau/2$ & 1 Interval & spread decomposition (2.1); time to execution (2.3)\\
-Adverse selection (\ref{sec:adverse}) & lower price impact, not zero; price reacts less to flow & 3 Segregation & price impact (2.1); Kyle's lambda (2.2)\\
+Latency arbitrage (\ref{sec:discretetime}) & no speed race within $\tau$; lower adverse-selection cost; delay of about $\tau/2$ & 1 Interval & spread decomposition (2.1, CDA only); time to execution (2.3)\\
+Adverse selection (\ref{sec:adverse}) & lower price impact, not zero; price reacts less to flow & 3 Segregation & price impact (2.1, CDA only); Kyle's lambda (2.2)\\
 Transparency (\ref{sec:transparency}) & disclosure trades exploitation against bid shading & 2 Disclosure & not testable in a replay\\
 Auction theory (\ref{sec:auctiontheory}) & near-truthful limits; price improvement; thin batches at short $\tau$ & 4 Clearing & trader surplus (2.3); share of batches with no trade (descriptive)\\
 Market quality (\ref{sec:quality}) & batching pools liquidity and dampens price moves & --- & depth, Amihud (2.1); volatility, dispersion (2.2)\\

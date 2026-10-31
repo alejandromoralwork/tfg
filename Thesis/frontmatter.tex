@@ -59,13 +59,13 @@ implemented in Rust and fed with
 the same replayed Level~4 order flow from the Hyperliquid exchange for the Solana (SOL) perpetual futures contract during one month of trading. The comparison covers liquidity and transaction costs, price discovery and market quality, and
 execution.
 
-The main finding is that one-second batching changes who bears the cost of
-trading, but not how much trades or at what price. The two engines trade
-volumes that are statistically indistinguishable, at closely matching
-prices, and the same net order flow moves both prices by the same amount.
-In the continuous market, resting orders systematically pay an
-adverse-selection cost; in the batch auction no such one-sided cost is
-found, although this result relies on an estimated trade direction. At one
+The main finding is that one-second batching changes neither how much
+trades nor at what price. The two engines trade volumes that are
+statistically indistinguishable, at closely matching prices, and the same
+net order flow moves both prices by the same amount. In the continuous
+market, resting orders systematically pay an adverse-selection cost;
+whether batching removes it cannot be measured from the replay, because
+trades in a batch auction have no direction. At one
 second, however, the batch auction is too thin to work as intended:
 \FbaEmptyBatchShare\% of batches clear no trade at all, orders take longer
 to execute, and the batch market is slightly less deep, not deeper.

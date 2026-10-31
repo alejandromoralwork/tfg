@@ -1,12 +1,11 @@
 \chapter{Simulation Design and Data}
 \label{ch:simulation}
 
-The idea behind the empirical part of the thesis is simple: one historical
-stream of orders is replayed through two engines at once, a continuous
-engine and a batch engine.
+The empirical part of the thesis replays one historical stream of orders
+through two engines at once, a continuous engine and a batch engine.
 Because both engines receive exactly the same events, everything that could
-otherwise distort the comparison is held fixed, and the matching engine is the
-only thing that differs.
+otherwise distort the comparison is held fixed, and the matching mechanism is
+the only difference between the two runs.
 
 \section{Simulation Environment}
 \label{sec:environment}
@@ -26,37 +25,31 @@ deterministic, because nothing in either engine is random.
 
 \subsection{The Continuous Engine (CDA)}
 
-The continuous engine keeps a limit order book in which orders are served by
-price first and arrival time second. Each new order is matched at once against
-the other side of the book and trades at the price of the resting order, so
-one large order that sweeps several price levels can produce several trade
-prices. Any unfilled part of a limit order stays in the book until it is
-filled or a cancel record removes it (\Cref{sec:cancellations}).
-\Cref{sec:implcda} describes the data structures behind the book. The
+The continuous engine implements the matching rule of \Cref{sec:cdaformal}:
+price-time priority, immediate matching at the resting order's price, and an
+unfilled limit remainder that stays in the book until it is filled or a cancel
+record removes it (\Cref{sec:cancellations}). \Cref{sec:implcda} describes the
+data structures behind the book. The
 time-in-force field of an order is read from the data but not enforced.
 This is a limitation of this implementation, and \Cref{sec:testfidelity}
 measures how large it is.
 
 \subsection{The Batch Engine (FBA)}
 
-The batch engine collects all orders arriving within an interval $\tau$ and
-clears them at its end. It builds the total buy and total sell quantity at each
-price, as in \eqref{eq:demandsupply}, using only submitted limit prices. A
+The batch engine implements the clearing rule of \Cref{sec:fbanotation}: it
+collects all orders arriving within an interval $\tau$, clears them at its
+end at the volume-maximising price chosen by the tie-break cascade, rations
+the longer side by price-time priority within the batch, and rolls the
+residual into the next batch. Two implementation details are not part of that
+description. Candidate prices are taken only from submitted limit prices; a
 market order counts as demand or supply at every price but never proposes a
-price itself, so a batch made only of market orders does not trade. The engine
-then picks the price with the largest traded volume. If several prices tie, it
-applies three further rules in turn: smallest leftover imbalance, then the
-price closest to the previous batch's clearing price, and finally the lowest
-price, so the outcome is always the same. Orders priced
-strictly better than the clearing price are filled completely, except in the
-rare case where a range of prices supports the same volume (\Cref{sec:testfba}).
-The eligible orders of each side are served in order of aggressiveness (a
-market order before any limit order, then the better limit price) and then
-submission time, so among orders priced exactly at the clearing price the
-earlier one is filled first. \Cref{sec:implfba} describes the clearing step
-in detail.
+price itself, so a batch made only of market orders does not trade. And orders
+priced strictly better than the clearing price are filled completely, except
+in the rare case where a range of prices supports the same volume
+(\Cref{sec:testfba}). \Cref{sec:implfba} describes the clearing step in
+detail.
 
-Volume that cannot be matched always moves to the next batch. No outside
+No outside
 source of liquidity, such as an automated market maker, is used to fill it, so
 both engines can only trade against the orders that were actually submitted.
 The interval is fixed at $\tau=1$\,second, which keeps a replay of about 640
@@ -123,7 +116,9 @@ removes the order with the same order number from the engine: from the resting
 book of the CDA, or from the waiting orders of the FBA, including any part that
 was carried over from earlier batches. The whole order is removed, whatever size
 it had left. If the order is no longer there, because it was already filled or
-never seen, the cancellation does nothing and is not an error. Cancellations
+because its opening record never reached the engine (it was opened before the
+first record of the data, or skipped for its size, \Cref{sec:dataset}), the
+cancellation has no effect and is not an error. Cancellations
 are processed in file order, so a cancel that carries the same timestamp as a
 new order is applied in the order the records appear. Rejections, and conditional
 orders that have not triggered yet, never enter an engine.
@@ -212,7 +207,7 @@ the smallest orders of the venue are not part of the comparison.
 Since the engines are the author's own, some quantities that are invisible in
 real markets can be observed directly: every submitted price, including those
 of orders that never trade, the exact rationing outcome, and the volume left
-unmatched after each batch. Some things remain unknown. The dataset has no
+unmatched after each batch. Some quantities remain unknown. The dataset has no
 oracle or mark price, so neither engine's price can be measured against an
 external reference second by second within the replay; only at an hourly
 scale can both be compared with the spot price, and they track it closely
@@ -263,16 +258,11 @@ difference between the two engines' price changes is regressed on the
 common order flow, and the same Newey--West rule gives the standard error
 of the difference in slopes (\Cref{sec:formularq22}).
 
-This design's limits are real: \Cref{sec:limitations} sets out their full
-scope, and \Cref{sec:metricreliability} does the same for the metrics
-built to compare the two mechanisms. In short, an order stream only
-exists under the mechanism that produced it. A field comparison across
-two real mechanisms cannot hold that stream fixed the way a replay can;
-a replay buys that fixed comparison at a cost of its own, since it
-cannot show how the same flow would have looked had participants known
-they were trading under the other mechanism. Each design answers a
-different question, and this one is built to answer RQ2
-(\Cref{sec:rqs}).
+A replay holds the order stream fixed, which a field comparison cannot
+(\Cref{sec:gap}), but it cannot show how the flow would have changed had
+participants known they were trading under the other mechanism. The limits
+of the metrics are set out in \Cref{sec:metricreliability}, and those of the
+design as a whole in \Cref{sec:limitations}.
 
 \section{Metrics}
 \label{sec:metrics}
@@ -288,16 +278,17 @@ explains why each is used.
 The replayed orders were submitted on Hyperliquid's own continuous engine,
 not in reaction to batching. Every metric therefore shows the mechanical
 effect of the batch rule on fixed historical orders, not how participants
-would behave under real batching. In particular, nothing can be learned
+would behave under real batching. If a continuous market had latency races,
+one would expect more cancellations in it than under batching, as liquidity
+providers withdraw stale quotes; the data contain only the continuous
+market's cancellations, so there is nothing to compare them with. Nothing
+can likewise be learned
 from where orders fall relative to a simulated batch boundary, because
 that position depends on where the boundary was placed, not on any choice
-by the participant. Throughput and clearing latency have a different
-purpose: they are a control showing that both engines would be fast
-enough to run in real time. They cannot explain any other result,
-because the replay runs on the data's timestamps and not on the computer's
-clock.
+by the participant. Throughput and clearing latency are controls, not
+results (\Cref{sec:metricscontrol}).
 
-\section{Validation of the Harness}
+\section{Validation of the Simulator}
 \label{sec:validation}
 
 A simulation is only as reliable as the code behind it. The order book checks a

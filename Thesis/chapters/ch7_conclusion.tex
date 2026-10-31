@@ -4,9 +4,9 @@
 \section{Answers to the Research Questions}
 
 This thesis asked two questions: how a frequent batch auction engine is
-designed, and what changes when the same real order flow is cleared by
-one instead of by a continuous book. The two paragraphs below answer each
-in turn.
+designed, and what changes when the same real order flow is cleared in
+batches instead of continuously. The two paragraphs below answer each in
+turn.
 
 \paragraph{RQ1.} A frequent batch auction engine is fully specified by five
 design blocks: the batch interval, the disclosure regime during
@@ -35,16 +35,18 @@ of time window into a boundary repricing race (\Cref{sec:priceimprovement}).
 
 \paragraph{RQ2.} The simulation replayed one month of SOL perpetual order
 flow through both engines, with one-second batches. Its answer is that
-batching changes \emph{who bears the cost of trading}, but not \emph{how
-much} trades or \emph{at what price} (\Cref{tab:rq2answers}).
+batching changes neither \emph{how much} trades nor \emph{at what price},
+nor how far the price responds to order flow (\Cref{tab:rq2answers}).
 
 \begin{itemize}
   \item \textbf{Costs (RQ2.1).} In the continuous market, resting orders
   lose systematically to better-informed orders: the effective spread is
   positive, the realized spread negative and the price impact grows with
-  time. In the batch market no such one-sided cost is found, because every
-  order in a batch trades at one price set after all orders are in. Standing
-  liquidity, however, is slightly lower in the batch market, not higher.
+  time. Whether batching removes this cost could not be measured, because
+  the batch market's trades have no direction and the spread decomposition
+  cannot be built for them. The measures that need no direction do not
+  favour the batch market: standing liquidity is slightly lower there, not
+  higher, and the price moves slightly more per dollar traded.
   \item \textbf{Prices (RQ2.2).} Both engines arrive at the same price, and
   volatility is slightly higher in the batch market, not dampened as
   predicted; uniform pricing removes the spread of prices within a second. The same net order flow moves both prices by the same
@@ -56,13 +58,14 @@ much} trades or \emph{at what price} (\Cref{tab:rq2answers}).
   all.
 \end{itemize}
 
-Put together, batching at one second protects resting orders from being
-picked off, but on this market a one-second batch rarely holds enough
-two-sided flow to work as the well-filled auction the mechanism assumes.
-These conclusions hold for one instrument, one month and one interval, for
-orders that were never submitted to a batch market, and the cost result
-rests on an estimated trade direction, so it shows that no one-sided cost
-is found rather than that the cost is zero (\Cref{sec:metricreliability}).
+In summary, the replay finds no evidence that batching at one second
+changes the price or the volume, and on this market a one-second batch
+rarely holds enough two-sided flow to work as the well-filled auction the
+mechanism assumes. Whether it protects resting orders from being picked
+off remains open: it would need a trade direction for the batch market
+that the replay does not have. These conclusions hold for one instrument,
+one month and one interval, and for orders that were never submitted to a
+batch market (\Cref{sec:metricreliability}).
 
 \section{Limitations}
 \label{sec:limitations}
@@ -79,7 +82,15 @@ chosen under uncertainty about a clearing price. Every equilibrium
 prediction of the FBA literature --- narrower quoted spreads, size
 inflation, orders bunching at the batch close, bid shading --- is therefore out of
 reach, and the simulation delivers the mechanical baseline against which
-such responses would be measured. A further limitation bounds what future
+such responses would be measured. Field evidence includes these responses
+but cannot hold the flow fixed. \citet{lee2026taiwan} study the Taiwan
+Stock Exchange's move from frequent batch auctions to continuous trading
+and find that liquidity and price efficiency improved for mid- and
+small-cap stocks after the switch. That points in the same direction as
+the replay, in which one-second batches are slightly less liquid than the
+continuous market. The two designs are complementary: theirs measures the
+mechanism together with the participants' response to it, this one the
+mechanism alone. A further limitation bounds what future
 work can build on: several metrics require adaptation to a batch setting,
 which an extension inherits (\Cref{sec:metricreliability} works through them
 case by case).
@@ -95,14 +106,13 @@ block (\Cref{sec:venue}), so its continuous market already protects
 resting quotes to a degree; on a purely first-come, first-served
 exchange the cost that batching removes, and so the gain measured here,
 could be larger.
-And because the replay does not enforce post-only orders or self-trade
-prevention, it trades about \VerCdaOverVenue\ times the venue's own recorded
-volume (\Cref{sec:testfidelity}). Both engines receive this same input, so
-it does not favour either side of the paired comparisons in
-\Cref{ch:results}. Sizes are also rounded to whole SOL, which removes
-orders below 0.5\,SOL from both engines alike (\Cref{sec:dataset}). But the
-absolute volume, trade-count and latency levels reported there describe
-this replay, not Hyperliquid's live market. Finally, the month was not
-replayed in one uninterrupted run: \VerResetN\ restarts in its first five
-days emptied both engines at the same record, which understates book-based
-measures for some hours afterwards (\Cref{sec:testresets}).
+Finally, the replay itself departs from the venue in ways that affect
+both engines alike: it trades about \VerCdaOverVenue\ times the venue's
+recorded volume because post-only orders and self-trade prevention are
+not enforced, sizes are rounded to whole SOL, and the month was replayed
+with \VerResetN\ restarts, each of which emptied both books and
+understates book-based measures for some hours afterwards
+(\Cref{sec:testresets}). None of these favours either side of the
+paired comparisons, but absolute volume, trade-count and latency levels
+describe the replay, not Hyperliquid's live market
+(\Cref{sec:limitsreplay}).

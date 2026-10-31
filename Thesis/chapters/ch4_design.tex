@@ -80,7 +80,7 @@ this happens with probability $\delta/\tau$. With $\delta$ of a few
 microseconds --- the time scale on which the races of
 \citet{aquilina2022quantifying} are decided --- and $\tau$ around
 100~milliseconds, the probability is only $10^{-4}$ to $10^{-5}$. Speed is not
-banned; it simply stops paying.
+banned; it stops paying.
 
 The price is delay. Every participant waits on average $\tau/2$ before its
 order can trade, and up to $\tau$ in the worst case. This is harmless for an
@@ -185,7 +185,8 @@ For any $p \in \mathcal{P}^{*}$ with allocation $x$ held fixed,
 \end{equation}
 which does not depend on $p$.
 
-Expanding the two sums, the terms in $p$ enter as
+Substituting the definitions of $W^{\mathbb{B}}$ and $W^{\mathbb{A}}$ from
+\eqref{eq:surplus} into this sum, the terms in $p$ enter as
 $p\left(\sum_{\mathbb{A}} x_k - \sum_{\mathbb{B}} x_k\right)$, which
 vanishes by flow conservation. Two consequences follow immediately.
 First, $\partial W^{\mathbb{B}} / \partial p = -V^{*}$ and
@@ -385,7 +386,7 @@ reason to submit late, which makes a random closing time more valuable. A
 sealed-bid design removes most of that reason and makes a fixed closing time
 easier to defend. Secrecy also does not remove information leakage; it only
 moves it. Under sealed bidding, the price and volume of one batch become
-public before the next one closes, and as $\tau$ gets shorter this sequence of
+public before the next one closes, and as $\tau$ becomes shorter this sequence of
 published prices approaches a continuous price signal.
 
 \section{Block 3: Order Flow Segregation}
@@ -405,7 +406,7 @@ markets \citep{easley1996cream}, and it carries over to batches
 through one auction per group, or through eligibility rules for each group.
 The difficulty is classification. The split is only as good as the label,
 labels can be gamed by sending institutional orders through retail channels,
-and participants in different groups get different prices for the same asset
+and participants in different groups receive different prices for the same asset
 at the same moment, which raises fairness and best-execution concerns.
 
 \subsection{Intent-Based Segregation: The Dual Flow Batch Auction}
@@ -491,7 +492,7 @@ an extra rule bolted on afterwards; it falls directly out of that one
 requirement, that total buying equal total selling across the whole
 batch. Because the requirement applies to the batch as a whole and not
 order by order, every executed order ends up trading at the same price.
-Two things follow. First, the optimisation decides who trades but
+Two consequences follow. First, the optimisation decides who trades but
 not always at what price: several prices can support the same trades, and
 that range is exactly $\mathcal{P}^{*}$. The price ambiguity is therefore
 built into the problem, and $\sigma$ is what resolves it. Second, the
@@ -510,14 +511,15 @@ only in part as well (\Cref{sec:testfba}).
 At the clearing price the two sides are usually not equal, $D(\clr) \neq
 S(\clr)$, so the orders on the longer side priced exactly at $\clr$ cannot all
 be filled and must be rationed. The rule chosen determines what participants
-do to get a bigger share. Any rule that gives more to those who increase some
+do to obtain a larger share. Any rule that gives more to those who increase some
 variable they control encourages them to inflate that variable
 \citep{haynes2020precedence}.
 
 \begin{description}
-  \item[Price-time priority within the batch.] Orders at $\clr$ are filled in
-  order of submission (market orders first, then by limit price, then by
-  time), which keeps continuity with continuous markets but brings back a
+  \item[Price-time priority within the batch.] Eligible orders are filled in
+  priority order (market orders first, then the better limit price, then
+  the earlier submission), so among orders at $\clr$ the earlier one is
+  filled first. This keeps continuity with continuous markets but brings back a
   speed race at the scale of the interval: if being early inside the batch
   improves the fill, participants pay to be early, which is the incentive
   the mechanism was built to remove. Under a fixed close it also pulls
@@ -527,7 +529,7 @@ variable they control encourages them to inflate that variable
   (\Cref{tab:fbachoices}).
   \item[Pro rata.] Each order at $\clr$ receives a share proportional to its
   size, the rule the DFBA uses after price priority. It ignores timing, but
-  because a bigger order gets a bigger fill, participants submit more than they
+  because a larger order receives a larger fill, participants submit more than they
   want to trade. This \emph{order stuffing} makes displayed sizes less
   informative.
   \item[Size priority or maximal fill.] Larger orders are filled first, or the
@@ -548,7 +550,7 @@ variable they control encourages them to inflate that variable
 \end{description}
 
 No rule is neutral. Every rule ties the allocation to some variable, and that
-variable becomes the thing participants compete on. The question is not which
+variable becomes what participants compete on. The question is not which
 rule has no distortion, but which distortion the venue prefers.
 
 \section{Block 5: Settlement and Residual Handling}

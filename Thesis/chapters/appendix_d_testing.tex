@@ -10,8 +10,8 @@ them need real data or system tools and are run separately), and a checklist of
 FBA, \VerChecklistMet\ metrics) compiled into the simulator itself, so it runs on the
 finished executable with no development tools. On top of these, three further checks
 were built specifically for this appendix: an independent second implementation of
-both engines, deliberately planted bugs to confirm the tests can actually catch
-mistakes, and a comparison of the simulated output with what really happened on the
+both engines, deliberately planted bugs to confirm the tests can catch
+mistakes, and a comparison of the simulated output with what happened on the
 venue. All numbers below come from the scripts listed in \Cref{sec:testlimits}, run
 on the full December~2025 data and result files.
 
@@ -88,7 +88,7 @@ maximises volume.
 
 Second, \VerChecklistCda\ and \VerChecklistFba\ scenarios worked out by hand cover
 the ordinary cases (a plain cross, a multi-level sweep, ties with and without price
-history) and the edge cases that are easy to get wrong (an empty book or batch, a
+history) and the edge cases that are easy to implement incorrectly (an empty book or batch, a
 market order with no liquidity, a cancel of an unknown order, roll-over of a
 leftover); three are regression tests for real defects found while building the
 simulator.
@@ -175,7 +175,7 @@ month-long run was not one.
 
 Everything above shows the engines do what their rules say. A different question is
 whether those rules, applied to the real order flow, give a realistic picture of
-what actually happened on the venue --- and the answer is only partly yes. The
+what happened on the venue --- and the answer is only partly yes. The
 archive itself contains the venue's own record of every taker fill (an order filled
 the moment it was submitted), so the venue's true traded volume can be measured
 directly from data the simulator never even reads. Over the month this comes to
@@ -226,21 +226,24 @@ simulated minus real price, in basis points.}
 The simulator can save a checkpoint and resume a stopped run, but the code that
 resumes creates both engines again from empty, losing every resting or pending
 order. This leaves a visible trace: the CDA's book depth briefly collapses at the
-start of an hour, and the FBA occasionally clears a batch already split across the
-timing grid. Looking for this trace shows \VerResetN\ such restarts, all in the
+start of an hour, and FBA batches can afterwards straddle the timing grid. Looking for this trace shows \VerResetN\ such restarts, all in the
 first five days of the month and none afterward.
 
 Because both engines restart at the same record, the paired comparison between them
 is affected equally; but book-state measures, especially CDA depth, are understated
-for some hours afterward, and the FBA's batch clock stays briefly out of step with
-the metrics grid, which is why its price dispersion is not exactly zero in
-\VerDispRows\ buckets. An uninterrupted replay of the month would remove this; this
-work did not run one.
+for some hours afterward. The FBA's batch clock is also not realigned with the
+metrics grid after a restart. Before the restart of 2~December at 19:00 no bucket
+holds trades from two batch clears; from then until the end of the month about
+3.4\% of the buckets in which the FBA traded do, because a batch then straddles two
+one-second buckets and its trades are stamped with the latest submission time in
+the batch (\Cref{sec:implfba}). This is why the FBA's price dispersion is not
+exactly zero in \VerDispRows\ buckets. An uninterrupted replay of the month would
+remove both effects; this work did not run one.
 
 \section{What Was Not Checked}
 \label{sec:testlimits}
 
-Three things fall outside this verification. The convergence of the FBA to the CDA
+Three checks fall outside this verification. The convergence of the FBA to the CDA
 as $\tau \to 0$ was not tested, since it needs a sweep over several interval widths
 that this thesis does not include. The full month was not replayed by the
 independent Python reference, only four hours in detail and 24 more for volume,

@@ -29,7 +29,8 @@ instruction to buy or sell and is described by
   k = (s_k,\; q_k,\; \pi_k,\; t_k),
 \end{equation}
 where $s_k \in \{\text{buy}, \text{sell}\}$ is its side, $q_k > 0$ its
-quantity, $\pi_k$ its limit price and $t_k$ its submission time. A buy
+quantity in units of the base asset (SOL), $\pi_k$ its limit price in the
+quote currency (USD per SOL) and $t_k$ its submission time. A buy
 order is also called a \emph{bid} and a sell order an \emph{ask}; the sets
 of bids and asks in a given collection of orders are written $\mathbb{B}$
 and $\mathbb{A}$.
@@ -138,22 +139,22 @@ $n$ & number of buckets (or days) with a paired value & \S\ref{sec:experiments}\
 \multicolumn{3}{@{}l}{\emph{Metrics}}\\
 $h$ & distance threshold of depth within $h$ bps, $h \in \{10, 50, 100\}$ & \S\ref{sec:metrics21}\\
 $m_k$ & pre-trade reference price of trade $k$ & \S\ref{sec:metrics21}\\
-$\Delta$ & markout horizon, $\Delta \in \{1, 5, 30\}$\,s & \S\ref{sec:metrics21}\\
+$\Delta$ & markout horizon: time after a trade at which the reference price is read again, $\Delta \in \{1, 5, 30\}$\,s & \S\ref{sec:metrics21}\\
 $m_{k+\Delta}$ & first reference price at or after $t_k + \Delta$ & \S\ref{sec:metrics21}\\
 $S^{\mathrm{eff}}_k$ & effective spread of trade $k$ & \eqref{eq:effspread}\\
 $S^{\mathrm{real}}_k(\Delta)$ & realized spread of trade $k$ at horizon $\Delta$ & \eqref{eq:realspread}\\
 $\mathrm{PI}_k(\Delta)$ & price impact of trade $k$ at horizon $\Delta$ & \eqref{eq:priceimpact}\\
-$r_i$ & $i$-th consecutive return of the reference price within a bucket & \S\ref{sec:formularq22}\\
+$P^{\mathrm{c}}_t, R_t$ & last reference price in bucket $t$, and its return from the previous bucket (Amihud) & \eqref{eq:amihud}\\
+$r_i$ & return between two successive reference prices within a bucket & \S\ref{sec:formularq22}\\
 $\mathcal{T}$ & set of buckets in which both engines traded & \S\ref{sec:formularq22}\\
 $\mathrm{VWAP}^{e}_t$ & volume-weighted average price of engine $e$ in bucket $t$ & \S\ref{sec:formularq22}\\
 $r^{e}_i$ & log return of $\mathrm{VWAP}^{e}$ between consecutive buckets of $\mathcal{T}$ & \eqref{eq:matchedvol}\\
-$\mathrm{vol}^{e}_{\text{day}}$ & matched-timestamp volatility of engine $e$ on one day & \eqref{eq:matchedvol}\\
+$\mathrm{vol}^{e}_{\text{day}}, N_{\text{day}}$ & matched-timestamp volatility of engine $e$ on one day, and the number of returns it uses & \eqref{eq:matchedvol}\\
 $\lambda$ & Kyle's lambda, price change per unit of net order flow & \S\ref{sec:formularq22}\\
 $f_i$ & venue net taker flow in second $i$ (1{,}000 SOL), the regressor of Kyle's lambda & \eqref{eq:kylef}\\
 $y^{e}_i(h)$ & price change (bps) of engine $e$ from second $i-1$ to $i+h$ & \eqref{eq:kyley}\\
 $\lambda^{e}(h), u^{e}_i$ & Kyle's lambda of engine $e$ at horizon $h$, and the regression residual & \eqref{eq:kylereg}\\
 $\theta(h), v_i$ & difference $\lambda^{\mathrm{FBA}}(h) - \lambda^{\mathrm{CDA}}(h)$, and its regression residual & \eqref{eq:kylediff}\\
-$m_{\mathrm{pre}}, m_{\mathrm{post}}$ & CDA midpoint before a sweep and 5\,s after it (per-sweep CDA lambda) & \S\ref{sec:formularq22}\\
 $\mu$ & prior expected value of the asset in the model of \citet{kyle1985continuous} & \S\ref{sec:adverse}\\
 \midrule
 \multicolumn{3}{@{}l}{\emph{Design analysis}}\\
@@ -225,7 +226,7 @@ smooth ones, because each order adds its whole quantity at once, the
 moment its limit price is reached, rather than a little at a time: $D$
 steps down as price rises, $S$ steps up. \Cref{fig:fbaschedule} shows
 exactly this picture for a small worked example. At any price $p$, only
-the smaller of the two sides can actually trade, so the volume executable
+the smaller of the two sides can trade, so the volume executable
 at that price is
 \begin{equation}
   V(p) = \min\{D(p), S(p)\}.
@@ -259,7 +260,7 @@ The two curves do not have to cross at one exact price: they can run side
 by side, both holding the same height, across several price ticks at
 once, which happens often when the book is thin. Every price in that
 stretch executes the same maximum volume, so volume by itself cannot say
-which one is actually used. The clearing rule therefore works in two
+which one is used. The clearing rule therefore works in two
 stages. First, it finds every price that reaches the greatest executable
 volume, the volume-maximising set
 \begin{equation}
@@ -303,7 +304,10 @@ is used up (\Cref{sec:rationing} discusses the alternatives). The volume
 left unmatched, $|D(\clr) - S(\clr)|$ on the longer side together with
 every order that was not eligible at $\clr$, is the \emph{residual}; in
 this thesis it rolls over into the next batch with its limit price and
-submission time unchanged.
+submission time unchanged. An unfilled market order rolls over as a
+market order, still without a limit, and keeps its priority in the next
+batch. A common convention on exchanges is instead to convert it into a
+limit order at the auction price; the engine used here does not do this.
 
 \subsection{Price Improvement and Surplus}
 
@@ -351,7 +355,7 @@ without changing who trades or how much.
 \subsection{What Differs from the CDA}
 \label{sec:fbavscda}
 
-Set against \Cref{sec:cdaformal}, the FBA changes three things. Orders
+Set against \Cref{sec:cdaformal}, the FBA differs in three respects. Orders
 wait up to $\tau$ for their first chance to trade, instead of trading on
 arrival, and longer if they are rolled over.
 All trades of a batch share one price $\clr$, instead of each trading at
@@ -359,8 +363,8 @@ the resting order's price. And because the orders of a batch trade
 simultaneously, no order crosses another's quote: there is no maker and
 no taker, and a trade has no observable direction $\varepsilon_k$. This
 point is one reason several metrics below need an adaptation for the
-FBA. The other reason is less obvious but matters just as much: the FBA
-has no order book that could be observed in the way the CDA's can.
+FBA. The other reason is that the FBA has no order book that could be
+observed in the way the CDA's can.
 
 \paragraph{Why the FBA's unmatched orders are not an order book.} At
 first sight the FBA seems to offer a ready-made substitute for the CDA's
@@ -369,13 +373,13 @@ each with a side, a quantity and a limit price. Sorted by price, this set
 would give a best bid, a best ask, depth at every level and a book
 imbalance, and every book-based statistic could then be computed exactly
 as for the CDA. This does not work, because the two sets are produced by
-different processes and therefore mean different things.
+different processes and therefore have different meanings.
 
 A CDA book is what remains \emph{after} matching. Every order that can
 trade does so the instant it arrives (\Cref{sec:cdaformal}), so an order
 sits in the book only because no opposite order has been willing to trade
 with it. The book is therefore never crossed ($b_t < a_t$ at all times),
-and its depth is liquidity that is actually available: a new order can
+and its depth is liquidity that is available: a new order can
 trade against it immediately, at the prices shown.
 
 The FBA's pending orders are what is waiting \emph{for} matching: the
@@ -383,12 +387,10 @@ residual of the last batch plus everything submitted since. None of
 these orders has yet been matched against any other, which has three
 consequences.
 \begin{itemize}
-  \item \textbf{The set holds orders a CDA book never would.} A buy
-  priced above a waiting sell would have traded on arrival in the CDA; in
-  the FBA both simply wait for the close. Whenever a batch is going to
-  trade, its pending set is crossed, with the best buy at or above the
-  best sell. Its ``quoted spread'' is then zero or negative, and its depth
-  includes quantity that is about to disappear.
+  \item \textbf{The set can be crossed.} Whenever a batch is going to
+  trade, its best buy is at or above its best sell, so its ``quoted
+  spread'' is zero or negative and its depth includes quantity that is
+  about to execute.
   \item \textbf{Its content depends on when it is read.} Just after a
   clear it holds only the residual; just before the next clear it holds
   the residual plus a full interval of new orders. A CDA book has no such
@@ -413,8 +415,7 @@ biased.
   it holds the whole interval's orders, including those that are about to
   execute. Depth read here is overstated, so the bias \emph{favours} the
   FBA. Both depth measures in this thesis are read at this point
-  (\Cref{sec:metrics21}). The FBA still comes out slightly thinner, so
-  that finding holds with margin.
+  (\Cref{sec:metrics21}).
   \item \textbf{Just after the clear} the residual is, like a CDA book,
   no longer crossed, because everything that could trade at $\clr$ has
   traded. But this is the thinnest moment of the cycle. The clear has
@@ -434,8 +435,8 @@ biased.
   Averaging such readings over the interval only mixes the two biases
   above, in proportions set by when orders happen to arrive.
 \end{itemize}
-The sampling also differs. A CDA bucket value is the mean of many book
-snapshots spread across the second (\Cref{sec:metrics21}), which
+The sampling also differs. A CDA bucket value is the mean of all book
+snapshots taken within the second (\Cref{sec:metrics21}), which
 describes the typical state of the book. An FBA value is a single reading
 per batch, taken at one end of the cycle.
 
@@ -445,7 +446,8 @@ at the instant two orders cross, and in the FBA at the instant the batch
 clears. Executed volume, VWAP and trader surplus are therefore read from
 the same kind of object in both engines, whenever they are read. The
 effective and realized spread and the price impact are trade-based too,
-but for the FBA they still need an estimated trade direction
+but they need the direction of each trade, which the FBA does not have, so
+their FBA values cannot be compared with the CDA's
 (\Cref{sec:limitssign}).
 The book-like FBA metrics are kept, but each is read at a stated point in
 the cycle, and its direction of bias is taken into account when the
@@ -519,18 +521,34 @@ question. Every metric is computed for both engines.}
 \subsection{Liquidity and Transaction Costs (RQ2.1)}
 \label{sec:metrics21}
 
-\paragraph{Quoted spread.} For the CDA, every book snapshot in the
-bucket with both sides present contributes $(a_t - b_t)/\midp \cdot
-10^{4}$\,bps, and the bucket value is the mean over snapshots. The FBA
+This group measures how much quantity is available near the price and
+what a trade costs. The first three metrics describe the book; the spread
+decomposition and Amihud illiquidity describe the trades that executed.
+Book-based CDA values are averaged over \emph{book snapshots}: the state
+of the CDA book recorded after every record the engine processes, so a
+busy second contributes many snapshots and a quiet one few.
+
+\paragraph{Quoted percentage spread.} For the CDA, every book snapshot in
+the bucket with both sides present contributes $(a_t - b_t)/\midp \cdot
+10^{4}$\,bps, with $\midp$ the midpoint of \eqref{eq:midpoint}, and the
+bucket value is the mean over snapshots. The FBA
 has no book while a batch accumulates; its analogue is the gap between the
 best unfilled sell and the best unfilled buy among the orders left after
 a clear (including those rolled over from earlier batches), relative to
 $\clr$ and in bps, averaged over the batches in which both exist.
 
-\paragraph{Depth at best.} For the CDA, the mean over snapshots of
-(best-bid size $+$ best-ask size)$/2$, the touch only. For the FBA, the
-mean over batches of $(D(\clr) + S(\clr))/2$, the quantity eligible to
-trade at the clearing price. A batch that does not cross still has a
+\paragraph{Depth at best.} For the CDA, depth at best is the mean over
+snapshots of (best-bid size $+$ best-ask size)$/2$; only the touch is
+counted. For the FBA, it is the mean over batches of
+$(D(\clr) + S(\clr))/2$, the quantity eligible to trade at the clearing
+price. The FBA has no best bid and best ask in the CDA's sense. The
+natural candidate, the size at the best unfilled buy and sell among the
+orders left after a clear, is read at the thinnest moment of the batch
+cycle and is often one-sided near $\clr$ (\Cref{sec:fbavscda}). The
+schedule at $\clr$ was preferred because it exists in every batch; it
+counts every order priced at or better than $\clr$, not one price level,
+so the two engines' values are reported but not compared
+(\Cref{sec:limitscomparable}). A batch that does not cross still has a
 price: the engine applies the same tie-break cascade to the submitted
 limit prices even when no volume can execute, and the price it selects
 serves as $\clr$ for the FBA's book-like metrics in that batch, so depth
@@ -545,8 +563,11 @@ just before it clears (FBA, rolled-over orders included, reference
 $\clr$).
 
 \paragraph{Effective, realized spread and price impact.} Let trade
-$k$ have price $p_k$, direction $\varepsilon_k$, pre-trade reference price $m_k$
-and, a markout horizon $\Delta$ later, reference price $m_{k+\Delta}$.
+$k$ have price $p_k$, direction $\varepsilon_k$ and pre-trade reference
+price $m_k$ (for the CDA, the midpoint of \eqref{eq:midpoint}; the FBA's
+reference price is given below). The \emph{markout horizon} $\Delta$ is
+the time after the trade at which the reference price is read again, and
+$m_{k+\Delta}$ is that later reference price.
 In proportional form \citep{hasbrouck1993assessing,hendershott2011algorithmic},
 \begin{align}
   S^{\mathrm{eff}}_k &= \frac{2 \varepsilon_k (p_k - m_k)}{m_k},
@@ -558,7 +579,10 @@ In proportional form \citep{hasbrouck1993assessing,hendershott2011algorithmic},
 \end{align}
 each in bps after multiplying by $10^{4}$, so that $S^{\mathrm{eff}}_k =
 S^{\mathrm{real}}_k(\Delta) + \mathrm{PI}_k(\Delta)$ trade by trade and in
-any quantity-weighted aggregate. The bucket value is the
+any quantity-weighted aggregate. The effective spread is the trade's
+slippage against the pre-trade midpoint; in practice slippage also
+depends on the horizon over which it is measured, on trade size and on
+volatility (\Cref{sec:spread-decomposition}). The bucket value is the
 quantity-weighted mean over the bucket's trades, for $\Delta \in
 \{1, 5, 30\}$\,s. For the CDA, $m_k$ is the book midpoint just before the
 trade (the best price of the one side present, if the other side is
@@ -570,27 +594,25 @@ first FBA clearing price at or after $t_k + \Delta$. And its trades have no dire
 (\Cref{sec:fbanotation}), so the simulator records only the unsigned
 deviation $2|p_k - m_k|/m_k$.
 
-\paragraph{Signing the FBA side.} Before the FBA values are compared, each
-bucket in which both engines traded is given a direction by a zero-tick
-rule \citep{leeready1991} applied to the \emph{CDA's} prices: taking these
-buckets in time order, a bucket's FBA trades are labelled buys if the CDA's
-VWAP rose from the previous such bucket, sells if it fell, and inherit the
-last nonzero tick if it is unchanged. The reported
-FBA effective and realized spread are this sign times the unsigned
-values, and the FBA price impact is the signed effective spread minus the
-signed realized spread. Signing with the FBA's own price history instead
-would be circular, because that history is $m_k$ itself, so the sign
-would only undo the deviation's own sign. The rule is an estimate, not
-an observed direction; \Cref{sec:limitssign} discusses what it can and cannot
-recover.
+\paragraph{Signing the FBA side.} Each bucket in which both engines
+traded is given a sign $\hat\varepsilon_k$ by a zero-tick rule
+\citep{leeready1991} applied to the \emph{CDA's} prices: taking these
+buckets in time order, the sign is $+1$ if the CDA's VWAP rose from the
+previous such bucket, $-1$ if it fell, and the last nonzero tick if it is
+unchanged. The reported FBA effective and realized spread are
+$\hat\varepsilon_k$ times the unsigned values, and the FBA price impact is
+their difference. Because the sign multiplies an \emph{unsigned}
+deviation, not the signed one of \eqref{eq:effspread}, these values are
+close to zero by construction and are not compared with the CDA's
+(\Cref{sec:limitssign}).
 
-\paragraph{Amihud illiquidity.} With $\mathrm{close}$ the last
-reference price observed in a bucket (carried forward across empty
-buckets) and $\mathrm{ret} = (\mathrm{close} -
-\mathrm{prev\_close})/\mathrm{prev\_close}$,
+\paragraph{Amihud illiquidity.} Let $P^{\mathrm{c}}_t$ be the last
+reference price observed in bucket $t$, carried forward across empty
+buckets, and $R_t = (P^{\mathrm{c}}_t - P^{\mathrm{c}}_{t-1})/P^{\mathrm{c}}_{t-1}$
+its return from the previous bucket. Then
 \begin{equation}
   \label{eq:amihud}
-  \mathrm{Amihud} = \frac{|\mathrm{ret}|}{\text{dollar volume}} \cdot 10^{6}
+  \mathrm{Amihud}_t = \frac{|R_t|}{\text{dollar volume}_t} \cdot 10^{6}
 \end{equation}
 for every bucket that traded a nonzero volume \citep{amihud2002illiquidity};
 it is missing otherwise, so a price move on zero volume is not recorded as
@@ -599,11 +621,21 @@ infinite illiquidity.
 \subsection{Price Discovery and Market Quality (RQ2.2)}
 \label{sec:formularq22}
 
-\paragraph{Realized volatility.} Within a bucket, the root sum of
-squared consecutive returns of the reference price,
-$\sqrt{\sum_i r_i^2}$. It needs at least two prices in one bucket, which
-the FBA, clearing at most once per second, almost never has; it is
-therefore not used for the comparison, and is replaced by the next metric.
+This group measures how each engine's price moves: how variable it is,
+how much it varies within one second, and how strongly it responds to
+order flow. Volatility is grouped here with price discovery rather than
+with the spread; other authors treat the spread as the main market-quality
+measure, and in this thesis it belongs to RQ2.1.
+
+\paragraph{Realized volatility.} Realized volatility in a bucket is the
+square root of the sum of squared returns, $\sqrt{\sum_i r_i^2}$, where
+$r_i$ is the return between two successive observations of the reference
+price within the bucket. These observations are not equally spaced: for
+the CDA they follow the records the engine processes, and for the FBA
+they are successive clearing prices, one interval $\tau$ apart. The
+measure needs at least two prices in one bucket, which the FBA, clearing
+at most once per second, almost never has; it is therefore not used for
+the comparison, and is replaced by the next metric.
 
 \paragraph{Matched-timestamp volatility.} Let $\mathcal{T}$ be the set
 of buckets in which both engines traded, with $\mathrm{VWAP}^{e}_t$ the
@@ -611,10 +643,11 @@ volume-weighted average price of engine $e$ in bucket $t$. Over
 consecutive $t_i, t_{i+1} \in \mathcal{T}$ the two engines' log returns
 $r^{e}_i = \ln(\mathrm{VWAP}^{e}_{t_{i+1}} / \mathrm{VWAP}^{e}_{t_i})$ are
 computed over the \emph{same} instants for both. They are grouped by the
-calendar day of $t_{i+1}$ and summarised as
+calendar day of $t_{i+1}$ and, with $N_{\text{day}}$ the number of
+returns on that day, summarised as
 \begin{equation}
   \label{eq:matchedvol}
-  \mathrm{vol}^{e}_{\text{day}} = \sqrt{\operatorname{mean}_i\, (r^{e}_i)^2}
+  \mathrm{vol}^{e}_{\text{day}} = \sqrt{\frac{1}{N_{\text{day}}}\sum_{i \in \text{day}} (r^{e}_i)^2}
   \cdot 10^{4}\ \text{bps},
 \end{equation}
 a root \emph{mean} square, so that a busier day is not mistaken for a more
@@ -655,7 +688,9 @@ fill recorded at the order's own submission time, with an elapsed time
 of zero, means the order traded on arrival: it took liquidity and was
 the taker. A fill recorded later belongs to an order that had been
 resting, a maker. The filled quantity is the drop in the order's
-remaining size. Summing the taker fills by side gives the venue's net
+remaining size. This classification describes the venue's own continuous
+market; inside the FBA there are still no makers or takers, but each
+second of its order flow now has an external direction. Summing the taker fills by side gives the venue's net
 taker flow in each second $i$,
 \begin{equation}
   \label{eq:kylef}
@@ -664,19 +699,16 @@ taker flow in each second $i$,
 positive when buyers were the aggressors on balance. Three properties
 make it the right regressor. It is identical for both engines, because
 both replay the same orders in the same second. Its direction comes from
-the venue's own fill records, not from a price-based guess such as the
-tick rule used for the FBA spreads; the only error left is a maker hit
-within the first millisecond after it was posted, which the record's
-millisecond resolution would count as a taker. And it comes from neither of the two engines
-being compared: the simulator never reads these records. Using the
-CDA's own executed flow instead would have measured the FBA against a
-quantity produced by its competitor. The CDA's simulated volume follows
-the venue's closely over time, but at about twice its level, because the
-replay does not enforce all of the venue's rules
-(\Cref{sec:testfidelity}); the venue's own record avoids that error too.
+fill records, not from a price; the only error left is a maker order
+filled within the first millisecond after it was posted, which the record's
+millisecond resolution would count as a taker. And it comes from neither
+of the two engines being compared: the simulator never reads these
+records, so the FBA is not measured against a quantity produced by its
+competitor, and the CDA's inflated simulated volume
+(\Cref{sec:testfidelity}) does not enter.
 
 With $f_i$ fixed, each engine is regressed on it separately. The response
-is that engine's own price change,
+is that engine's price change,
 \begin{equation}
   \label{eq:kyley}
   y^{e}_i(h) = \frac{P^{e}_{i+h} - P^{e}_{i-1}}{P^{e}_{i-1}} \cdot 10^{4},
@@ -703,7 +735,11 @@ this much net buying in a second, how far did this mechanism's price
 move? The sample is every second with nonzero venue flow in which both
 $y^{\mathrm{CDA}}_i$ and $y^{\mathrm{FBA}}_i$ exist, pooled over the
 whole month, so both regressions use exactly the same observations and
-$\lambda$ is in bps per 1{,}000 SOL.
+$\lambda$ is in bps per 1{,}000 SOL. Because prices are carried forward,
+an engine need not trade in second $i$ for $y^{e}_i$ to exist, so this
+sample is larger than the set of seconds in which both engines traded
+that the other paired metrics use. In a second in which an engine did
+not trade, its same-second change ($h = 0$) is zero by construction.
 
 To test whether the two slopes differ, a third regression is run on the
 difference between the engines' price changes,
@@ -721,12 +757,20 @@ lag length chosen by the same rule as for every other metric
 different from zero means the two prices respond to the same flow by the
 same amount.
 
-For the CDA alone, a finer per-sweep estimate is also reported: the
-midpoint move 5\,s after a sweep, regressed on the sweep's net executed
-quantity, in bps per SOL (\Cref{sec:res22}).
+For the CDA alone, a per-sweep estimate is also reported: within each
+second, the midpoint move 5\,s after each sweep is regressed through the
+origin on the sweep's net executed quantity, in bps per SOL, and the
+per-second slopes are averaged over the month (\Cref{sec:res22}). An
+average of per-second slopes weights a second with a few small sweeps as
+much as one with large sweeps, so it is not on the scale of the pooled
+slopes above and is not compared with them.
 
 \subsection{Execution (RQ2.3)}
 \label{sec:metrics23}
+
+This group measures what happens to the orders themselves: how much
+trades, how long an order waits for its first fill, and how much better
+than its own limit it trades.
 
 \paragraph{Executed volume, notional, VWAP and trade count.} The sums
 of $q$ and of $p \cdot q$ over the bucket's trades, their ratio (the

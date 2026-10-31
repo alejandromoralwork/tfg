@@ -1,11 +1,11 @@
 \chapter{Comparability of the FBA's Unmatched Orders and the CDA Book}
 \label{app:comparability}
 
-A natural first instinct is to treat the FBA's set of not-yet-matched
+A natural first intuition is to treat the FBA's set of not-yet-matched
 orders at time $t$ as a stand-in for ``the CDA order book at $t$,'' and
 then compute the usual book-based metrics (quoted spread, depth, book
 imbalance) on it the same way they are computed on the CDA. This appendix
-explains why that instinct does not survive scrutiny, and what the
+explains why that intuition does not hold, and what the
 metrics defined in \Cref{sec:metricdefs} do instead.
 
 \section{The Question}
@@ -21,7 +21,7 @@ reasons.
 \section{Pre-Clearing: Settlement Mismatch and Inflated Depth}
 
 Read immediately \emph{before} the batch containing $t$ clears, the
-pending set mixes two things that must not be mixed. Using the notation
+pending set mixes two kinds of order that must be kept apart. Using the notation
 of \Cref{sec:fbanotation}: some pending orders are inframarginal at the
 price the batch is about to clear at (every buy with $\pi_k > \clr$,
 every sell with $\pi_k < \clr$) and will execute the instant the gate
@@ -30,7 +30,7 @@ flow that batching has temporarily delayed. Others are genuinely
 marginal or out of the money and will remain unmatched. Counting the
 whole pending set as if it were book depth overstates FBA liquidity
 purely as an artefact of the batching delay, not because more liquidity
-is actually standing there.
+is available.
 
 The deeper problem is one of kind, not convention. The CDA book at $t$
 reflects a mechanism that has already finished matching everything it
@@ -78,15 +78,14 @@ sidestep one of the two issues above, for a reason now made explicit.
   together, not the unmatched residual. This is the closest analogue of a
   CDA book's touch size (``how much was there at the best price''), and
   deliberately not an answer to ``how much is left over.'' It is read off
-  the one price that actually cleared, not a provisional one, but it still
+  the one price that cleared, not a provisional one, but it still
   counts the volume about to execute at that price, so it carries the
   Pre-Clearing section's mixing problem; this is one reason
   \Cref{sec:limitscomparable} treats it as not comparable with the CDA's touch size.
   \item[Depth within a threshold] is also read from the batch just before
   it clears, so it too includes orders about to execute. That can only
-  make the FBA look deeper than its standing liquidity, which is why the
-  result that the FBA is nonetheless slightly \emph{thinner} on this
-  measure holds with margin.
+  make the FBA look deeper than its standing liquidity
+  (\Cref{sec:limitscomparable}).
   \item[Quoted spread] uses the post-clearing residual, and only for
   batches where both a best unfilled buy \emph{and} a best unfilled sell
   exist. Because unmatched orders on both sides roll over, this holds in
@@ -97,7 +96,7 @@ sidestep one of the two issues above, for a reason now made explicit.
   \item[Book imbalance] is not computed for the FBA at all. Unlike
   quoted spread, it has no gated, partial version here: a book-imbalance
   figure needs a resting two-sided book to read continuously, which, as
-  argued above, the FBA simply does not have between clears, so this
+  argued above, the FBA does not have between clears, so this
   thesis does not build a proxy for an object that does not exist.
   \item[Almost everything else] --- executed volume, trade
   count, VWAP, effective and realized spread, price impact --- is built
@@ -106,10 +105,12 @@ sidestep one of the two issues above, for a reason now made explicit.
   post-clearing either way (a CDA trade the instant of crossing, an FBA
   trade the instant the batch clears), which is exactly why trade-based
   metrics sidestep the pre/post-clearing dilemma above entirely rather
-  than resolving it.
+  than resolving it. Effective and realized spread and price impact also
+  need the direction of each trade, which FBA trades do not have, so their
+  FBA values are reported but not compared (\Cref{sec:limitssign}).
 \end{description}
 
-Put together, the FBA's unmatched orders --- the leftover residual this
+In summary, the FBA's unmatched orders --- the leftover residual this
 appendix has been discussing --- appear in exactly one metric, quoted
 spread, and only there under the two-sided gate above; the two depth
 measures read the batch before it clears instead, and book imbalance is
