@@ -34,85 +34,107 @@ that split can be steered by whoever submits last, which turns the choice
 of time window into a boundary repricing race (\Cref{sec:priceimprovement}).
 
 \paragraph{RQ2.} The simulation replayed one month of SOL perpetual order
-flow through both engines, with one-second batches. Its answer is that
-batching changes neither \emph{how much} trades nor \emph{at what price},
-nor how far the price responds to order flow (\Cref{tab:rq2answers}).
+flow through both engines, with one-second batches, and compared them
+second by second on the same orders. It produced six findings
+(\Cref{tab:findings}); \Cref{sec:findingsreliability} explains how each is
+reached, why it arises and how far it can be relied on.
+\begin{enumerate}[label=\textbf{F\arabic*}]
+  \item \textbf{The same volume trades, at the same price} (high
+  reliability). Batching reschedules trades rather than preventing them:
+  unfilled orders roll over, so crossing interest still meets, at most one
+  interval later. The two prices differ by a median of
+  \PriceDiffMedianBps\,bps, and only when an order sweeps several price
+  levels, which the CDA prices level by level and the FBA at one price.
+  \item \textbf{The price responds to order flow by the same amount}
+  (high reliability at 5\,s). Net buying removes the same resting orders in
+  both engines, so both prices settle at the same level. Theory predicts a
+  smaller response under batching through a change in behaviour, which a
+  replay cannot reproduce.
+  \item \textbf{Uniform pricing removes price dispersion within a second}
+  (high reliability). Each one-second bucket holds one batch, which trades
+  at one price, so all traders arriving within that second get the same
+  price; the variation moves to between seconds.
+  \item \textbf{At one second batching adds no liquidity} (high
+  reliability for no gain, low for a loss). Depth near the price is not
+  higher, but a few percent lower; Amihud illiquidity and volatility are
+  slightly higher, partly because of how each engine's price is measured.
+  A one-second batch rarely holds more than the flow that would have traded
+  anyway, so there is little to pool.
+  \item \textbf{Batching delays execution} (high reliability for the
+  direction). Orders wait \ResTimeToExecDiff\,s longer for their first
+  fill: up to one second for the clear, the rest most likely from which
+  resting orders the batch matches. Most batches clear no trade, but the
+  continuous market also trades in only about a quarter of seconds.
+  \item \textbf{The continuous market charges resting orders an
+  adverse-selection cost} (high reliability, continuous market only). The
+  realized spread is negative and the price impact grows with the horizon:
+  resting orders are accepted most often by traders who expect the price
+  to move their way.
+\end{enumerate}
 
-\begin{itemize}
-  \item \textbf{Costs (RQ2.1).} In the continuous market, resting orders
-  lose systematically to better-informed orders: the effective spread is
-  positive, the realized spread negative and the price impact grows with
-  time. Whether batching removes this cost could not be measured, because
-  the batch market's trades have no direction and the spread decomposition
-  cannot be built for them. The measures that need no direction do not
-  favour the batch market: standing liquidity is slightly lower there, not
-  higher, and the price moves slightly more per dollar traded.
-  \item \textbf{Prices (RQ2.2).} Both engines arrive at the same price, and
-  volatility is slightly higher in the batch market, not dampened as
-  predicted; uniform pricing removes the spread of prices within a second. The same net order flow moves both prices by the same
-  amount within five seconds, so batching neither slows the price's
-  response to information nor dampens it, contrary to the prediction that
-  a batch price reacts less to one-sided flow.
-  \item \textbf{Execution (RQ2.3).} The same volume trades, but orders wait
-  longer, because \FbaEmptyBatchShare\% of one-second batches do not cross at
-  all.
-\end{itemize}
-
-In summary, the replay finds no evidence that batching at one second
-changes the price or the volume, and on this market a one-second batch
-rarely holds enough two-sided flow to work as the well-filled auction the
-mechanism assumes. Whether it protects resting orders from being picked
-off remains open: it would need a trade direction for the batch market
-that the replay does not have. These conclusions hold for one instrument,
-one month and one interval, and for orders that were never submitted to a
-batch market (\Cref{sec:metricreliability}).
+In summary, at one second and on this market, batching largely
+reproduces the continuous market with a short delay. Its promised gains
+depend on pooling orders that would otherwise arrive at different
+moments, and a one-second batch rarely holds more than the flow that would
+have traded anyway. This agrees with field evidence from the Taiwan Stock
+Exchange: \citet{lee2026taiwan} find that liquidity and price efficiency
+improved for mid- and small-cap stocks when the exchange moved from
+frequent batch auctions to continuous trading. Their design captures the
+participants' response to the mechanism, this one the mechanism alone,
+and neither finds a liquidity gain from batching. Whether batching
+protects resting orders from adverse selection, and whether a longer
+interval would give the batches enough flow to pool, remain open
+(\Cref{sec:limitssign}).
 
 \section{Limitations}
 \label{sec:limitations}
 
-The central limitation is intrinsic to the design. A replay holds order flow
-constant, which is what makes the comparison clean, and by the same token
-prevents participants from responding to the mechanism: the orders replayed
-were submitted under a continuous engine, so their sizes were not chosen
-against the rationing rule implemented (price-time-within-the-batch, a
-different rule from the pro rata and size-priority alternatives surveyed
-in \Cref{sec:rationing}), their arrival times
-were not chosen against a batch boundary, and their limit prices were not
-chosen under uncertainty about a clearing price. Every equilibrium
-prediction of the FBA literature --- narrower quoted spreads, size
-inflation, orders bunching at the batch close, bid shading --- is therefore out of
-reach, and the simulation delivers the mechanical baseline against which
-such responses would be measured. Field evidence includes these responses
-but cannot hold the flow fixed. \citet{lee2026taiwan} study the Taiwan
-Stock Exchange's move from frequent batch auctions to continuous trading
-and find that liquidity and price efficiency improved for mid- and
-small-cap stocks after the switch. That points in the same direction as
-the replay, in which one-second batches are slightly less liquid than the
-continuous market. The two designs are complementary: theirs measures the
-mechanism together with the participants' response to it, this one the
-mechanism alone. A further limitation bounds what future
-work can build on: several metrics require adaptation to a batch setting,
-which an extension inherits (\Cref{sec:metricreliability} works through them
-case by case).
+\paragraph{Participants cannot respond.}
+\label{sec:limitsbehaviour}
+A replay holds order flow constant, which is what makes the comparison
+clean, and by the same token prevents participants from responding to the
+mechanism. The replayed orders were submitted to a continuous engine, so
+their sizes, arrival times and limit prices were not chosen against a batch
+rule. The equilibrium predictions of the FBA literature --- narrower quoted
+spreads, size inflation, orders bunching at the batch close, bid shading
+(\Cref{sec:priceimprovement}) --- are therefore out of reach, and the
+findings are the mechanical baseline against which such responses would be
+measured. The same holds for cancellations: if latency races were present,
+a continuous market would show more cancellations than a batch market, but
+the data contain only the continuous market's cancellations.
 
-The sample itself bounds the claims further. The data come from one
-venue, one instrument and one continuous month; a crypto perpetuals
-exchange has a participant population, fee structure and latency profile
-that differ from an equity market, so magnitudes should not be carried
-over elsewhere without re-estimation, and the month gives day-by-day
-stability within the sample, not a cross-instrument or cross-regime one.
-Hyperliquid also processes cancellations before new orders within each
-block (\Cref{sec:venue}), so its continuous market already protects
-resting quotes to a degree; on a purely first-come, first-served
-exchange the cost that batching removes, and so the gain measured here,
-could be larger.
-Finally, the replay itself departs from the venue in ways that affect
-both engines alike: it trades about \VerCdaOverVenue\ times the venue's
-recorded volume because post-only orders and self-trade prevention are
-not enforced, sizes are rounded to whole SOL, and the month was replayed
-with \VerResetN\ restarts, each of which emptied both books and
-understates book-based measures for some hours afterwards
-(\Cref{sec:testresets}). None of these favours either side of the
-paired comparisons, but absolute volume, trade-count and latency levels
-describe the replay, not Hyperliquid's live market
-(\Cref{sec:limitsreplay}).
+\paragraph{One venue, one instrument, one month, one interval.} Magnitudes
+should not be carried over to other markets without re-estimation.
+Hyperliquid processes cancellations before new orders within each block
+(\Cref{sec:venue}), so its continuous market already protects resting
+quotes to a degree; on a purely first-come, first-served exchange the
+benefit of batching could be larger. And every finding is for
+$\tau = 1$\,s.
+
+\paragraph{Fidelity of the replay.} The replay departs from the venue in
+ways that affect both engines alike --- unenforced post-only and
+self-trade rules, rounding to whole SOL, and restarts in the first days.
+None favours either side of the paired comparison, but absolute levels
+describe the replay, not the live market (\Cref{sec:limitsreplay}).
+
+\section{Future Work}
+\label{sec:futurework}
+
+Each limitation above points to a concrete extension.
+\begin{itemize}
+  \item \textbf{Measure adverse selection under batching.} Recording the
+  signed deviation of each FBA trade from its reference price, and signing
+  it by the venue's net taker flow in that second, would give the FBA a
+  spread decomposition comparable with the CDA's (\Cref{sec:limitssign})
+  and answer the question F6 leaves open.
+  \item \textbf{Vary the interval.} A sweep over $\tau$ would show whether
+  longer intervals fill the batches without losing F1 and F2, and the limit
+  $\tau \to 0$ would check that the FBA converges to the CDA.
+  \item \textbf{Replay the month without interruption}, which removes the
+  effects of the restarts (\Cref{sec:testresets}).
+  \item \textbf{Let participants respond.} Agent-based simulation or
+  laboratory experiments built on the same engines could test the
+  behavioural predictions a replay cannot reach.
+  \item \textbf{Other instruments and venues}, to see whether the findings
+  hold beyond one perpetual contract on one exchange.
+\end{itemize}

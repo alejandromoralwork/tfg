@@ -316,9 +316,10 @@ and price impact decompose that cost into the part retained by the
 liquidity provider and the part lost to adverse selection
 \citep{hasbrouck1993assessing}; \Cref{sec:spread-decomposition} gives the
 prediction for each. \citet{amihud2002illiquidity} provides a
-low-frequency summary of price impact per unit of volume, robust and easy
-to compare across mechanisms because it needs neither a book nor a trade
-direction.
+low-frequency summary of price impact per unit of volume, which can be
+computed for both mechanisms because it needs neither a book nor a trade
+direction; it does need a reference price, which differs between the two
+engines (\Cref{sec:limitscomparable}).
 
 \textbf{Price discovery (RQ2.2).} Batching aggregates orders before
 setting a price, so it should change how much prices move and how they

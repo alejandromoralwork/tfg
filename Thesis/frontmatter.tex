@@ -61,14 +61,15 @@ execution.
 
 The main finding is that one-second batching changes neither how much
 trades nor at what price. The two engines trade volumes that are
-statistically indistinguishable, at closely matching prices, and the same
-net order flow moves both prices by the same amount. In the continuous
+statistically indistinguishable, at closely matching prices, the same
+net order flow moves both prices by the same amount within five seconds,
+and uniform pricing removes price dispersion within a second. In the continuous
 market, resting orders systematically pay an adverse-selection cost;
 whether batching removes it cannot be measured from the replay, because
-trades in a batch auction have no direction. At one
-second, however, the batch auction is too thin to work as intended:
-\FbaEmptyBatchShare\% of batches clear no trade at all, orders take longer
-to execute, and the batch market is slightly less deep, not deeper.
+trades in a batch auction have no direction. Batching at one second
+adds no liquidity: a one-second batch rarely holds more than the order
+flow that would have traded anyway, so there is little to pool, the batch
+market is not deeper, and orders take longer to execute.
 Finally, the design analysis shows that batching does not make speed
 worthless. When traders can
 predict when a batch closes, the best way to get price improvement is to

@@ -227,15 +227,12 @@ else identical, stating where it could not:
   \item \textbf{Same starting state.} Both engines start from an empty book at
   the same first timestamp, and no lead-in period is excluded from the
   metrics.
-  \item \textbf{One uncontrolled case.} Neither engine prevents self-trades: an
-  order that would fill against the same participant's own resting order is
-  executed like any other. This is a real limitation, not a shared policy.
+  \item \textbf{Same rules outside the mechanism.} Neither engine prevents
+  self-trades, so this affects both alike (\Cref{sec:limitsreplay}).
   \item \textbf{Determinism.} The same input always produces the same output,
   since nothing in either engine depends on randomness or on the clock; the
   only exceptions are the two columns that measure computing time
-  (\Cref{sec:testdeterminism}). This
-  holds for an uninterrupted replay; the month result was restarted several
-  times in its first days (\Cref{sec:testresets}).
+  (\Cref{sec:testdeterminism}).
 \end{enumerate}
 
 The sample is a single instrument, the SOL perpetual, replayed once through each engine
@@ -258,11 +255,12 @@ difference between the two engines' price changes is regressed on the
 common order flow, and the same Newey--West rule gives the standard error
 of the difference in slopes (\Cref{sec:formularq22}).
 
-A replay holds the order stream fixed, which a field comparison cannot
-(\Cref{sec:gap}), but it cannot show how the flow would have changed had
-participants known they were trading under the other mechanism. The limits
-of the metrics are set out in \Cref{sec:metricreliability}, and those of the
-design as a whole in \Cref{sec:limitations}.
+This design is what allows a finding to be attributed to the mechanism:
+the two engines see the same orders in the same second, so a systematic
+paired difference can only come from how they match them. A replay holds
+the order stream fixed, which a field comparison cannot (\Cref{sec:gap});
+what it cannot show is how participants would have changed their orders
+under the other mechanism (\Cref{sec:limitations}).
 
 \section{Metrics}
 \label{sec:metrics}
@@ -276,35 +274,25 @@ explains why each is used.
 \label{sec:testable}
 
 The replayed orders were submitted on Hyperliquid's own continuous engine,
-not in reaction to batching. Every metric therefore shows the mechanical
-effect of the batch rule on fixed historical orders, not how participants
-would behave under real batching. If a continuous market had latency races,
-one would expect more cancellations in it than under batching, as liquidity
-providers withdraw stale quotes; the data contain only the continuous
-market's cancellations, so there is nothing to compare them with. Nothing
-can likewise be learned
-from where orders fall relative to a simulated batch boundary, because
-that position depends on where the boundary was placed, not on any choice
-by the participant. Throughput and clearing latency are controls, not
-results (\Cref{sec:metricscontrol}).
+not in reaction to batching, so every metric shows the mechanical effect of
+the batch rule on fixed historical orders (\Cref{sec:limitations}). For
+the same reason, where orders fall relative to a simulated batch boundary
+carries no information, since that position depends on where the boundary
+was placed. Throughput and clearing latency are controls, not results
+(\Cref{sec:metricscontrol}).
 
 \section{Validation of the Simulator}
 \label{sec:validation}
 
-A simulation is only as reliable as the code behind it. The order book checks a
-small number of structural conditions all the time (for example that no price
-level is left in the book with no orders), and if any fails the run stops
-instead of writing a wrong row. Financial properties one would expect ---
-quantities are conserved, no order trades beyond its limit, no fill is
-counted twice --- are not checked live. They are checked beforehand by two
-independent sets of tests: a suite of automatic tests, including comparisons
-against a simple reference implementation, and a checklist of cases worked out
-by hand, including the awkward ones (empty book, no crossing orders, every
-tie-breaking step, a batch with one deciding order). The run finishing without
-stopping is consistent with these properties holding throughout, but it is not
-a new proof of them. Two checks against outside references were added: an
-independent second implementation of both engines, and a comparison of the
-simulated volume and price with what the venue itself recorded. Checking that
-the FBA converges to the CDA as $\tau \to 0$ was not done, because it needs an
-interval sweep that was not run. \Cref{app:testing} lists every test and every
-data check, and its results are summarised in \Cref{sec:validationresults}.
+A finding is only as reliable as the code that produced it, so the simulator
+is checked in four ways: structural conditions checked live during the run,
+which stop it rather than write a wrong row; a suite of automatic tests of
+financial properties such as conservation of quantity and no trade beyond a
+limit; a checklist of hand-worked cases, including every tie-breaking step;
+and two outside references, an independent second implementation of both
+engines and a comparison with the volume and price the venue recorded.
+\Cref{sec:validationresults} reports the outcome and \Cref{app:testing}
+lists every test.
+
+With the data, the two engines, the paired design and the metrics in place,
+\Cref{ch:results} reports what the comparison finds.
