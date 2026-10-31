@@ -12,44 +12,45 @@ Newey--West standard error (\Cref{sec:experiments}). Sections
 summarises them, and \Cref{sec:metricreliability} sets out the limits on how
 far they can be read.
 
-\paragraph{Main findings.} The comparison yields six findings, each
-developed in the section given.
+\paragraph{Main findings.} The comparison yields five findings, one for
+each dimension of market quality, each stating which engine performs
+better and by how much.
 \begin{enumerate}[label=\textbf{F\arabic*}]
-  \item \textbf{Batching leaves the volume and the price unchanged.} Both
-  engines trade the same volume (\ResExecVolumeCda\ against
-  \ResExecVolumeFba\,SOL per second, $p$ \ResExecVolumeP), and the median
-  gap between their prices is \PriceDiffMedianBps\,bps
-  (\Cref{sec:res22,sec:res23}).
-  \item \textbf{The price responds to order flow by the same amount.}
-  Five seconds after the venue's net taker flow, both prices have moved by
-  the same amount per unit of flow (Kyle's lambda
-  \ResCommonFlowLambdaFiveSCda\ against \ResCommonFlowLambdaFiveSFba\,bps
-  per 1{,}000 SOL, $p$ \ResCommonFlowLambdaFiveSP; \Cref{sec:res22}).
-  \item \textbf{Uniform pricing removes price dispersion within a second.}
-  Dispersion falls from \ResDispersionCda\ to \ResDispersionFba\,bps, and
-  is exactly zero in \DispersionFbaExactZeroPct\% of the seconds in which
-  both engines traded (\Cref{sec:res22}).
-  \item \textbf{At one second, batching adds no liquidity.} Depth within
-  10, 50 and 100\,bps of the price is slightly lower for the FBA, not
-  higher; Amihud illiquidity and volatility are also slightly higher, but
-  part of that gap comes from how each engine's price is measured
-  (\Cref{sec:res21,sec:res22}).
-  \item \textbf{Batching delays execution.} Orders wait
-  \ResTimeToExecDiff\,s longer for their first fill. Most one-second
-  batches (\FbaEmptyBatchShare\%) clear no trade, about the same share of
-  seconds in which the CDA trades nothing, so a batch rarely holds more
-  than the flow that would have traded anyway (\Cref{sec:res23}).
-  \item \textbf{The continuous market charges resting orders an
-  adverse-selection cost.} In the CDA the realized spread is negative and
-  the price impact grows from \ResPriceImpactOneSCda\ to
-  \ResPriceImpactThirtySCda\,bps between 1 and 30\,s (\Cref{sec:res21}).
-  Whether batching removes this cost cannot be measured in the replay
-  (\Cref{sec:limitssign}).
+  \item \textbf{Liquidity: the CDA is slightly more liquid.} Depth within
+  10, 50 and 100\,bps of the price is higher in the CDA
+  (\ResDepthWithinTenBpsCda\ against \ResDepthWithinTenBpsFba\,SOL within
+  10\,bps), the price moves less per dollar traded (Amihud illiquidity
+  \ResAmihudCda\ against \ResAmihudFba), and the quoted spread is
+  practically the same (\ResQuotedSpreadCda\ against
+  \ResQuotedSpreadFba\,bps). The differences are small: batching at one
+  second does not make the market more liquid (\Cref{sec:res21}).
+  \item \textbf{Transaction costs: resting orders pay an adverse-selection
+  cost in the CDA; the FBA's cost cannot be measured.} In the CDA the
+  realized spread is negative and the price impact grows from
+  \ResPriceImpactOneSCda\ to \ResPriceImpactThirtySCda\,bps between 1 and
+  30\,s. Because FBA trades have no direction, the replay cannot say which
+  engine is cheaper to trade in (\Cref{sec:res21,sec:limitssign}).
+  \item \textbf{Volatility: the FBA is slightly more volatile.} Its daily
+  volatility is \ResMatchedVolFba\ against \ResMatchedVolCda\,bps for the
+  CDA: batching at one second does not dampen price moves
+  (\Cref{sec:res22}).
+  \item \textbf{Price formation: no difference.} Both engines arrive at
+  the same price (median gap \PriceDiffMedianBps\,bps), and five seconds
+  after the venue's net order flow both prices have moved by the same
+  amount (Kyle's lambda \ResCommonFlowLambdaFiveSCda\ against
+  \ResCommonFlowLambdaFiveSFba\,bps per 1{,}000 SOL, $p$
+  \ResCommonFlowLambdaFiveSP; \Cref{sec:res22}).
+  \item \textbf{Execution: the same volume trades, but the CDA executes
+  faster.} Volume is the same in both engines (\ResExecVolumeCda\ against
+  \ResExecVolumeFba\,SOL per second, $p$ \ResExecVolumeP), but orders wait
+  \ResTimeToExecDiff\,s longer for their first fill in the FBA
+  (\Cref{sec:res23}).
 \end{enumerate}
-\Cref{sec:findingsreliability} explains how each finding is reached and
-how far it can be relied on, and why each result arises; F1, F2, F3, F5
-and F6 are well supported, while F4 supports only the weaker statement
-that batching does not make the market more liquid.
+\Cref{sec:findingsreliability} explains how each finding is reached, why
+it arises and how far it can be relied on. F2, F4 and F5 are well
+supported; F1 and F3 are consistent in direction but small, and partly
+reflect how each engine's price is measured.
+
 
 \section{Sample and Descriptive Statistics}
 \label{sec:sample}
@@ -125,9 +126,9 @@ the CDA as $\tau \to 0$ was not checked (\Cref{sec:limitsreplay}).
 \label{sec:res21}
 
 \Cref{tab:res21} reports the liquidity and cost metrics for both engines.
-Two findings come from it: at one second batching adds no liquidity
-(F4), and the continuous market
-charges resting orders an adverse-selection cost (F6).
+Two findings come from it: the CDA is slightly more liquid than the FBA
+(F1), and in the CDA resting orders pay an adverse-selection cost, while
+the FBA's cost cannot be measured (F2).
 
 \begin{table}[htbp]
 \centering
@@ -168,7 +169,7 @@ for the CDA and \ResQuotedSpreadFba\,bps for the FBA, a gap of
 \ResQuotedSpreadP) only because $n$ is over two million; it is too small to
 matter economically.
 
-\textbf{Depth: the FBA is slightly thinner (F4).} Depth within a fixed
+\textbf{Depth: the CDA is slightly deeper (F1).} Depth within a fixed
 distance of the reference price is defined the same way for both engines,
 and on it the FBA is slightly \emph{thinner} at every threshold:
 \ResDepthWithinTenBpsFba\ against \ResDepthWithinTenBpsCda\,SOL within
@@ -181,7 +182,7 @@ liquidity, the FBA would be deeper. Depth at best is higher for the FBA
 figures measure different objects and are not compared
 (\Cref{sec:limitscomparable}).
 
-\textbf{Spread decomposition: resting orders lose in the CDA (F6).}
+\textbf{Spread decomposition: resting orders lose in the CDA (F2).}
 Effective spread, realized spread and price impact split the cost of a
 trade into the total cost, the part the liquidity provider keeps once the
 price has moved, and the part lost to better-informed traders. The CDA
@@ -204,7 +205,7 @@ close to zero by construction and are reported but not interpreted
 measures that need no trade direction, Amihud illiquidity below and
 Kyle's lambda in \Cref{sec:res22}.
 
-\textbf{Amihud illiquidity: higher for the FBA (F4).} The price movement
+\textbf{Amihud illiquidity: lower for the CDA (F1).} The price movement
 per dollar traded is about a fifth higher for the FBA (\ResAmihudFba\
 against \ResAmihudCda, $p$ \ResAmihudP). Part of this gap is a matter of
 measurement. The CDA's reference price is the book midpoint, which does
@@ -247,11 +248,10 @@ cost measure (\Cref{sec:limitssign}).}
 \section{RQ2.2: Price Discovery and Market Quality}
 \label{sec:res22}
 
-\Cref{tab:res22} reports the price discovery metrics. Four findings come
-from this section: the two engines arrive at the same price (F1), their
-prices respond to the same order flow by the same amount (F2), uniform
-pricing removes dispersion within a second (F3), and volatility is
-slightly higher, not lower, in the batch market (F4).
+\Cref{tab:res22} reports the price discovery metrics. Three findings come
+from this section: the FBA is slightly more volatile than the CDA (F3),
+and the two engines arrive at the same price and respond to the same
+order flow by the same amount (F4).
 
 \begin{table}[htbp]
 \centering
@@ -269,7 +269,6 @@ the number of seconds with venue flow.}
 \textbf{Metric} & \textbf{CDA} & \textbf{FBA} & \textbf{Diff.} &
 \textbf{$p$} & \textbf{$n$}\\
 \midrule
-Intra-interval price dispersion (bps) & \ResDispersionCda & \ResDispersionFba & \ResDispersionDiff\ (\ResDispersionHacSe) & \ResDispersionP & \ResDispersionNPaired\\
 Kyle's lambda, same second (bps per 1{,}000 SOL) & \ResCommonFlowLambdaCda & \ResCommonFlowLambdaFba & \ResCommonFlowLambdaDiff\ (\ResCommonFlowLambdaHacSe) & \ResCommonFlowLambdaP & \ResCommonFlowLambdaNPaired\\
 Kyle's lambda, 5\,s (bps per 1{,}000 SOL) & \ResCommonFlowLambdaFiveSCda & \ResCommonFlowLambdaFiveSFba & \ResCommonFlowLambdaFiveSDiff\ (\ResCommonFlowLambdaFiveSHacSe) & \ResCommonFlowLambdaFiveSP & \ResCommonFlowLambdaFiveSNPaired\\
 Matched-timestamp volatility, daily RMS (bps) & \ResMatchedVolCda & \ResMatchedVolFba & \ResMatchedVolDiff\ (\ResMatchedVolHacSe) & \ResMatchedVolP & \ResMatchedVolNPaired\\
@@ -277,7 +276,7 @@ Matched-timestamp volatility, daily RMS (bps) & \ResMatchedVolCda & \ResMatchedV
 \end{tabularx}
 \end{table}
 
-\textbf{Volatility: slightly higher for the FBA (F4).} Volatility within a
+\textbf{Volatility: the FBA is slightly more volatile (F3).} Volatility within a
 bucket cannot be compared, because the FBA almost never has two prices in
 one bucket ($n=\ResRealizedVolNPaired$); matched-timestamp volatility
 replaces it. Both
@@ -307,15 +306,7 @@ day was built from against the 5-return exclusion floor (bottom).}
 \label{fig:matchedvol}
 \end{figure}
 
-\textbf{Intra-interval price dispersion: removed by uniform pricing (F3).}
-The spread of trade prices within one second is \ResDispersionCda\,bps for
-the CDA and practically
-zero for the FBA, as uniform pricing implies: exactly zero in
-\DispersionFbaExactZeroPct\% of the intervals in which both engines traded,
-the rest being seconds that received trades from two batch clears
-(\Cref{sec:testresets}).
-
-\textbf{Kyle's lambda: the same response to order flow (F2).} Both
+\textbf{Kyle's lambda: the same response to order flow (F4).} Both
 engines' prices follow the venue's net taker flow
 (\Cref{fig:kylelambda}, left): net buying raises the price and net
 selling lowers it, as adverse selection predicts. Measured 5\,s after the
@@ -342,17 +333,13 @@ CDA alone and is not on the scale of the pooled slopes above
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.95\textwidth]{figures/fig_kylelambda.png}
-\caption[Kyle's lambda and the uniform-pricing check]{Left: mean price
-change of each engine within the second, against the venue's net taker
-flow in that second, in 20 bins of equal count (horizontal axis
-symmetric-logarithmic); the legend gives the pooled same-second slopes.
-Right: distribution of
-intra-interval price dispersion (log-scale count axis, since the FBA's
-near-total mass at exactly zero would otherwise flatten everything else);
-CDA's full distribution against only the small nonzero minority of FBA
-intervals. Shares in the legend are over every interval in which the FBA
-traded, so they differ slightly from the share in the text, which counts
-only intervals where both engines traded.}
+\caption[Kyle's lambda]{Left: mean price change of each engine within
+the second, against the venue's net taker flow in that second, in 20 bins
+of equal count (horizontal axis symmetric-logarithmic); the legend gives
+the pooled same-second slopes. Right: distribution of the spread of trade
+prices within one second (log-scale count axis), a check that the batch
+engine trades each batch at a single price, as its rule requires; it is
+not part of the comparison.}
 \label{fig:kylelambda}
 \end{figure}
 
@@ -370,7 +357,7 @@ both prices track the spot price closely (\Cref{sec:testprice}).}
 \label{fig:pricepaths}
 \end{figure}
 
-\textbf{Price paths: the same price (F1).} The two engines' prices track each other closely
+\textbf{Price paths: the same price (F4).} The two engines' prices track each other closely
 (\Cref{fig:pricepaths,fig:pricediff}). Over \PriceDiffN\ intervals in which
 both traded, the FBA-minus-CDA VWAP difference has a median of
 \PriceDiffMedianBps\,bps, a mean of \PriceDiffMeanBps\,bps and a standard
@@ -398,8 +385,8 @@ traded, clipped at the 0.5th/99.5th percentiles for legibility.}
 \label{sec:res23}
 
 \Cref{tab:res23} reports the execution metrics. Two findings come from
-this section: both engines trade the same volume (F1), and batching
-delays execution while most batches stay empty (F5). Trader surplus
+this section: both engines trade the same volume, but the CDA executes
+orders faster (F5). Trader surplus
 confirms the transfer argument of \Cref{sec:priceimprovement}.
 
 \begin{table}[htbp]
@@ -425,7 +412,7 @@ Mean clearing/match latency ($\mu$s) & \ResClearingLatencyCda & \ResClearingLate
 \end{tabularx}
 \end{table}
 
-\textbf{Executed volume: the same (F1).} Volume is not statistically
+\textbf{Executed volume: the same in both engines (F5).} Volume is not statistically
 different (\ResExecVolumeCda\ against \ResExecVolumeFba\,SOL per interval,
 $p$ \ResExecVolumeP); over the month this is \$\SampleCdaNotional\ against
 \$\SampleFbaNotional\ of notional (\Cref{tab:sample}). Both engines can
@@ -438,7 +425,7 @@ against \ResTradeCountCda\ trades per interval, $p$ \ResTradeCountP). With
 the same volume this means slightly smaller trades, consistent with one
 clearing price splitting a large order among several counterparties.
 
-\textbf{Time to execution: longer for the FBA (F5).} Waiting is the
+\textbf{Time to execution: the CDA is faster (F5).} Waiting is the
 clearest cost of batching:
 \ResTimeToExecFba\,s for the FBA against \ResTimeToExecCda\,s for the CDA, a
 gap of \ResTimeToExecDiff\,s ($p$ \ResTimeToExecP). Waiting for the next
@@ -492,13 +479,14 @@ clear); log scale. A control, not a market-quality result.}
 \label{sec:res_summary}
 
 \paragraph{Main conclusion.} When the same month of SOL order flow is
-cleared in one-second batches instead of continuously, \emph{how much}
-trades and \emph{at what price} stay the same (F1), the price responds to
-the same net order flow by the same amount within five seconds (F2), and
-uniform pricing removes price dispersion within a second (F3). Batching
-adds no liquidity (F4) and delays execution (F5). The continuous market
-charges resting orders a systematic adverse-selection cost (F6); whether
-batching removes it remains open (\Cref{sec:limitssign}).
+cleared in one-second batches instead of continuously, the continuous
+market is slightly more liquid (F1) and slightly less volatile (F3), and
+it executes orders faster (F5). The two engines do not differ in price
+formation: they reach the same price and respond to the same order flow
+by the same amount (F4), and they trade the same volume (F5). In the
+continuous market resting orders pay a systematic adverse-selection cost
+(F2); whether batching lowers it cannot be measured in the replay
+(\Cref{sec:limitssign}).
 
 \subsection{How Each Finding Is Reached, Why It Arises, and How Far It
 Can Be Relied On}
@@ -519,128 +507,38 @@ result, and \emph{Reliability} how far it can be relied on.
 \Cref{tab:findings} summarises the result.
 
 \begin{description}
-  \item[F1 --- Same volume, same price.] \emph{Evidence:} executed volume
-  of \ResExecVolumeCda\ against \ResExecVolumeFba\,SOL per second, with no
-  significant difference ($p$ \ResExecVolumeP), and a VWAP gap with a
-  median of \PriceDiffMedianBps\,bps and a standard deviation of
-  \PriceDiffStdBps\,bps over \PriceDiffN\ seconds. \emph{Reasoning:} if
-  batching left tradable flow unmatched, or moved the price away from the
-  continuous one, the paired differences would show it; they do not.
-  \emph{Why:} batching reschedules trades rather than preventing them. An
-  order that would cross on arrival in the CDA waits for the next clear,
-  and unfilled orders roll over instead of being dropped, so crossing
-  interest still meets, at most one interval later. The price is set by
-  the same limit prices in both engines. When an arriving order meets the
-  resting orders, the CDA trades at each resting price in turn, while the
-  FBA trades all of it at one price, the last level the order reaches. The
-  two prices therefore coincide when an order takes one level and differ
-  when it sweeps several, in either direction, which is why the gap has a
-  median of zero and widens only in fast markets (\Cref{sec:res22}).
-  \emph{Reliability: high.} Both engines can only trade the orders that
-  were submitted, so the finding is that batching loses no volume, not
-  that it creates any. Absolute volume describes the replay, which
-  trades about twice the venue's volume, but this applies to both engines
-  alike (\Cref{sec:limitsreplay}).
+  \item[F1 --- Liquidity: the CDA is slightly more liquid.]
+  \emph{Evidence:} depth within 10, 50 and 100\,bps is higher in the CDA by
+  between one and four percent ($p$ \ResDepthWithinTenBpsP); Amihud
+  illiquidity is \ResAmihudCda\ for the CDA against \ResAmihudFba\ for the
+  FBA ($p$ \ResAmihudP); the quoted spread is \ResQuotedSpreadCda\ against
+  \ResQuotedSpreadFba\,bps. \emph{Reasoning:} depth is the measure
+  defined the same way for both engines, and its only known bias favours
+  the FBA (\Cref{sec:limitscomparable}), so the CDA's lead in depth cannot
+  come from that bias. Amihud illiquidity points the same way but is not
+  like-for-like: it uses the book midpoint for the CDA and the clearing
+  price for the FBA, and a clearing price moves between the bid and the ask
+  side with the direction of each batch even when the midpoint does not,
+  which raises the FBA's value (\Cref{sec:res21}). The quoted spread is
+  practically equal and is weaker evidence, because the FBA's is read from
+  the orders left after a clear. \emph{Why:} the argument for batching is
+  that it pools orders that would otherwise arrive at different moments,
+  so that each auction is deeper than the continuous book. At one second
+  this market gives a batch little to pool: \FbaEmptyBatchShare\% of
+  batches clear no trade, about the same share of seconds in which the CDA
+  trades nothing, so a batch that trades usually holds the same burst of
+  crossing flow that the CDA trades in that second, and the resting orders
+  around it are the same orders in both engines. \emph{Reliability:
+  moderate.} The direction is consistent across the measures and robust to
+  the known bias, but the differences are small, partly due to
+  measurement, and significant mainly because of the sample size; the
+  firm conclusion is that batching at one second does not make the market
+  more liquid. The finding holds for $\tau = 1$\,s only.
 
-  \item[F2 --- Same price response to order flow.] \emph{Evidence:}
-  Kyle's lambda at 5\,s of \ResCommonFlowLambdaFiveSCda\ against
-  \ResCommonFlowLambdaFiveSFba\,bps per 1{,}000 SOL, with $p$
-  \ResCommonFlowLambdaFiveSP\ for the difference, over
-  $n = \ResCommonFlowLambdaFiveSNPaired$ seconds. \emph{Reasoning:} both
-  engines are regressed on one regressor, the venue's own net taker flow,
-  which is read from the venue's fill records and is produced by neither
-  engine; the difference in slopes is tested directly
-  (\Cref{sec:formularq22}). \emph{Why:} net buying removes the same
-  resting sell orders in both engines, so once a burst of flow is over
-  both prices sit at the same new level of the book; a few seconds later
-  the two series have settled there. Within the same second the FBA's
-  price moves further (\ResCommonFlowLambdaFba\ against
-  \ResCommonFlowLambdaCda), for the reason given under F1: the clearing
-  price jumps to the last level a large flow reaches, while the CDA's VWAP
-  averages the levels on the way. The theory that predicts a smaller
-  lambda under batching works through behaviour --- liquidity providers
-  quoting more aggressively once protected from sniping --- which a replay
-  of fixed orders cannot reproduce. \emph{Reliability: high at 5\,s.} The
-  point estimates differ by under one percent, and a sample of this size
-  would detect a small difference; formally the result is that no
-  difference is found, not a proof of equality. The same-second
-  comparison is weaker, because it sets a VWAP against a single clearing
-  price.
-
-  \item[F3 --- No price dispersion within a second.] \emph{Evidence:}
-  dispersion of \ResDispersionCda\,bps in the CDA against
-  \ResDispersionFba\,bps in the FBA, exactly zero in
-  \DispersionFbaExactZeroPct\% of the seconds in which both traded.
-  \emph{Reasoning:} every trade of a batch is at one price, and the batch
-  interval equals the one-second measurement bucket, so a bucket holds at
-  most one clear and its trades can have no dispersion. The seconds that
-  are not exactly zero are those that received trades from two clears,
-  because after a restart the batches no longer line up with the buckets
-  (\Cref{sec:testresets}); they are a measurement effect, not a failure
-  of uniform pricing. \emph{Why:} in the CDA, prices within one second
-  differ because an order that sweeps the book trades at several levels,
-  and because successive orders arrive at a book that has already moved.
-  Uniform clearing replaces all of these prices with one. The consequence
-  is that all traders who arrive within the same second receive the same
-  price, whatever their order of arrival, which removes the reward for
-  being first within the interval. The price variation does not disappear,
-  however: it moves from within the second to between seconds, where it is
-  measured as volatility (F4). \emph{Reliability: high.} The result
-  follows from the rule itself and shows that the engine works as
-  specified; it would not hold if the batch interval were shorter than the
-  measurement bucket.
-
-  \item[F4 --- No added liquidity at one second.] \emph{Evidence:} depth
-  within 10, 50 and 100\,bps is lower for the FBA by between one and four
-  percent ($p$ \ResDepthWithinTenBpsP); Amihud illiquidity is
-  \ResAmihudFba\ against \ResAmihudCda\ ($p$ \ResAmihudP); daily
-  volatility is \ResMatchedVolFba\ against \ResMatchedVolCda\,bps over
-  \ResMatchedVolNPaired\ days ($p$ \ResMatchedVolP). \emph{Reasoning:}
-  depth is the one measure defined the same way for both engines, and its
-  only known bias favours the FBA (\Cref{sec:limitscomparable}); since
-  the FBA is not deeper even so, batching did not add liquidity. The other
-  two measures point the same way but are not like-for-like. Amihud
-  illiquidity uses the book midpoint for the CDA and the clearing price for
-  the FBA, and a clearing price moves between the bid and the ask side of
-  the book with the direction of each batch even when the midpoint does
-  not, which raises the FBA's value (\Cref{sec:res21}). Volatility compares
-  a single clearing price with a VWAP that averages several fills and is
-  therefore smoother (\Cref{sec:res22}). \emph{Why:} the argument for
-  batching is that it pools orders that would otherwise arrive at
-  different moments, so that each auction is deeper than the continuous
-  book. At one second this market gives a batch little to pool: a batch
-  that trades usually holds the same burst of crossing flow that the CDA
-  trades in that second (F5), and the resting orders around it are the
-  same orders in both engines. \emph{Reliability: high for the statement
-  that batching adds no liquidity, low for the statement that it removes
-  some.} The measured differences are small, partly due to measurement,
-  and significant mainly because of the sample size. The finding holds for
-  $\tau = 1$\,s only.
-
-  \item[F5 --- Batching delays execution.] \emph{Evidence:} time to first
-  fill of \ResTimeToExecFba\,s against \ResTimeToExecCda\,s ($p$
-  \ResTimeToExecP); \FbaEmptyBatchShare\% of batches clear no trade, while
-  the CDA trades in about a quarter of all seconds as well
-  (\Cref{sec:res22}), and the two engines trade in largely the same
-  seconds. \emph{Reasoning:} the delay is significant and in the
-  direction batching implies. The empty batches do not explain it, because
-  the CDA has as many seconds without a trade; they show instead that in
-  most seconds no order arrives that is priced to cross. \emph{Why:} part
-  of the delay is the wait for the clear, at most one second and half a
-  second on average for orders arriving evenly. The rest most likely comes
-  from which resting orders are matched once a batch crosses: the batch
-  fills the orders eligible at its single price in price-time order within
-  the batch, while the CDA fills an arriving order level by level, so the
-  two engines can fill different resting orders from the same flow. This
-  explanation is not measured directly. \emph{Reliability: high for the
-  direction, lower for the size.} A fill that comes long after an order's
-  submission falls outside the window the metric is computed on and is not
-  counted, for either engine; because FBA orders wait longer, this more
-  likely understates the gap than overstates it.
-
-  \item[F6 --- Resting orders pay an adverse-selection cost in the CDA.]
-  \emph{Evidence:} effective spread \ResEffectiveSpreadCda\,bps, realized
-  spread \ResRealizedSpreadOneSCda/\ResRealizedSpreadFiveSCda/\ResRealizedSpreadThirtySCda\,bps
+  \item[F2 --- Transaction costs: an adverse-selection cost in the CDA;
+  the FBA's cost cannot be measured.] \emph{Evidence:} effective spread
+  \ResEffectiveSpreadCda\,bps, realized spread
+  \ResRealizedSpreadOneSCda/\ResRealizedSpreadFiveSCda/\ResRealizedSpreadThirtySCda\,bps
   and price impact
   \ResPriceImpactOneSCda/\ResPriceImpactFiveSCda/\ResPriceImpactThirtySCda\,bps
   at 1/5/30\,s. \emph{Reasoning:} each CDA trade has an observed direction,
@@ -653,11 +551,85 @@ result, and \emph{Reliability} how far it can be relied on.
   it by more than that, so on average it loses. Hyperliquid's processing of
   cancellations before new orders (\Cref{sec:venue}) protects quotes
   against being picked off within a block, but not against better-informed
-  traders. \emph{Reliability: high for the pattern,} which holds at all
-  three horizons. The magnitudes describe the replay, in which part of the
-  volume comes from post-only orders that would not have traded as takers
-  on the venue (\Cref{sec:testfidelity}). It is a finding about the CDA
-  only; no FBA counterpart can be compared (\Cref{sec:limitssign}).
+  traders. \emph{Reliability: high for the CDA,} where the pattern holds at
+  all three horizons; the magnitudes describe the replay, in which part of
+  the volume comes from post-only orders that would not have traded as
+  takers on the venue (\Cref{sec:testfidelity}). Which engine is cheaper
+  to trade in cannot be said, because FBA trades have no direction
+  (\Cref{sec:limitssign}).
+
+  \item[F3 --- Volatility: the FBA is slightly more volatile.]
+  \emph{Evidence:} daily volatility of \ResMatchedVolFba\,bps for the FBA
+  against \ResMatchedVolCda\,bps for the CDA over \ResMatchedVolNPaired\
+  days ($p$ \ResMatchedVolP), computed over the same instants for both
+  engines. \emph{Reasoning:} using the same instants removes any
+  difference in when the two prices are observed, so the gap comes from the
+  prices themselves. \emph{Why:} uniform clearing replaces the several
+  prices at which the CDA trades within a second with one, so the price
+  variation the CDA spreads across a second appears in the FBA as a move
+  from one second to the next. In addition, the CDA's VWAP averages several
+  fills and is therefore smoother than a single clearing price, which
+  raises the FBA's measured volatility even with no economic difference.
+  \emph{Reliability: low to moderate.} The gap is about three percent and
+  partly a matter of how each price is formed; the firm conclusion is that
+  batching at one second does not dampen price moves, as theory predicts it
+  should (\Cref{tab:theorylinks}).
+
+  \item[F4 --- Price formation: no difference.] \emph{Evidence:} a VWAP
+  gap with a median of \PriceDiffMedianBps\,bps and a standard deviation
+  of \PriceDiffStdBps\,bps over \PriceDiffN\ seconds; Kyle's lambda at
+  5\,s of \ResCommonFlowLambdaFiveSCda\ against
+  \ResCommonFlowLambdaFiveSFba\,bps per 1{,}000 SOL, with $p$
+  \ResCommonFlowLambdaFiveSP\ for the difference, over
+  $n = \ResCommonFlowLambdaFiveSNPaired$ seconds. \emph{Reasoning:} if
+  batching moved the price away from the continuous one, the paired price
+  gap would show it; and both engines are regressed on one regressor, the
+  venue's own net taker flow, produced by neither engine, so the
+  difference in slopes is tested directly (\Cref{sec:formularq22}).
+  \emph{Why:} the price is set by the same limit prices in both engines.
+  When an arriving order meets the resting orders, the CDA trades at each
+  resting price in turn, while the FBA trades all of it at one price, the
+  last level the order reaches; the two prices therefore coincide when an
+  order takes one level and differ, in either direction, when it sweeps
+  several, which is why the gap has a median of zero and widens only in
+  fast markets. Net buying removes the same resting sell orders in both
+  engines, so once a burst of flow is over both prices settle at the same
+  level. Within the same second the FBA's price moves further
+  (\ResCommonFlowLambdaFba\ against \ResCommonFlowLambdaCda), because the
+  clearing price jumps to the last level a large flow reaches while the
+  CDA's VWAP averages the levels on the way. The theory that predicts a
+  smaller response under batching works through behaviour, liquidity
+  providers quoting more aggressively once protected from sniping, which a
+  replay of fixed orders cannot reproduce. \emph{Reliability: high.} The
+  slopes at 5\,s differ by under one percent, and a sample of this size
+  would detect a small difference; formally the result is that no
+  difference is found, not a proof of equality.
+
+  \item[F5 --- Execution: the same volume, faster in the CDA.]
+  \emph{Evidence:} executed volume of \ResExecVolumeCda\ against
+  \ResExecVolumeFba\,SOL per second ($p$ \ResExecVolumeP); time to first
+  fill of \ResTimeToExecCda\,s in the CDA against \ResTimeToExecFba\,s in
+  the FBA ($p$ \ResTimeToExecP). \emph{Reasoning:} both engines can only
+  trade the orders that were submitted, so equal volume means batching
+  leaves no tradable flow unmatched over the month; the longer wait is
+  significant and in the direction batching implies. \emph{Why:} batching
+  reschedules trades rather than preventing them: an order that would
+  cross on arrival in the CDA waits for the next clear, and unfilled orders
+  roll over instead of being dropped. The wait for the clear is at most one
+  second, half a second on average for orders arriving evenly. The empty
+  batches do not explain the rest, because the CDA has as many seconds
+  without a trade (\Cref{sec:sample}). The rest most likely comes from
+  which resting orders are matched once a batch crosses: the batch fills
+  the orders eligible at its single price in price-time order within the
+  batch, while the CDA fills an arriving order level by level, so the two
+  engines can fill different resting orders from the same flow; this is
+  not measured directly. \emph{Reliability: high for equal volume and for
+  the direction of the delay, lower for its size.} A fill that comes long
+  after an order's submission falls outside the window the metric is
+  computed on and is not counted, for either engine; because FBA orders
+  wait longer, this more likely understates the gap than overstates it.
+  Absolute volume describes the replay, which trades about twice the
+  venue's volume in both engines (\Cref{sec:limitsreplay}).
 \end{description}
 
 Trader surplus (\ResTraderSurplusCda\ against \ResTraderSurplusFba\,USD
@@ -667,43 +639,40 @@ theory rather than adding to it.
 
 \begin{table}[htbp]
 \centering
-\caption[Findings and their reliability]{The six findings, the RQ each
-answers, the key evidence (CDA against FBA) and how far each can be relied
-on (\Cref{sec:findingsreliability}).}
+\caption[Findings and their reliability]{The five findings: for each
+dimension of market quality, the engine that performs better, the key
+evidence (CDA against FBA) and how far the finding can be relied on
+(\Cref{sec:findingsreliability}).}
 \label{tab:findings}
 \small
-\begin{tabularx}{\textwidth}{@{}p{4.3cm} p{1.0cm} L p{1.8cm}@{}}
+\begin{tabularx}{\textwidth}{@{}p{2.4cm} p{1.9cm} L p{1.7cm}@{}}
 \toprule
-\textbf{Finding} & \textbf{RQ} & \textbf{Key evidence} & \textbf{Reliability}\\
+\textbf{Dimension} & \textbf{Better} & \textbf{Key evidence (CDA vs.\ FBA)} & \textbf{Reliability}\\
 \midrule
-F1 Same volume and price & 2.2, 2.3 &
-volume \ResExecVolumeCda\ vs.\ \ResExecVolumeFba\,SOL/s ($p$ \ResExecVolumeP); median VWAP gap \PriceDiffMedianBps\,bps & high\\
-F2 Same response to order flow & 2.2 &
-Kyle's lambda at 5\,s \ResCommonFlowLambdaFiveSCda\ vs.\ \ResCommonFlowLambdaFiveSFba\ ($p$ \ResCommonFlowLambdaFiveSP) & high\\
-F3 No dispersion within a second & 2.2 &
-\ResDispersionCda\ vs.\ \ResDispersionFba\,bps; \DispersionFbaExactZeroPct\% of seconds exactly zero & high\\
-F4 No added liquidity at $\tau=1$\,s & 2.1, 2.2 &
-depth within 10\,bps \ResDepthWithinTenBpsCda\ vs.\ \ResDepthWithinTenBpsFba\,SOL; Amihud \ResAmihudCda\ vs.\ \ResAmihudFba\ and volatility \ResMatchedVolCda\ vs.\ \ResMatchedVolFba\,bps, partly measurement & high (no gain); low (a loss)\\
-F5 Batching delays execution & 2.3 &
-time to execution \ResTimeToExecCda\ vs.\ \ResTimeToExecFba\,s & high (direction)\\
-F6 Adverse-selection cost in the CDA & 2.1 &
-CDA realized spread \ResRealizedSpreadThirtySCda\,bps, price impact \ResPriceImpactThirtySCda\,bps at 30\,s & high (CDA only)\\
+F1 Liquidity (2.1) & CDA, slightly &
+depth within 10\,bps \ResDepthWithinTenBpsCda\ vs.\ \ResDepthWithinTenBpsFba\,SOL; Amihud \ResAmihudCda\ vs.\ \ResAmihudFba; quoted spread \ResQuotedSpreadCda\ vs.\ \ResQuotedSpreadFba\,bps & moderate\\
+F2 Transaction costs (2.1) & not measurable &
+CDA realized spread \ResRealizedSpreadThirtySCda\,bps, price impact \ResPriceImpactThirtySCda\,bps at 30\,s; no FBA counterpart & high (CDA side)\\
+F3 Volatility (2.2) & CDA, slightly &
+daily volatility \ResMatchedVolCda\ vs.\ \ResMatchedVolFba\,bps & low to moderate\\
+F4 Price formation (2.2) & neither &
+median VWAP gap \PriceDiffMedianBps\,bps; Kyle's lambda at 5\,s \ResCommonFlowLambdaFiveSCda\ vs.\ \ResCommonFlowLambdaFiveSFba\ ($p$ \ResCommonFlowLambdaFiveSP) & high\\
+F5 Execution (2.3) & CDA, faster &
+volume \ResExecVolumeCda\ vs.\ \ResExecVolumeFba\,SOL/s ($p$ \ResExecVolumeP); time to execution \ResTimeToExecCda\ vs.\ \ResTimeToExecFba\,s & high\\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-\paragraph{Interpretation.} Taken together, the findings say that at one
-second, on this market, batching largely reproduces the continuous market
-with a short delay. The same orders trade at the same prices (F1), the
-price absorbs order flow in the same way (F2), and the only change in
-how prices are formed is the one the rule guarantees: one price per
-batch instead of several per second (F3). The gains batching promises
-depend on pooling, gathering orders from both sides that would otherwise
-arrive at different moments, and at one second a batch rarely holds more
-than the flow that would have traded anyway, so no gain in liquidity
-appears (F4). What remains is the cost of batching, a longer wait for
-execution (F5). Whether a longer interval would give the batches enough
-flow to pool is the main open question this leaves.
+\paragraph{Interpretation.} On every dimension that can be compared, the
+batch market either matches the continuous one or falls slightly behind
+it: the same price, the same response to order flow and the same volume
+(F4, F5), but slightly less liquidity (F1), slightly more volatility (F3)
+and slower execution (F5). At one second and on this market, batching
+largely reproduces the continuous market with a short delay. The gains it
+promises depend on pooling orders that would otherwise arrive at
+different moments, and a one-second batch rarely holds more than the flow
+that would have traded anyway. Whether a longer interval would give the
+batches enough flow to pool is the main open question this leaves.
 
 \paragraph{What remains open.} The simulation does not settle whether
 batching reduces adverse selection (\Cref{sec:limitssign}), how
@@ -749,7 +718,7 @@ net taker flow in that second (\Cref{sec:formularq22}).
 
 Most metrics are defined the same way for both engines and are compared
 directly: executed volume, trade count and VWAP, depth within a
-threshold, intra-interval dispersion, time to execution and trader
+threshold, time to execution and trader
 surplus. Three metrics cannot be compared at all, and five are compared
 with a caveat.
 
@@ -830,7 +799,7 @@ Executed volume, trade count, VWAP & high & read directly off executed trades, s
 Time to execution, trader surplus & high & same definition for both engines, computed from each engine's own fills\\
 Depth within a threshold & high & same definition for both engines; the one asymmetry favours the FBA\\
 Amihud illiquidity & moderate & midpoint for the CDA, clearing price for the FBA; the asymmetry raises the FBA's value\\
-Intra-interval dispersion & high & same definition for both engines\\
+Intra-interval dispersion & check only & zero by the batch rule; confirms each batch trades at one price, not a comparison\\
 Matched-timestamp volatility & moderate & same instants for both engines, but a VWAP is smoother than a single clearing price\\
 Kyle's lambda, 5\,s & high & same regressor (venue flow) and same definition for both engines\\
 Kyle's lambda, same second & moderate & CDA price is a VWAP within the second, the FBA's a single clearing price\\

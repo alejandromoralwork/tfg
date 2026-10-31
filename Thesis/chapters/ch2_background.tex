@@ -661,7 +661,8 @@ variation of the trade prices within a bucket,
 $\operatorname{std}(\{p_k\}) / \operatorname{mean}(\{p_k\}) \cdot
 10^{4}$\,bps (population standard deviation). It is zero for the FBA by
 construction whenever the bucket holds a single batch clear, since every
-trade of a batch is at $\clr$.
+trade of a batch is at $\clr$, so it serves as a check of the batch rule
+rather than as a comparison between the engines.
 
 \paragraph{Kyle's lambda.} Kyle's lambda measures how far the price
 moves per unit of net order flow \citep{kyle1985continuous}. It is

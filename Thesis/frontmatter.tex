@@ -66,17 +66,19 @@ identical orders and are compared second by second, any difference
 between them comes from the matching mechanism alone.
 
 The main finding is that, at one second, batching largely reproduces the
-continuous market with a short delay. Both engines trade statistically
-indistinguishable volumes at closely matching prices, and the same net
-order flow moves both prices by the same amount within five seconds.
-Uniform pricing removes price dispersion within a second, as the rule
-implies. Batching adds no liquidity: a one-second batch rarely holds more
-than the order flow that would have traded anyway, so there is little to
-pool, the batch market is not deeper, and orders wait
-\ResTimeToExecDiff\,s longer for their first fill. In the continuous
-market, resting orders pay a systematic adverse-selection cost; whether
-batching removes it cannot be measured in the replay, because trades in a
-batch auction have no direction. These results describe the mechanical
+continuous market with a short delay, and where the two differ the
+continuous market comes out slightly ahead. Price formation does not
+differ: both engines trade statistically indistinguishable volumes at
+closely matching prices, and the same net order flow moves both prices by
+the same amount within five seconds. The continuous market is slightly
+more liquid, a few percent deeper near the price, and slightly less
+volatile, and it executes orders faster: in the batch market orders wait
+\ResTimeToExecDiff\,s longer for their first fill. A one-second batch
+rarely holds more than the order flow that would have traded anyway, so
+there is little to pool. In the continuous market, resting orders pay a
+systematic adverse-selection cost; whether batching lowers it cannot be
+measured in the replay, because trades in a batch auction have no
+direction. These results describe the mechanical
 effect of batching on fixed historical orders, not how traders would
 adapt to it.
 

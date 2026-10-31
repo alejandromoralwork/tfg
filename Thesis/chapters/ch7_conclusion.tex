@@ -35,56 +35,46 @@ of time window into a boundary repricing race (\Cref{sec:priceimprovement}).
 
 \paragraph{RQ2.} The simulation replayed one month of SOL perpetual order
 flow through both engines, with one-second batches, and compared them
-second by second on the same orders. It produced six findings
-(\Cref{tab:findings}); \Cref{sec:findingsreliability} explains how each is
-reached, why it arises and how far it can be relied on.
+second by second on the same orders. It produced five findings, one per
+dimension of market quality (\Cref{tab:findings});
+\Cref{sec:findingsreliability} explains how each is reached, why it arises
+and how far it can be relied on.
 \begin{enumerate}[label=\textbf{F\arabic*}]
-  \item \textbf{The same volume trades, at the same price} (high
-  reliability). Batching reschedules trades rather than preventing them:
-  unfilled orders roll over, so crossing interest still meets, at most one
-  interval later. The two prices differ by a median of
-  \PriceDiffMedianBps\,bps, and only when an order sweeps several price
-  levels, which the CDA prices level by level and the FBA at one price.
-  \item \textbf{The price responds to order flow by the same amount}
-  (high reliability at 5\,s). Net buying removes the same resting orders in
-  both engines, so both prices settle at the same level. Theory predicts a
-  smaller response under batching through a change in behaviour, which a
-  replay cannot reproduce.
-  \item \textbf{Uniform pricing removes price dispersion within a second}
-  (high reliability). Each one-second bucket holds one batch, which trades
-  at one price, so all traders arriving within that second get the same
-  price; the variation moves to between seconds.
-  \item \textbf{At one second batching adds no liquidity} (high
-  reliability for no gain, low for a loss). Depth near the price is not
-  higher, but a few percent lower; Amihud illiquidity and volatility are
-  slightly higher, partly because of how each engine's price is measured.
-  A one-second batch rarely holds more than the flow that would have traded
-  anyway, so there is little to pool.
-  \item \textbf{Batching delays execution} (high reliability for the
-  direction). Orders wait \ResTimeToExecDiff\,s longer for their first
-  fill: up to one second for the clear, the rest most likely from which
-  resting orders the batch matches. Most batches clear no trade, but the
-  continuous market also trades in only about a quarter of seconds.
-  \item \textbf{The continuous market charges resting orders an
-  adverse-selection cost} (high reliability, continuous market only). The
-  realized spread is negative and the price impact grows with the horizon:
-  resting orders are accepted most often by traders who expect the price
-  to move their way.
+  \item \textbf{Liquidity: the continuous market is slightly more liquid}
+  (moderate reliability). It is a few percent deeper near the price, and
+  its price moves less per dollar traded; the quoted spread is practically
+  the same. A one-second batch rarely holds more than the flow that would
+  have traded anyway, so there is little to pool.
+  \item \textbf{Transaction costs: resting orders pay an adverse-selection
+  cost in the continuous market} (high reliability). The realized spread is
+  negative and the price impact grows with the horizon, because resting
+  orders are accepted most often by traders who expect the price to move
+  their way. Whether the batch market is cheaper cannot be measured.
+  \item \textbf{Volatility: the batch market is slightly more volatile}
+  (low to moderate reliability). One clearing price per second moves
+  further between seconds than the continuous market's averaged price;
+  batching does not dampen price moves.
+  \item \textbf{Price formation: no difference} (high reliability). Both
+  engines reach the same price, and the same net order flow moves both
+  prices by the same amount within five seconds, because it removes the
+  same resting orders in both.
+  \item \textbf{Execution: the same volume trades, but the continuous
+  market is faster} (high reliability). Batching reschedules trades
+  rather than preventing them, and orders wait \ResTimeToExecDiff\,s longer
+  for their first fill in the batch market.
 \end{enumerate}
 
-In summary, at one second and on this market, batching largely
-reproduces the continuous market with a short delay. Its promised gains
-depend on pooling orders that would otherwise arrive at different
-moments, and a one-second batch rarely holds more than the flow that would
-have traded anyway. This agrees with field evidence from the Taiwan Stock
-Exchange: \citet{lee2026taiwan} find that liquidity and price efficiency
-improved for mid- and small-cap stocks when the exchange moved from
-frequent batch auctions to continuous trading. Their design captures the
-participants' response to the mechanism, this one the mechanism alone,
-and neither finds a liquidity gain from batching. Whether batching
-protects resting orders from adverse selection, and whether a longer
-interval would give the batches enough flow to pool, remain open
-(\Cref{sec:limitssign}).
+In summary, on every dimension that can be compared, the batch market at
+one second either matches the continuous market or falls slightly behind
+it; it largely reproduces the continuous market with a short delay. This
+agrees with field evidence from the Taiwan Stock Exchange:
+\citet{lee2026taiwan} find that liquidity and price efficiency improved
+for mid- and small-cap stocks when the exchange moved from frequent batch
+auctions to continuous trading. Their design captures the participants'
+response to the mechanism, this one the mechanism alone, and neither finds
+a liquidity gain from batching. Whether batching protects resting orders
+from adverse selection, and whether a longer interval would give the
+batches enough flow to pool, remain open (\Cref{sec:limitssign}).
 
 \section{Limitations}
 \label{sec:limitations}
@@ -126,9 +116,10 @@ Each limitation above points to a concrete extension.
   signed deviation of each FBA trade from its reference price, and signing
   it by the venue's net taker flow in that second, would give the FBA a
   spread decomposition comparable with the CDA's (\Cref{sec:limitssign})
-  and answer the question F6 leaves open.
+  and answer the question F2 leaves open.
   \item \textbf{Vary the interval.} A sweep over $\tau$ would show whether
-  longer intervals fill the batches without losing F1 and F2, and the limit
+  longer intervals fill the batches enough to reverse F1 without changing
+  price formation (F4), and the limit
   $\tau \to 0$ would check that the FBA converges to the CDA.
   \item \textbf{Replay the month without interruption}, which removes the
   effects of the restarts (\Cref{sec:testresets}).
