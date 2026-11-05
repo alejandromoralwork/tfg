@@ -43,8 +43,11 @@ and how far it can be relied on.
   \item \textbf{Liquidity: the continuous market is slightly more liquid}
   (moderate reliability). It is a few percent deeper near the price, and
   its price moves less per dollar traded; the quoted spread is practically
-  the same. A one-second batch rarely holds more than the flow that would
-  have traded anyway, so there is little to pool.
+  the same. Batching is meant to add liquidity by gathering orders that
+  arrive at different moments into one auction, but trades occur in only
+  about a quarter of all seconds here, so a one-second batch usually
+  contains just the orders that would have traded at once in the
+  continuous market.
   \item \textbf{Transaction costs: resting orders pay an adverse-selection
   cost in the continuous market} (high reliability). The realized spread is
   negative and the price impact grows with the horizon, because resting

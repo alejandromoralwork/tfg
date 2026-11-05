@@ -73,9 +73,12 @@ closely matching prices, and the same net order flow moves both prices by
 the same amount within five seconds. The continuous market is slightly
 more liquid, a few percent deeper near the price, and slightly less
 volatile, and it executes orders faster: in the batch market orders wait
-\ResTimeToExecDiff\,s longer for their first fill. A one-second batch
-rarely holds more than the order flow that would have traded anyway, so
-there is little to pool. In the continuous market, resting orders pay a
+\ResTimeToExecDiff\,s longer for their first fill. Batching is meant to
+add liquidity by gathering buy and sell orders that arrive at different
+moments into one auction. In this market, however, trades occur in only
+about a quarter of all seconds, so a one-second batch usually contains
+just the few orders that would have traded at once in the continuous
+market, and there is nothing extra to combine. In the continuous market, resting orders pay a
 systematic adverse-selection cost; whether batching lowers it cannot be
 measured in the replay, because trades in a batch auction have no
 direction. These results describe the mechanical

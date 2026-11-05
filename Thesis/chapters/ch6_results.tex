@@ -669,10 +669,12 @@ it: the same price, the same response to order flow and the same volume
 (F4, F5), but slightly less liquidity (F1), slightly more volatility (F3)
 and slower execution (F5). At one second and on this market, batching
 largely reproduces the continuous market with a short delay. The gains it
-promises depend on pooling orders that would otherwise arrive at
-different moments, and a one-second batch rarely holds more than the flow
-that would have traded anyway. Whether a longer interval would give the
-batches enough flow to pool is the main open question this leaves.
+promises depend on gathering orders that arrive at different moments into
+one auction, but trades occur in only about a quarter of all seconds, so a
+one-second batch usually contains just the orders that would have traded
+at once in the continuous market. Whether a longer interval would gather
+enough orders per batch to change this is the main open question this
+leaves.
 
 \paragraph{What remains open.} The simulation does not settle whether
 batching reduces adverse selection (\Cref{sec:limitssign}), how
