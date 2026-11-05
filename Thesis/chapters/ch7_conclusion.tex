@@ -106,7 +106,7 @@ $\tau = 1$\,s.
 
 \paragraph{Fidelity of the replay.} The replay departs from the venue in
 ways that affect both engines alike --- unenforced post-only and
-self-trade rules, rounding to whole SOL, and restarts in the first days.
+self-trade rules and rounding to whole SOL.
 None favours either side of the paired comparison, but absolute levels
 describe the replay, not the live market (\Cref{sec:limitsreplay}).
 
@@ -124,8 +124,6 @@ Each limitation above points to a concrete extension.
   longer intervals fill the batches enough to reverse F1 without changing
   price formation (F4), and the limit
   $\tau \to 0$ would check that the FBA converges to the CDA.
-  \item \textbf{Replay the month without interruption}, which removes the
-  effects of the restarts (\Cref{sec:testresets}).
   \item \textbf{Let participants respond.} Agent-based simulation or
   laboratory experiments built on the same engines could test the
   behavioural predictions a replay cannot reach.

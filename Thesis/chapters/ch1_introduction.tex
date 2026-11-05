@@ -19,9 +19,10 @@ information changes the fair value of an asset, the stale quotes resting
 in the book are mispriced for a short interval, and the first participant
 to act either takes a stale quote or cancels it. Nothing about the
 informational content of the event determines who wins; only relative
-speed does. A mechanism designed to allocate goods according to
-willingness to pay thus partly allocates them according to willingness to
-invest in latency reduction \citep{budish2015hft}.
+speed does. The continuous auction is meant to give each trade to the
+participant willing to pay the best price; in practice it partly gives it
+to the participant who has spent the most on being fast
+\citep{budish2015hft}.
 
 The competition is not costless. Microwave and hollow-core fibre links,
 co-location and custom hardware absorb real resources without improving
@@ -56,7 +57,7 @@ and uniform-price batch clearing removes the ordering rent otherwise
 extracted by block producers
 \citep{daian2020flash,gong2023fbadex,walther2021multitoken,dutta2025cow}.
 
-\section{The Design Problem behind the Idea}
+\section{The Design Problem of a Frequent Batch Auction Engine}
 \label{sec:designproblem}
 
 Stating that orders should be batched and cleared at a uniform price does
@@ -74,8 +75,10 @@ be expected to induce.
 \section{Problem Statement and Research Gap}
 \label{sec:gap}
 
-The literature on frequent batch auctions is largely about whether
-batching is a good idea, not about how a batching engine is built.
+The existing literature leaves two gaps that this thesis addresses.
+First, the literature on frequent batch auctions is largely about whether
+batching improves on continuous trading, not about how a batching engine
+is built.
 \citet{budish2015hft} establish the equilibrium argument,
 \citet{aquilina2022quantifying} quantify what the alternative costs,
 \citet{zoican2021speed} and \citet{eibelshauser2022fba} study how
@@ -92,9 +95,8 @@ consolidated treatment that decomposes the engine into its architectural
 blocks, sets out the options for each, and traces each option to the
 strategic behaviour it induces.
 
-\paragraph{Field comparisons cannot hold order flow constant.}
-The empirical literature comparing batch and continuous trading must
-compare different venues, assets or time periods. \citet{lee2026taiwan}
+Secondly, field comparisons cannot hold order flow constant. The
+empirical literature comparing batch and continuous trading must compare different venues, assets or time periods. \citet{lee2026taiwan}
 exploit the Taiwan Stock Exchange's transition from intraday call auctions
 to continuous trading, about as clean a natural experiment as this area
 offers, yet the participant population, submission strategies and
@@ -137,9 +139,10 @@ a set of metrics defined in \Cref{sec:metricdefs}:
   lets participants trade at a lower cost and with more depth available?
   \item \textbf{RQ2.2 Price discovery and market quality.} Which mechanism
   produces a more stable, less dispersed price series?
-  \item \textbf{RQ2.3 Execution.} How much trades, how quickly and at what
-  price relative to the submitted limit, and how does the batch mechanism
-  reshape execution outcomes for the same unchanged order flow?
+  \item \textbf{RQ2.3 Execution.} How much volume is executed, how long do
+  orders wait for their first fill, and at what price relative to their own
+  limit do they trade? How does batching change these outcomes for the same
+  order flow?
 \end{itemize}
 
 How participants would time their orders against a batch close cannot be
@@ -185,18 +188,31 @@ line falls).
 \section{Structure of the Thesis}
 \label{sec:structure}
 
-\Cref{ch:background} introduces the terminology and notation, defines the
-continuous double auction and the frequent batch auction precisely, and
-gives the formal definition of every metric used in the comparison.
-\Cref{ch:foundations} reviews the theory and literature the thesis builds
-on and links each strand to a design block and to the metrics that
-measure it. \Cref{ch:design} answers RQ1 by decomposing the batch auction
-engine into its five design blocks, derives the boundary repricing race
-that a predictable batch close produces, and summarises the consequences
-of every design option in one table. \Cref{ch:simulation} describes the
-simulation, the data and the experimental design, and \Cref{ch:results}
-answers RQ2 with the paired comparison of the two engines.
-\Cref{ch:conclusion} summarises the answers and the limitations. The
-appendices document the clearing algorithm, the engine configuration,
+The thesis is organised as follows.
+
+\begin{enumerate}
+  \item \textbf{Introduction} (this chapter): motivation, research gaps,
+  research questions and contributions.
+  \item \textbf{Background} (\Cref{ch:background}): terminology and
+  notation, precise definitions of the continuous double auction and the
+  frequent batch auction, and the formal definition of every metric used in
+  the comparison.
+  \item \textbf{Theoretical Foundations and Literature Review}
+  (\Cref{ch:foundations}): the theory and literature the thesis builds on,
+  each strand linked to a design block and to the metrics that measure it.
+  \item \textbf{Design of a Frequent Batch Auction Engine}
+  (\Cref{ch:design}): answers RQ1 by decomposing the engine into its five
+  design blocks, derives the boundary repricing race that a predictable
+  batch close produces, and summarises the consequences of every design
+  option in one table.
+  \item \textbf{Simulation Design and Data} (\Cref{ch:simulation}): the
+  simulation, the data and the experimental design.
+  \item \textbf{Results} (\Cref{ch:results}): answers RQ2 with the paired
+  comparison of the two engines.
+  \item \textbf{Conclusion} (\Cref{ch:conclusion}): the answers to both
+  research questions, the limitations and future work.
+\end{enumerate}
+
+The appendices document the clearing algorithm, the engine configuration,
 reproducibility, testing, and the comparability of the FBA's unmatched
 orders with a CDA book.

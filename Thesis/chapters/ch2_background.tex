@@ -17,11 +17,9 @@ they are.
 \subsection{Orders}
 
 The instrument studied here is the SOL \emph{perpetual futures contract}
-traded on Hyperliquid (SOL-PERP): a linear contract on the price of the
-Solana token that has no expiry date, is collateralised in the USDC
-stablecoin, and is kept close to the spot price of SOL by funding payments
-exchanged every hour between long and short positions
-\citep{hyperliquid2026docs}. One contract unit is one SOL. Prices $p$ are
+traded on Hyperliquid (SOL-PERP), a futures contract on the price of the
+Solana token without an expiry date \citep{hyperliquid2026docs}. For this
+analysis only its order book matters; one contract unit is one SOL. Prices $p$ are
 quoted in US dollars per SOL (written USD throughout) and quantities $q$ in
 SOL. \Cref{sec:venue} describes the venue. An \emph{order} $k$ is an
 instruction to buy or sell and is described by
@@ -288,6 +286,16 @@ exactly this cascade (\Cref{app:config}):
   previous clearing price $p_{\mathrm{prev}}$;
   \item if still tied, choose the lowest such price.
 \end{enumerate}
+For example, take a tick of 0.01\,USD and a batch holding a buy order for
+10\,SOL with limit 100.03, a buy order for 5\,SOL with limit 100.01, and a
+sell order for 10\,SOL with limit 100.00. Every price from 100.00 to
+100.03 executes the full 10\,SOL, so $\mathcal{P}^{*} = [100.00, 100.03]$:
+over this stretch the executable volume is a horizontal line. At 100.00
+and 100.01 demand is 15\,SOL against a supply of 10, an imbalance of
+5\,SOL; at 100.02 and 100.03 the 5\,SOL order no longer buys and demand
+equals supply. Step~2 therefore keeps 100.02 and 100.03, the prices where
+the demand and supply curves finally cross, and steps~3 and 4 choose
+between those two.
 
 \subsection{Allocation, Rationing and the Residual}
 
@@ -577,9 +585,11 @@ In proportional form \citep{hasbrouck1993assessing,hendershott2011algorithmic},
   \mathrm{PI}_k(\Delta) &= \frac{2 \varepsilon_k (m_{k+\Delta} - m_k)}{m_k},
     \label{eq:priceimpact}
 \end{align}
-each in bps after multiplying by $10^{4}$, so that $S^{\mathrm{eff}}_k =
-S^{\mathrm{real}}_k(\Delta) + \mathrm{PI}_k(\Delta)$ trade by trade and in
-any quantity-weighted aggregate. The effective spread is the trade's
+Each is converted to basis points by multiplying by $10^{4}$. By
+construction the effective spread is the sum of the other two,
+$S^{\mathrm{eff}}_k = S^{\mathrm{real}}_k(\Delta) + \mathrm{PI}_k(\Delta)$,
+for every single trade and therefore also for any quantity-weighted average
+of trades. The effective spread is the trade's
 slippage against the pre-trade midpoint; in practice slippage also
 depends on the horizon over which it is measured, on trade size and on
 volatility (\Cref{sec:spread-decomposition}). The bucket value is the
@@ -679,8 +689,8 @@ once, no trade has an aggressor, and $\varepsilon_k$ does not exist
 (\Cref{sec:fbavscda}). The FBA therefore has no net order flow of its
 own to put on the right-hand side of the regression.
 
-The solution is to measure the flow \emph{outside} both engines and use
-that one series for both. The raw Hyperliquid records have no aggressor
+A possible solution, and the one used here, is to measure the flow
+\emph{outside} both engines and use that one series for both. The raw Hyperliquid records have no aggressor
 field, but they allow the aggressor to be identified. Every fill on the
 real venue writes a record with status \emph{filled}, the order's side
 and its remaining size, and each record carries the time elapsed since
@@ -727,9 +737,10 @@ each engine $e$ and each horizon $h$:
 \end{equation}
 where $u^{e}_i$ is the part of the price change not explained by the
 flow. The regression is estimated by ordinary least squares
-\emph{without an intercept}: Kyle's price rule $p = \mu + \lambda f$
-(\Cref{sec:adverse}) says that with no net flow the price should not
-move, so the line is forced through the origin, and the
+\emph{without an intercept}, that is, with $\mu = 0$ in Kyle's price rule
+$p = \mu + \lambda f$ (\Cref{sec:adverse}). The rule says that with no
+net flow the price should not move, so the line is forced through the
+origin, and the
 estimator is the ratio given in \eqref{eq:kylereg}. The question each
 slope answers is the same for both engines: when the real market saw
 this much net buying in a second, how far did this mechanism's price
@@ -770,20 +781,25 @@ slopes above and is not compared with them.
 \label{sec:metrics23}
 
 This group measures what happens to the orders themselves: how much
-trades, how long an order waits for its first fill, and how much better
-than its own limit it trades.
+volume is traded, how long an order waits for its first fill, and how much
+better than its own limit price it trades.
 
-\paragraph{Executed volume, notional, VWAP and trade count.} The sums
-of $q$ and of $p \cdot q$ over the bucket's trades, their ratio (the
-volume-weighted average price, $\mathrm{VWAP}$, missing when no volume
-traded), and the number of trades.
+\paragraph{Executed volume, notional, VWAP and trade count.} The executed
+volume of a bucket is the sum of $q$ over its trades, and its notional is
+the sum of $p \cdot q$. Their ratio is the volume-weighted average price
+($\mathrm{VWAP}$), which is missing when no volume traded. The trade count
+is the number of trades in the bucket. A bucket without trades has volume,
+notional and trade count zero, so averages over the month include the
+seconds in which nothing traded.
 
-\paragraph{Average time to execution.} For every order that receives
-a fill, the time from its submission to its first fill, in seconds,
-averaged over the orders submitted in the bucket.
+\paragraph{Average time to execution.} For every order that receives a
+fill, partial or complete, the time from its submission to its first fill
+is measured in seconds. The bucket value is the average over the orders
+submitted in that bucket.
 
-\paragraph{Trader surplus.} Realized price improvement against each
-side's own limit, summed over the bucket's trades: the buy side of a
+\paragraph{Trader surplus.} Trader surplus is the realized price
+improvement against each side's own limit, summed over the bucket's
+trades: the buy side of a
 trade at $p_k$ contributes $\max(0, \pi - p_k)\,q_k$ and the sell side
 $\max(0, p_k - \pi)\,q_k$, where $\pi$ is that side's limit price; a market
 order has no limit, so its side contributes nothing. For the FBA this is

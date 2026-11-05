@@ -32,7 +32,12 @@ to cancel its stale quote, and every other fast participant wants to
 trade against it. The engine
 processes both messages in arrival order, so whether the quote is
 cancelled or picked off depends on network path length, hardware and code
-efficiency, not on anything informational.
+efficiency, not on anything informational. Even if every participant had
+identical hardware and network paths, the outcome would only become a
+lottery: with $N$ participants racing for the same stale quote, the
+liquidity provider's cancellation arrives first with a probability of
+about $1/N$, so the quote is still picked off in roughly $(N-1)/N$ of
+such events.
 
 Two consequences follow. The opportunity is mechanically recurrent,
 appearing every time the public signal moves --- thousands of times a day

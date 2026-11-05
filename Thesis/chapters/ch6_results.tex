@@ -41,7 +41,9 @@ better and by how much.
   \ResCommonFlowLambdaFiveSFba\,bps per 1{,}000 SOL, $p$
   \ResCommonFlowLambdaFiveSP; \Cref{sec:res22}).
   \item \textbf{Execution: the same volume trades, but the CDA executes
-  faster.} Volume is the same in both engines (\ResExecVolumeCda\ against
+  faster.} Volume, averaged over all seconds of the month with seconds
+  without trades counted as zero, is the same in both engines
+  (\ResExecVolumeCda\ against
   \ResExecVolumeFba\,SOL per second, $p$ \ResExecVolumeP), but orders wait
   \ResTimeToExecDiff\,s longer for their first fill in the FBA
   (\Cref{sec:res23}).
@@ -770,11 +772,6 @@ this.
   market.
   \item \textbf{Rounding.} Sizes are rounded to whole SOL, and orders below
   0.5\,SOL are skipped for both engines (\Cref{sec:dataset}).
-  \item \textbf{Restarts.} The month was replayed with \VerResetN\
-  restarts in its first five days, which emptied both engines at the same
-  record. From the second of them onward the FBA's batches no longer line
-  up exactly with the one-second buckets, so a bucket can hold trades from
-  two batch clears (\Cref{sec:testresets}).
   \item \textbf{Implementation.} A difference could in principle come from
   how well each engine is implemented. This is checked by the shared order
   representation and metrics code, the independent reference implementation

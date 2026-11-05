@@ -12,8 +12,7 @@ are not currently written by the checkpoint format; this is listed here
 as a gap worth closing, not implied to already exist. Given identical
 input and configuration, an uninterrupted run reproduces identical
 output in all columns except the two that measure computing time
-(\Cref{sec:testdeterminism}); the month result is not such a run
-(\Cref{sec:testresets}). The analysis pipeline is shared by both
+(\Cref{sec:testdeterminism}). The analysis pipeline is shared by both
 engines, so no metric is computed by engine-specific code. It reads the
 logged CSV output, plus one series taken from the raw archive itself:
 the venue's net taker flow per second, the common regressor of Kyle's

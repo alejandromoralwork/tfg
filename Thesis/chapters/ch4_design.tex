@@ -16,7 +16,7 @@ mechanism defined in \Cref{sec:fbanotation}.
 
 A matching engine takes a stream of timestamped messages and produces trades.
 A continuous engine handles each message completely before reading the next.
-A batch engine first collects messages for a while, then processes the whole
+A batch engine first collects messages for a while, and then processes the whole
 set at once. This one change forces five decisions that a continuous engine
 never has to make, because serial processing settles them automatically:
 
@@ -173,10 +173,8 @@ quantities $x_k$ with $\sum_{k \in \mathbb{B}} x_k = \sum_{k \in \mathbb{A}}
 x_k = V^{*}$, and the buyer and seller surplus $W^{\mathbb{B}}(p)$ and
 $W^{\mathbb{A}}(p)$ of \eqref{eq:surplus}.
 
-\subsubsection{Price Improvement Is a Transfer}
-
-\textbf{Total surplus does not depend on which clearing price is chosen.}
-For any $p \in \mathcal{P}^{*}$ with allocation $x$ held fixed,
+The first step is that total surplus does not depend on which clearing
+price is chosen. For any $p \in \mathcal{P}^{*}$ with allocation $x$ held fixed,
 \begin{equation}
 \label{lem:invariance}
   W = W^{\mathbb{B}}(p) + W^{\mathbb{A}}(p)
@@ -192,8 +190,8 @@ vanishes by flow conservation. Two consequences follow immediately.
 First, $\partial W^{\mathbb{B}} / \partial p = -V^{*}$ and
 $\partial W^{\mathbb{A}} / \partial p = +V^{*}$: every unit of
 price improvement conferred on one side is subtracted from the other.
-Second, a measured increase in buy-side price improvement is not evidence
-that the mechanism created value: total gains from trade are fixed by the
+Second, if one mechanism shows more buy-side price improvement than
+another, this alone does not show that it created more value: total gains from trade are fixed by the
 allocation, and the clearing price only divides them. The metric must
 therefore be read as a distributive statistic, reported for both sides
 jointly. If $\mathcal{P}^{*}$ were a singleton, the division would be
@@ -247,6 +245,17 @@ price to the boundary of $\mathcal{P}^{*}$ in its own favour. The prize
 goes to whoever submits closest to the deadline with the fullest view of
 the book: a reward for speed and timing rather than for providing
 liquidity or information.
+
+A simple example shows the mechanism. A batch holds one buy order for
+1\,SOL with a limit of 100.10\,USD. A seller values its 1\,SOL at
+100.00\,USD and submits last, seeing the resting buy order. If it submits
+at its own valuation, every price from 100.00 to 100.10 clears the trade,
+and the selection rule decides how the 0.10\,USD of surplus is split, for
+example 100.05 for an even split. If it instead submits at 100.10, the
+volume-maximising set shrinks to that single price: the trade and the
+total surplus are unchanged, but the seller now takes all 0.10\,USD and
+the buyer's price improvement falls to zero. Only the seller's position as
+the last mover with a view of the book made this possible.
 
 Two conditions expose a participant to being the donating side of the
 transfer: submitting without observing the accumulated batch, as an
@@ -414,7 +423,12 @@ at the same moment, which raises fairness and best-execution concerns.
 Jump Trading's Dual Flow Batch Auction (DFBA) \citep{jump2025dfba} splits
 orders by \emph{intent} rather than by who submits them. Every order is
 labelled either maker flow (supplying liquidity) or taker flow (demanding
-it). Each batch then runs two separate auctions, maker buys against taker
+it, and seeking prompt execution). The proposal deliberately leaves open
+how the label is assigned and names three ways: the exchange designates
+certain participants as market makers, whose orders are maker flow; anyone
+may submit maker orders, but access to taker flow is controlled by the
+exchange; or each user labels its own orders, with taker as the default.
+Each batch then runs two separate auctions, maker buys against taker
 sells and maker sells against taker buys, both at one uniform price. Market
 makers never trade against each other, which removes trades between two
 liquidity providers that add volume but give liquidity to nobody who wanted
@@ -443,22 +457,34 @@ other three are proposed here:
 \begin{enumerate}
   \item \textbf{By declared intent}, as in the DFBA. Simple to operate, but
   self-declared unless a separate eligibility rule enforces it.
-  \item \textbf{By price aggressiveness.} Orders whose limit price is far from
-  the clearing price on the passive side are makers; orders that would have
-  crossed a wide range of prices are takers. This can be observed and is hard
+  \item \textbf{By price aggressiveness.} The label depends on how far the
+  order's limit lies from the clearing price, a matter of degree. Orders
+  whose limit price is far from the clearing price on the passive side are
+  makers; orders that would have crossed a wide range of prices, such as
+  market orders, are takers. This can be observed and is hard
   to game without changing one's real exposure, but it penalises participants
   for wanting certainty of execution.
-  \item \textbf{By marginality.} The orders that set the clearing price are
-  takers; orders priced strictly better than it are makers. This is
+  \item \textbf{By marginality.} The label depends only on whether the
+  order is at the clearing price of its batch, a yes-or-no question. The
+  orders whose limit equals the clearing price, and which therefore set it,
+  are takers; orders priced strictly better than it are makers. This is
   attractive in theory, since the marginal order determines the price, but the
   fee a participant pays then depends on what everyone else does in the
   batch, so it cannot be known in advance.
-  \item \textbf{By persistence across batches.} An order that has waited
-  through several batches is a maker; a new order is a taker. This rewards
+  \item \textbf{By persistence across batches.} The label depends on time,
+  not on price. An order filled in the batch in which it was submitted is a
+  taker; an order that was not filled and has rolled over through one or
+  more batches, resting as it would in a continuous book, is a maker. This rewards
   liquidity that stays available, which is what the rebate is supposed to pay
   for, and it is the only one of the four that measures something lasting
   rather than a single moment.
 \end{enumerate}
+
+Criteria 2 and 3 both look at the order's price within a single batch,
+criterion 2 by how far the limit lies from the clearing price and
+criterion 3 only by whether it lies at it. Criterion 4 looks at the
+order's history across batches and is the only one that does not depend
+on the clearing price.
 
 The choice matters beyond accounting. A rebate is an incentive, so whichever
 definition the engine adopts is the behaviour it ends up paying for.
