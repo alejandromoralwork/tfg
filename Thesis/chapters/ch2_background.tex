@@ -813,14 +813,25 @@ market order, not from the price as such (\Cref{sec:priceimprovement}).
 \subsection{Engine Controls}
 \label{sec:metricscontrol}
 
-\paragraph{Throughput and clearing latency.} Throughput is the number
-of messages in the bucket divided by the computing time spent on them;
-clearing latency is that computing time divided by the number of timed
-operations, which is one per order for the CDA but one per \emph{batch}
-for the FBA. Both are wall-clock measurements, so they are the only
-values that differ between repeated runs (\Cref{sec:testdeterminism}).
-Neither describes market quality. Because the replay runs on the
-timestamps stored in the data, not on the computer's clock
-(\Cref{sec:environment}), computing speed cannot change any other metric;
-the two controls only show whether each engine would be fast enough to run
-in real time.
+\paragraph{Throughput and clearing latency.} For each one-second
+event-time bucket, throughput is the count of input messages in that bucket
+divided by the total measured matching time assigned to it. Clearing
+latency is that total time divided by the number of timed operations in the
+bucket: one per input message for the CDA and one per non-empty batch clear
+for the FBA. The timer uses wall-clock elapsed time. For each CDA message,
+it starts immediately before the conditional order-processing call and
+stops immediately after; non-actionable messages therefore record only the
+brief no-op path. For the FBA, it starts immediately before
+\texttt{clear()} and stops immediately after. The CDA time is assigned by
+the message timestamp; an FBA clear is assigned by the batch-close
+timestamp. This excludes work outside those timed calls, including file
+reading, result writing and, for the FBA, adding orders to the pending
+batch; empty FBA batches are not timed. Thus these are matching-operation
+controls, not end-to-end replay benchmarks, and the FBA latency is per
+batch rather than per message. Both are wall-clock measurements, so they
+are the only values that differ between repeated runs
+(\Cref{sec:testdeterminism}). Neither describes market quality. Because the
+replay runs on the timestamps stored in the data, not on the computer's
+clock (\Cref{sec:environment}), computing speed cannot change any other
+metric; the two controls only show whether each engine's timed matching
+work would be fast enough to run in real time.

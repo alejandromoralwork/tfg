@@ -455,17 +455,24 @@ matched orders, and from trades with a market order, whose side has no
 limit and contributes nothing, so that only the limit side's improvement,
 which does depend on the price, is counted (\Cref{sec:metrics23}).
 
-\textbf{Engine controls} show whether each engine would keep up with the
-order flow in real time; they do not bear on any other result
-(\Cref{sec:limitsreplay}). The mean latency (\ResClearingLatencyCda\,$\mu$s
-for the CDA against \ResClearingLatencyFba\,$\mu$s for the FBA) times one
-order against one whole batch, which also re-evaluates every rolled-over
-order, so its three-orders-of-magnitude gap reflects what is timed.
-Throughput, which divides the same message count by computing time, is the
-fairer comparison: \ResThroughputCda\ against \ResThroughputFba\ messages
-per second of computing time, under four times apart. Both engines stay far
-inside real-time needs: an FBA clear of about 2\,ms is three orders of
-magnitude shorter than the one-second interval it has to fit into
+\textbf{Engine controls} provide a partial check on whether the timed
+matching work could keep up with real time; they do not bear on any other result
+(\Cref{sec:limitsreplay}). These are matching-operation timings, not
+end-to-end benchmarks: FBA order insertion is not timed, and its latency
+is per non-empty batch rather than per message (\Cref{sec:metricscontrol}).
+Mean latency (\ResClearingLatencyCda\,$\mu$s
+for the CDA against \ResClearingLatencyFba\,$\mu$s for the FBA) compares
+one timed message operation with one whole batch clear, which also
+re-evaluates every rolled-over order, so its three-orders-of-magnitude gap
+reflects what is timed.
+Throughput uses the same message count for both engines and expresses
+capacity in messages per second of measured time, but remains partial
+because the FBA's order-insertion time is excluded:
+\ResThroughputCda\ against \ResThroughputFba\ messages per second of
+computing time, under four times apart. The measured FBA clear of about
+2\,ms is three orders of magnitude shorter than the one-second interval
+it has to fit into; this indicates ample time for the measured clearing
+stage, but does not establish end-to-end processing time
 (\Cref{fig:latencycontrol}).
 
 \begin{figure}[htbp]
