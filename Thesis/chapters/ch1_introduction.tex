@@ -145,32 +145,6 @@ a set of metrics defined in \Cref{sec:metricdefs}:
   order flow?
 \end{itemize}
 
-\paragraph{How computing speed is measured.}
-Throughput and clearing latency are computer-speed checks, not measures of
-trading quality. The simulator starts a wall-clock timer immediately before
-the operation being timed and stops it immediately afterwards; this is
-different from the event timestamps in the replay, which determine when
-orders arrive in simulated market time. For each one-second interval,
-throughput is the number of input messages in that interval divided by the
-total measured computing time for that engine. This total is the sum of
-the individual stopwatch readings, not the time taken to replay the whole
-interval. For example, 2 million messages processed in a total of 4
-seconds of measured time gives a throughput of 500,000 messages per
-second.
-
-Clearing latency instead asks how long one timed operation takes on
-average: divide that same total computing time by the number of timed
-operations. For the CDA, the operation is processing one message; for the
-FBA, it is clearing one non-empty batch. So the CDA figure is an average
-per message, while the FBA figure is an average per batch, not per message.
-For example, 4 seconds over 2,000 timed operations is 2 milliseconds per
-operation. The CDA records one timing per message; actionable messages
-time the order-processing call, while other messages time only a
-near-empty no-op path. The FBA timer surrounds the batch-clear call. In
-particular, adding orders to the FBA batch, reading input files and
-writing results are not included. The figures therefore indicate matching
-speed under this measurement, not end-to-end runtime for the whole replay
-(\Cref{sec:metricscontrol}).
 
 
 

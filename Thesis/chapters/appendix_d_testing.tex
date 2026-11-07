@@ -218,25 +218,6 @@ simulated minus real price, in basis points.}
 \label{fig:pricevsyahoo}
 \end{figure}
 
-\section{Was the Month One Continuous Run?}
-\label{sec:testresets}
-
-The simulator can save a checkpoint and resume a stopped run, but the code that
-resumes creates both engines again from empty, losing every resting or pending
-order. This leaves a visible trace: the CDA's book depth briefly collapses at the
-start of an hour, and FBA batches can afterwards straddle the timing grid. Looking for this trace shows \VerResetN\ such restarts, all in the
-first five days of the month and none afterward.
-
-Because both engines restart at the same record, the paired comparison between them
-is affected equally; but book-state measures, especially CDA depth, are understated
-for some hours afterward. The FBA's batch clock is also not realigned with the
-metrics grid after a restart. Before the restart of 2~December at 19:00 no bucket
-holds trades from two batch clears; from then until the end of the month about
-3.4\% of the buckets in which the FBA traded do, because a batch then straddles two
-one-second buckets and its trades are stamped with the latest submission time in
-the batch (\Cref{sec:implfba}). This is why the FBA's price dispersion is not
-exactly zero in \VerDispRows\ buckets. An uninterrupted replay of the month would
-remove both effects; this work did not run one.
 
 \section{What Was Not Checked}
 \label{sec:testlimits}
